@@ -24,5 +24,8 @@ A task becomes **ready** when all its upstream dependencies are `done`. Completi
 ## Status
 
 - [x] Plan locked — see [`docs/SPEC.md`](docs/SPEC.md)
-- [ ] MVP engine: DDL + unblock trigger + `v_ready_tasks` + runner loop + planner
-- [ ] First end-to-end run, kill+restart to prove resumability
+- [x] MVP engine: DDL + unblock trigger + `v_ready_tasks` + runner loop + planner + zero-trust verifier
+- [x] First end-to-end run, kill+restart to prove resumability — **11/11 tasks verified done, trigger unblocked 10×, resumed cleanly after a simulated crash** (`npm run demo`)
+- [ ] Swap stub agents for live Claude API calls (set `ANTHROPIC_API_KEY`)
+- [ ] LLM planner (brief → graph) replacing the deterministic template
+- [ ] Point at real Supabase instead of local Postgres

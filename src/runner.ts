@@ -1,0 +1,83 @@
+import pg from 'pg';
+import { ev, counts } from './db.ts';
+import { runAgent, type Ctx } from './agents.ts';
+import { verify } from './verify.ts';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function reclaim(pool: pg.Pool): Promise<number> {
+  const r = await pool.query(
+    `update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now()
+     where status='running' and lease_expires_at < now() returning id`);
+  return r.rowCount ?? 0;
+}
+
+async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[]> {
+  const r = await pool.query(
+    `update tasks set status='running', claimed_by=$1,
+        lease_expires_at=now()+interval '60 seconds', attempts=attempts+1, updated_at=now()
+     where id in (select id from tasks where status='ready' order by seq for update skip locked limit $2)
+     returning *`, [runnerId, cap]);
+  return r.rows;
+}
+
+async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
+  const proj = await pool.query('select brief from projects where id=$1', [task.project_id]);
+  const ups = await pool.query(
+    `select u.seq, u.department, coalesce(o.content,'') as content
+     from task_dependencies d join tasks u on u.id=d.upstream_id
+     left join task_outputs o on o.task_id=u.id and o.is_current
+     where d.downstream_id=$1 order by u.seq`, [task.id]);
+  return { brief: proj.rows[0].brief, upstream: ups.rows };
+}
+
+async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
+  const ctx = await buildContext(pool, task);
+  const content = await runAgent(task.department, ctx);     // the agent: text in -> text out
+
+  await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+  await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+  await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
+
+  const { ok, log } = await verify(pool, task.verify, content);   // deterministic check — not the agent's word
+  if (ok) {
+    await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
+    await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
+  } else {
+    await ev(pool, task.project_id, task.id, 'verify_failed', `#${task.seq}: ${log}`);
+    const next = task.attempts >= task.max_attempts ? 'failed' : 'ready';
+    await pool.query(`update tasks set status=$2, claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1`, [task.id, next]);
+  }
+}
+
+// The whole scheduler: find ready -> run -> store -> verify -> unblock -> repeat.
+// Stateless: everything it needs is recomputed from the DB, so it is restart-safe.
+// maxSteps lets us simulate a crash mid-run to prove resumability.
+export async function runLoop(
+  pool: pg.Pool, projectId: string,
+  opts: { runnerId?: string; cap?: number; maxSteps?: number } = {}
+): Promise<{ stopped: string; steps: number }> {
+  const runnerId = opts.runnerId ?? 'runner-1';
+  const cap = opts.cap ?? 4;
+  const maxSteps = opts.maxSteps ?? Infinity;
+  let steps = 0;
+
+  while (true) {
+    await reclaim(pool);
+    const claimed = await claim(pool, runnerId, cap);
+    if (claimed.length === 0) {
+      const c = await counts(pool, projectId);
+      if (c.running === 0 && c.ready === 0) break;  // complete, or deadlocked (blocked>0)
+      await sleep(25);
+      continue;
+    }
+    await Promise.all(claimed.map((t) => processTask(pool, t, runnerId)));
+    steps += claimed.length;
+    if (steps >= maxSteps) return { stopped: 'maxSteps', steps };
+  }
+
+  const c = await counts(pool, projectId);
+  const done = (c.blocked + c.ready + c.running) === 0 && c.failed === 0;
+  await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
+  return { stopped: done ? 'complete' : 'blocked', steps };
+}
