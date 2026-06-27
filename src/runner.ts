@@ -8,6 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { renderPage } from './render.ts';
 import { processMedia } from './media.ts';
+import * as appdb from './appdb.ts';
 
 const stripFences = (s: string) => s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
 // a real .sql deliverable: drop any prose preamble, keep from the first CREATE TABLE (mirrors sql_applies)
@@ -67,7 +68,10 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme };
+  // tell the build agent the app's REAL provisioned tables so a collection targets a table that exists
+  let tables: string[] = [];
+  if (task.department === 'build') { try { tables = await appdb.listTables(pool, task.project_id); } catch {} }
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {

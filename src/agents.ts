@@ -11,7 +11,7 @@ const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[] };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -56,6 +56,8 @@ function buildUser(ctx: Ctx): string {
     s += `Use those exact relative hrefs (home is index.html). Build ONLY this one page.\n`;
     const th = themeFor(ctx.theme, ctx.brief);
     s += `\nDesign language: ${th}. Match the copy TONE to it — ${themeTone(th)}. (The system renders all visual design; you write copy + choose sections + 2 colours.)\n`;
+    if (ctx.tables && ctx.tables.length)
+      s += `\nThis app's REAL database tables: ${ctx.tables.join(', ')}. For any {"type":"collection"} use one of these EXACT table names so it shows live data.\n`;
   }
   return s;
 }
