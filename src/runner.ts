@@ -6,6 +6,20 @@ import { runAgent, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
+import { renderPage } from './render.ts';
+import { processMedia } from './media.ts';
+
+// parse the FIRST brace-balanced JSON object from the build agent's spec output
+function firstSpec(s: string): any {
+  const t = s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
+  const a = t.indexOf('{'); if (a < 0) return null;
+  let d = 0;
+  for (let i = a; i < t.length; i++) {
+    if (t[i] === '{') d++;
+    else if (t[i] === '}') { if (--d === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch { return null; } } }
+  }
+  return null;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -63,8 +77,14 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     if (task.artifact) {
       const dir = new URL(task.project_id + '/', SITES);
       mkdirSync(fileURLToPath(dir), { recursive: true });
-      snapshot = cms.instrument(await cms.cleanBody(content, dir));      // real media + sanitize, then stamp edit ids
-      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // == applyExcellence(cleaned): unchanged output
+      // NEW ENGINE: the agent returns a SPEC; a deterministic renderer (vetted components) builds the page.
+      const spec = firstSpec(content);
+      if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
+        throw new Error('build did not return a valid spec (need brand + >=2 sections)');
+      const slug = task.artifact.replace(/\.html$/, '');
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title });
+      snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
+      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml skips excellence (rendered marker)
     }
 
     await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);

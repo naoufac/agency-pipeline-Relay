@@ -53,9 +53,11 @@ export function stripEditAttrs(html: string): string {
   return html.replace(new RegExp(`(<(?:${TAGS})\\b)\\sdata-edit="e\\d+"`, 'gi'), '$1');
 }
 
-// the FINAL ship step, identical for build and republish
+// the FINAL ship step. Deterministically-rendered pages already have their CSS/fonts inlined and a
+// proper responsive nav, so they skip the Tailwind/excellence pass; legacy LLM-HTML still gets it.
 export function shipHtml(html: string): string {
-  return applyExcellence(stripEditAttrs(html));
+  const stripped = stripEditAttrs(html);
+  return stripped.includes('<!--relay:rendered-->') ? stripped : applyExcellence(stripped);
 }
 
 export interface Block { block_id: string; kind: string; label: string; seq: number; value: string; read_only: boolean; }

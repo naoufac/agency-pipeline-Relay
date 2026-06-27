@@ -28,7 +28,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
 
   const brand = (spec && spec.brand && spec.brand.name) || 'Studio';
   const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s)).join('\n');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <style>${vars}
