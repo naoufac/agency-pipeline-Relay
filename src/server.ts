@@ -10,6 +10,7 @@ import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { republishPage } from './cms.ts';
 import { reviewSite, qaRunning } from './qa.ts';
+import * as appdb from './appdb.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -182,6 +183,21 @@ const server = http.createServer(async (req, res) => {
       if (!(await pool.query('select 1 from projects where id=$1', [sid])).rows[0]) return send(res, 404, 'application/json', '{"error":"unknown site"}');
       await pool.query('insert into site_submissions(project_id,form,data) values($1,$2,$3)', [sid, form, JSON.stringify(data)]);
       return send(res, 200, 'application/json', '{"ok":true}');
+    }
+    // ---- Live per-project DB: read/insert rows from the produced app's OWN isolated schema ----
+    const dataM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/data\/([a-zA-Z_][a-zA-Z0-9_]{0,62})$/);
+    if (dataM && req.method === 'GET') {
+      try { return send(res, 200, 'application/json', JSON.stringify({ rows: await appdb.readRows(pool, dataM[1], dataM[2], Number(url.searchParams.get('limit') || 50)) })); }
+      catch { return send(res, 200, 'application/json', '{"rows":[]}'); }
+    }
+    if (dataM && req.method === 'POST') {
+      const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
+      if (formLimited(ip)) return send(res, 429, 'application/json', '{"error":"too many submissions — try again shortly"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+      const data = (b.data && typeof b.data === 'object') ? b.data : {};
+      try { const ok = await appdb.insertRow(pool, dataM[1], dataM[2], data); return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok })); }
+      catch (e: any) { return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: String(e?.message ?? e).slice(0, 120) })); }
     }
     if (path === '/api/submissions') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');

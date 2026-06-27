@@ -42,6 +42,7 @@ function sampleSpec(theme: ThemeName) {
       { type: 'split', eyebrow: 'Our approach', title: 'Built with care, measured twice', body: 'Every engagement starts with the same question and ends with something you are proud to put your name on. We work in small teams, in the open, with no surprises at the end.', cta: 'Read our approach' },
       { type: 'cta', headline: 'Ready when you are', body: 'Tell us what you are building and we will tell you, honestly, whether we are the right fit.', cta: 'Book a call' },
       { type: 'feed', title: 'From the community', intro: 'Recent additions from people like you.', form: 'listing', empty: 'Be the first to add yours.' },
+      { type: 'collection', title: 'On the menu', intro: 'A few of our favourites.', table: 'items', empty: 'Menu coming soon.' },
       { type: 'form', title: 'Get in touch', intro: 'Tell us about your project and we will reply within a day.', cta: 'Send message' },
     ],
   };

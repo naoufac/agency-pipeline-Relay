@@ -18,7 +18,7 @@ const ROLE: Record<string, string> = {
   research:    'You are the Research department of an automated creative agency. From the brief, output concise market & positioning research. Plain text.',
   branding:    'You are the Branding department. Output ONLY a JSON object of design tokens: {"palette":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex"},"type":{"display":"Font","body":"Font"},"radius":"12px"}. CRITICAL: text vs bg MUST meet WCAG AA contrast (>=4.5:1) — dark text on a light bg or vice-versa. JSON only, no prose.',
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',
-  database:    'You are the Database department. Output ONLY a runnable PostgreSQL CREATE TABLE block for this app — no prose, no markdown fences.',
+  database:    'You are the Database department. Output ONLY runnable PostgreSQL for this app: a CREATE TABLE block for the core entities, THEN 3-6 INSERT statements seeding realistic example rows into the main public-facing table (e.g. products/menu/listings) so the site has real data to display. Use BARE table names (no schema prefix), no DROP/ALTER, no prose, no markdown fences.',
   design:      'You are the Design-system department. Using the brand tokens above, list the components and how the tokens map.',
   media:       'You are the Art Direction department. Describe the visual/imagery direction (mood, hero imagery, iconography) for this website. Concrete and on-brief.',
   content:     'You are the Content department. Output ONLY ONE valid JSON object (a single object — never two blocks). For sitemap/IA: {"sections":[{"id":"hero","title":"..."}, ...]}. For copy: {"hero":{"headline":"...","body":"..."}, ...}. Invent realistic, specific names and details that fit the brief (a real-sounding business name, real-sounding people/places); NEVER output bracketed placeholders like [Studio Name] or lorem ipsum. Exactly one JSON object, no prose, no markdown, no second block.',
@@ -35,6 +35,7 @@ const ROLE: Record<string, string> = {
                '- {"type":"cta","headline":"...","body":"one line","cta":"label"}\n' +
                '- {"type":"form","title":"...","intro":"one line","cta":"Send","fields":[{"name":"name","label":"Full name"},{"name":"email","label":"Email","type":"email"},{"name":"message","label":"Message","type":"textarea"}],"form":"contact"}  (a REAL form whose submissions are stored in the database — put one on a contact / get-in-touch / sign-up / stockists page. "form" names the table bucket, default "contact".)\n' +
                '- {"type":"feed","title":"...","intro":"one line","form":"listing","empty":"Nothing here yet."}  (a LIVE list of the site\'s own PUBLIC submissions to the form with the SAME "form" name — for a directory / listings / reviews / community wall. Pair it with a {"type":"form","form":"listing"} so visitors add an entry and SEE it appear. Use for app/store/directory briefs. NEVER point a feed at a private "contact" form.)\n' +
+               '- {"type":"collection","title":"...","intro":"one line","table":"items","empty":"Nothing here yet."}  (a LIVE list rendered from the project\'s REAL database table named "table" — products, menu, listings, fleet. Use for app/store pages; the database department must CREATE and SEED that exact table. Reads the live DB.)\n' +
                'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way). The system owns fonts, spacing, shape and layout (chosen from the brief) — you only supply copy, section order and 2 brand colours. JSON ONLY.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
@@ -106,7 +107,9 @@ create table orders (
   user_id int references users(id),
   total numeric not null,
   status text not null default 'placed'
-);`;
+);
+insert into items (name, price) values
+  ('Margherita', 9.50), ('Pepperoni', 12.00), ('Garden Salad', 7.25), ('Tiramisu', 6.00);`;
 
 function stub(department: string, brief: string): string {
   switch (department) {

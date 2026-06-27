@@ -11,7 +11,7 @@ type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archety
 // (kpi.ts counts only sql_applies/site_renders/wcag/json* as rigor; min/nonempty are honest floors.)
 const verifyFor = (d: string): string => {
   if (d === 'branding') return 'wcag';
-  if (/databas|schema|backend|datamodel/.test(d) || d === 'data' || d === 'sql') return 'sql_applies';
+  if (/databas|schema|backend|datamodel/.test(d) || d === 'data' || d === 'sql') return 'app_db';  // provision a real, isolated per-project schema
   if (/copy|content|writ/.test(d)) return 'json';
   return 'min:280';
 };
@@ -77,7 +77,7 @@ function validate(plan: any, brief: string): Plan | null {
 
   // FULL AGENCY PRODUCTION: an app/store brief MUST ship a real data model. Guarantee a database
   // department (verified by sql_applies, which actually applies the DDL) — injected if the plan lacks one.
-  if (needsData(archetype) && !tasks.some(t => verifyFor(t.department) === 'sql_applies')) {
+  if (needsData(archetype) && !tasks.some(t => verifyFor(t.department) === 'app_db')) {
     tasks.push({ seq: tasks.length + 1, title: 'Data model (database schema)', department: 'database',
       verify: 'sql_applies', depends_on: [1], artifact: null });
   }
@@ -87,7 +87,7 @@ function validate(plan: any, brief: string): Plan | null {
   let dbArtifactDone = false;
   for (const t of tasks) {
     t.verify = verifyFor(t.department);
-    if (t.verify === 'sql_applies' && !dbArtifactDone) { t.artifact = 'schema.sql'; dbArtifactDone = true; }
+    if (t.verify === 'app_db' && !dbArtifactDone) { t.artifact = 'schema.sql'; dbArtifactDone = true; }
   }
 
   // one render-verified BUILD per page (fans in from EVERY thinking step, incl. the schema), then QA on Home

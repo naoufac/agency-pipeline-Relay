@@ -113,6 +113,16 @@ export const SECTIONS: Record<string, (s: any) => string> = {
   cta: (s) => `<section class="section"><div class="container"><div class="cta">
     <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${s.cta ? `<a class="btn" href="#">${esc(s.cta)}</a>` : ''}
   </div></div></section>`,
+  // LIVE DB read: a list rendered from the project's REAL database table (data-table). Empty-state at
+  // build/gate time (file://); filled from /api/site/:id/data/:table when served over HTTP.
+  collection: (s) => {
+    const table = esc(s.table || 'items');
+    const empty = esc(s.empty || 'Nothing here yet.');
+    return `<section class="section"><div class="container">
+      ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+      <div class="grid grid-3 collection" data-table="${table}" style="margin-top:2.4rem"><p class="muted feed-empty">${empty}</p></div>
+    </div></section>`;
+  },
   // FULL-STACK read path: a LIVE list of the site's own submissions to one named form (a directory /
   // listings / reviews / wall). Renders an empty-state at build/gate time (file://, no server) and is
   // filled by the renderer's feed loader when served over HTTP. data-feed = the form name it reads.

@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 const execFileP = promisify(execFile);
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import * as appdb from './appdb.ts';
 
 export const SITES = new URL('../sites/', import.meta.url);
 
@@ -71,6 +72,15 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     try { await c.query('begin'); await c.query(sql); await c.query('rollback'); return { ok: true, log: 'sql applied cleanly' }; }
     catch (e: any) { try { await c.query('rollback'); } catch {} return { ok: false, log: 'sql error: ' + (e?.message ?? e) }; }
     finally { c.release(); }
+  }
+
+  if (rule === 'app_db') {
+    // Stronger than sql_applies: PROVISION the project's own isolated schema (app_<hex>) for real and
+    // prove the tables now exist. The app runs on a live DB, not a file. Confined to its namespace.
+    try {
+      const { schema, tables } = await appdb.provision(pool, task.project_id, content);
+      return { ok: tables.length >= 1, log: tables.length ? `app db live: ${tables.length} table(s) in ${schema} — ${tables.join(', ')}` : 'no tables created' };
+    } catch (e: any) { return { ok: false, log: 'app db provision failed: ' + (e?.message ?? e) }; }
   }
 
   if (rule === 'site_renders') {
