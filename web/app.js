@@ -76,10 +76,12 @@ function dashboard(){
 
   document.getElementById('go').onclick = submitBrief;
   document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
+  const params = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const idp = params.get('id'); if (idp) viewId = idp;
   initBoard();
   tick();
   pollTimer = setInterval(tick, 1000);
-  const tp = new URLSearchParams((location.hash.split('?')[1] || '')).get('task');
+  const tp = params.get('task');
   if (tp) setTimeout(() => openOutput(Number(tp)), 1400);
 }
 
@@ -126,17 +128,19 @@ async function tick(){
 }
 
 async function projects(){
-  app.innerHTML = `<div class="container section"><h2>Projects</h2><p class="muted" style="margin-top:8px">Every brief Relay has run — with its KPIs.</p><div id="plist" class="grid grid-2" style="margin-top:32px"></div></div>`;
-  const list = await j('/api/projects'); const wrap = document.getElementById('plist');
-  if (!list.length){ wrap.innerHTML = `<div class="empty">No projects yet. Start one from the Dashboard.</div>`; return; }
-  wrap.innerHTML = list.map(p => {
+  app.innerHTML = `<div class="container section"><h2>Projects</h2><p class="muted" style="margin-top:8px">Every brief Relay has run — open its live site, or its build board. Refreshes automatically.</p><div id="plist" class="grid grid-2" style="margin-top:32px"></div></div>`;
+  const wrap = document.getElementById('plist');
+  async function load(){
+   let list; try { list = await j('/api/projects'); } catch { return; }
+   if (!list.length){ wrap.innerHTML = `<div class="empty">No projects yet. Start one from the Dashboard.</div>`; return; }
+   wrap.innerHTML = list.map(p => {
     const pct = p.total ? Math.round(100*p.done/p.total) : 0;
     const fp  = p.done ? Math.round(100*p.firstpass/p.done) : 0;
     const rig = p.total ? Math.round(100*p.realchecks/p.total) : 0;
     const st = p.failed ? 'failed' : (p.active ? 'running' : (p.done===p.total && p.total ? 'done' : 'ready'));
-    return `<a class="card proj" href="#/" data-open="${p.id}">
+    return `<div class="card proj">
       <div class="row" style="justify-content:space-between">
-        <span class="pill"><i class="dot s-${st}"></i>${st}</span>
+        <span class="pill"><i class="dot s-${st}"></i>${st}${p.active?' · live':''}</span>
         <span class="muted" style="font-size:12px">${p.wall||0}s</span>
       </div>
       <div class="brief" style="margin-top:12px">${esc(p.brief)}</div>
@@ -144,8 +148,16 @@ async function projects(){
       <div class="kpi-mini">
         <span><b>${pct}%</b> done</span><span><b>${fp}%</b> first-pass</span><span class="${rig<40?'warn':''}"><b>${rig}%</b> rigor</span>
       </div>
-    </a>`; }).join('');
-  wrap.querySelectorAll('[data-open]').forEach(a => a.addEventListener('click', () => { viewId = a.getAttribute('data-open'); }));
+      <div class="row" style="margin-top:16px;gap:8px">
+        <a class="btn btn-sm btn-ghost" href="#/?id=${p.id}">View build</a>
+        ${p.site
+          ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${p.site}">Open site ↗</a>`
+          : `<span class="muted" style="font-size:12px;align-self:center">no website artifact</span>`}
+      </div>
+    </div>`; }).join('');
+  }
+  await load();
+  pollTimer = setInterval(load, 4000);
 }
 
 function about(){

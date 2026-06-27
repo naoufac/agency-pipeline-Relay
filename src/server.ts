@@ -47,6 +47,8 @@ async function projectsJSON() {
       coalesce(round(extract(epoch from (max(t.updated_at) - p.created_at)))::int,0) as wall
     from projects p left join tasks t on t.project_id=p.id
     group by p.id order by p.created_at desc limit 50`);
+  for (const row of r.rows)
+    row.site = existsSync(fileURLToPath(new URL(row.id + '/index.html', SITES))) ? '/sites/' + row.id + '/' : null;
   return r.rows;
 }
 
@@ -105,3 +107,12 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PORT));
+
+// restart-safe: on boot, resume any project that still has unfinished tasks
+(async () => {
+  try {
+    const r = await pool.query("select distinct project_id from tasks where status in ('ready','running','verifying','blocked')");
+    for (const row of r.rows) runLoop(pool, row.project_id, { cap: 4 }).catch(() => {});
+    if (r.rows.length) console.log('resuming', r.rows.length, 'unfinished project(s)');
+  } catch (e: any) { console.error('resume failed', e?.message); }
+})();
