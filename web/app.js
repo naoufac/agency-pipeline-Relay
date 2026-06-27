@@ -274,6 +274,36 @@ function toast(msg){
   setTimeout(() => t.classList.remove('show'), 3500);
 }
 
+function roadmap(){
+  const P = [
+    { n:'00', t:'Engine', s:'done', d:'A dependency-graph board in Postgres, a stateless restart-safe runner, an unblock trigger, and zero-trust verification — the foundation everything stands on.' },
+    { n:'01', t:'Real product', s:'done', d:'A deliverable-first app: type a brief → a live project workspace (Site · Build · Files · Metrics) with the website served at /sites/:id.' },
+    { n:'02', t:'Honest quality', s:'done', d:'A gate that refuses broken/external assets, KPIs that never lie (a stuck run reads “blocked”, not green), and retry-with-feedback so failures self-correct.' },
+    { n:'03', t:'Generic + multi-page', s:'done', d:'An LLM planner that writes a bespoke task graph per brief, producing real multi-page sites with a shared navigation.' },
+    { n:'04', t:'Design excellence', s:'done', d:'Tailwind compiled & inlined per page, real fonts shipped inline — modern 2024 output, not 1998 HTML.' },
+    { n:'05', t:'Real media', s:'progress', d:'Existing photography & video (Pexels) searched per section, downloaded into the site and served locally — gate-safe, never a broken link.' },
+    { n:'06', t:'Email platform', s:'progress', d:'The EmailDelivery ESP on email.naples.agency — campaigns, automations, segments, relay-based sending.' },
+    { n:'07', t:'Editable CMS', s:'next', d:'Pages & blocks in Postgres; edit content and re-publish a single page through the same verified build path.' },
+    { n:'08', t:'On demand', s:'next', d:'Astro, a real headless CMS, payments / storefront — added only when a brief genuinely needs them.' },
+  ];
+  const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
+  const done = P.filter(p=>p.s==='done').length;
+  app.innerHTML = `<div class="container section">
+    <span class="eyebrow">● the plan</span>
+    <h1 style="margin-top:14px">Roadmap</h1>
+    <p class="lead" style="margin-top:14px">Where Relay has been and where it's going — a brief in, a real multi-page verified website out, getting better every phase. <b style="color:var(--text)">${done}/${P.length} shipped.</b></p>
+    <div class="rm-legend"><span><i class="rm-dot done"></i>Shipped</span><span><i class="rm-dot prog"></i>In progress</span><span><i class="rm-dot next"></i>Planned</span></div>
+    <ol class="timeline">
+      ${P.map(p=>`<li class="tl-item ${p.s}"><div class="tl-node">${p.n}</div>
+        <div class="card tl-card">
+          <div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 class="tl-title">${p.t}</h3>${tag(p.s)}</div>
+          <p class="muted" style="margin-top:8px">${esc(p.d)}</p>
+        </div></li>`).join('')}
+    </ol>
+    <p style="margin-top:36px"><a class="btn" href="#/">Build a site →</a></p>
+  </div>`;
+}
+
 function about(){
   app.innerHTML = `<div class="container section"><div class="prose">
     <span class="eyebrow">About Relay</span>
@@ -308,6 +338,7 @@ function router(){
   let navPath = '/';
   if (!seg.length) home();
   else if (seg[0] === 'new') { navPath = '/new'; newSite(); }
+  else if (seg[0] === 'roadmap') { navPath = '/roadmap'; roadmap(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
   else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();

@@ -239,3 +239,23 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
   .foot{flex-direction:column; gap:6px}
   .kpis{grid-template-columns:repeat(2,1fr)}
 }
+
+/* ============ roadmap timeline ============ */
+.rm-legend{display:flex;gap:18px;margin:20px 0 6px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.rm-legend span{display:inline-flex;align-items:center;gap:7px}
+.rm-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.rm-dot.done{background:var(--st-done)} .rm-dot.prog{background:var(--accent)} .rm-dot.next{background:var(--faint)}
+.timeline{list-style:none;margin:28px 0 0;padding:0;position:relative}
+.timeline::before{content:"";position:absolute;left:23px;top:10px;bottom:24px;width:2px;background:linear-gradient(var(--st-done),var(--accent) 60%,var(--line))}
+.tl-item{position:relative;padding:0 0 16px 66px}
+.tl-node{position:absolute;left:0;top:2px;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--font-display);font-weight:700;font-size:14px;background:var(--surface-2);border:2px solid var(--line);color:var(--muted)}
+.tl-item.done .tl-node{border-color:var(--st-done);color:var(--st-done)}
+.tl-item.progress .tl-node{border-color:var(--accent);color:var(--accent-2);box-shadow:0 0 0 4px rgba(124,122,255,.12)}
+.tl-card{padding:16px 20px}
+.tl-title{font-size:18px}
+.rm-tag{font-size:12px;font-weight:600;padding:4px 11px;border-radius:var(--rpill);white-space:nowrap;align-self:flex-start}
+.rm-tag.done{background:rgba(54,179,126,.14);color:var(--st-done)}
+.rm-tag.prog{background:rgba(124,122,255,.16);color:var(--accent-2)}
+.rm-tag.next{background:var(--surface-2);color:var(--muted)}
+@media(max-width:720px){ .tl-item{padding-left:56px} .timeline::before{left:19px} .tl-node{width:40px;height:40px;font-size:12px} }
