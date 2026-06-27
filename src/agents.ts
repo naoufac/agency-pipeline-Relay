@@ -53,6 +53,11 @@ async function callMiniMax(system: string, user: string, maxTokens = 1500): Prom
   return String(text);
 }
 
+// generic MiniMax text call (used by the planner); '' when no key so callers fall back
+export async function llm(system: string, user: string, maxTokens = 2000): Promise<string> {
+  return KEY ? callMiniMax(system, user, maxTokens) : '';
+}
+
 export async function runAgent(department: string, ctx: Ctx): Promise<string> {
   if (KEY) {
     const system = ROLE[department] || `You are the ${department} department of an automated agency. Do your part for the brief.`;
