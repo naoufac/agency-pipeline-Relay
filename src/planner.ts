@@ -1,8 +1,10 @@
 import pg from 'pg';
 import { llm } from './agents.ts';
+import { themeFor, classifyTheme, type ThemeName } from './themes.ts';
 
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
+type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName };
 
 // Fallback (LLM unavailable): a small multi-page site.
 const FB_THINKING: Task[] = [
@@ -15,10 +17,12 @@ const FB_PAGES: Page[] = [{ slug:'index', title:'Home' }, { slug:'about', title:
 
 const PLANNER_SYS = `You are the Planner for an automated agency that ships a real MULTI-PAGE website for ANY brief.
 Output ONLY JSON (no prose, no fences):
-{"pages":[{"slug":"index","title":"Home"},{"slug":"about","title":"About"}, ...],
+{"theme":"editorial|modern|warm|bold|minimal",
+ "pages":[{"slug":"index","title":"Home"},{"slug":"about","title":"About"}, ...],
  "tasks":[{"seq":1,"title":"...","department":"research","depends_on":[]}, ...]}
 
 Rules:
+- "theme": the design language that best fits the brief — editorial (law/finance/architecture/luxury — serif, refined), modern (saas/product/tech — geometric sans), warm (cafe/bakery/wellness/craft — soft, rounded), bold (agency/fitness/events/fashion — oversized, high-energy), minimal (portfolio/photography/studio — spare). Pick exactly one.
 - "pages": 2 to 5 pages tailored to the brief. The FIRST page MUST be {"slug":"index","title":"Home"}. Slugs are lowercase, url-safe, no extension (e.g. "about","services","menu","contact","pricing").
 - "tasks": 4 to 7 THINKING steps only (research, strategy, branding, content/IA, copywriting, media, design) in dependency order; depends_on references only earlier seq. Do NOT include build or QA tasks — those are added automatically, one build per page.
 - Adapt pages + tasks to THIS brief (a restaurant: Home/Menu/About/Contact; a SaaS: Home/Features/Pricing/Docs; a portfolio: Home/Work/About/Contact).
@@ -34,10 +38,11 @@ function normPages(arr: any): Page[] {
   return pages.slice(0, 5);
 }
 
-function validate(plan: any): { tasks: Task[]; pages: Page[] } | null {
+function validate(plan: any, brief: string): Plan | null {
   const list = Array.isArray(plan?.tasks) ? plan.tasks : null;
   if (!list || !list.length) return null;
   const pages = normPages(plan.pages);
+  const theme = themeFor(plan?.theme, brief);  // trust an LLM-named archetype only if it's in the closed set
 
   // thinking tasks only (drop any build/qa the LLM emitted)
   let tasks: Task[] = list.map((t: any, i: number) => ({
@@ -64,23 +69,23 @@ function validate(plan: any): { tasks: Task[]; pages: Page[] } | null {
   const pageBuilds: Task[] = pages.map(pg => ({ seq: ++seq, title: `Build the ${pg.title} page`, department: 'build', verify: 'site_renders', depends_on: thinkSeqs, artifact: `${pg.slug}.html` }));
   const indexBuild = pageBuilds[0];
   const qa: Task = { seq: ++seq, title: 'QA — acceptance (renders live)', department: 'qa', verify: 'site_renders', depends_on: [indexBuild.seq], artifact: null };
-  return { tasks: [...tasks, ...pageBuilds, qa], pages };
+  return { tasks: [...tasks, ...pageBuilds, qa], pages, theme };
 }
 
-async function llmPlan(brief: string): Promise<{ tasks: Task[]; pages: Page[] } | null> {
+async function llmPlan(brief: string): Promise<Plan | null> {
   let raw = ''; try { raw = await llm(PLANNER_SYS, 'BRIEF: ' + brief, 2000); } catch { return null; }
   if (!raw.trim()) return null;
   const txt = raw.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
   const s = txt.indexOf('{'), e = txt.lastIndexOf('}'); if (s < 0 || e <= s) return null;
   let parsed: any; try { parsed = JSON.parse(txt.slice(s, e + 1)); } catch { return null; }
-  try { return validate(parsed); } catch { return null; }
+  try { return validate(parsed, brief); } catch { return null; }
 }
 
 export async function plan(pool: pg.Pool, brief: string): Promise<string> {
-  const result = (await llmPlan(brief)) || { tasks: [...FB_THINKING, ...buildsFor(FB_PAGES, FB_THINKING.length)], pages: FB_PAGES };
+  const result = (await llmPlan(brief)) || { tasks: [...FB_THINKING, ...buildsFor(FB_PAGES, FB_THINKING.length)], pages: FB_PAGES, theme: classifyTheme(brief) };
   const usedLLM = result.pages !== FB_PAGES;
-  const { tasks, pages } = result;
-  const params = { planner: usedLLM ? 'llm' : 'template', pages };
+  const { tasks, pages, theme } = result;
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;

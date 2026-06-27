@@ -10,6 +10,7 @@
     "run": "tsx src/run.ts",
     "serve": "tsx src/server.ts",
     "kpi": "tsx src/kpi-cli.ts",
+    "theme:check": "tsx src/theme-check.ts",
     "mail:test": "tsx src/mail-cli.ts"
   },
   "dependencies": {

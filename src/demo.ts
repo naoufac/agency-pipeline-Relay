@@ -1,8 +1,15 @@
 // End-to-end PROOF: plan a brief, run partially (simulated crash), restart, finish.
 // Asserts the final state with real checks and exits non-zero on any failure.
-import { makePool, applySchema, board, counts } from './db.ts';
+import { makePool, applySchema, ensureDatabase, board, counts } from './db.ts';
 import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
+
+// The demo is DESTRUCTIVE (it resets the schema to prove crash/restart). Never let it touch the live
+// board: default to an isolated scratch DB unless the operator explicitly points DATABASE_URL elsewhere.
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:5439/agency_test';
+  process.env.ALLOW_DB_RESET = '1';
+}
 
 function printBoard(rows: any[]) {
   for (const r of rows) {
@@ -12,6 +19,7 @@ function printBoard(rows: any[]) {
 }
 
 async function main() {
+  if (process.env.DATABASE_URL?.endsWith('/agency_test')) await ensureDatabase('agency_test');
   const pool = makePool();
   console.log('› applying schema (DDL + unblock trigger + v_ready_tasks)…');
   await applySchema(pool);

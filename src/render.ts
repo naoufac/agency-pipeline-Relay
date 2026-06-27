@@ -1,6 +1,7 @@
 // Deterministic page renderer: a structured spec -> perfect HTML, assembled from vetted components.
 // No LLM touches structure/CSS/nav/contrast here. spec = { brand:{name,cta,tokens}, sections:[{type,...}] }.
 import { DS_CSS, navBar, footer, SECTIONS, esc } from './components.ts';
+import { themeFor, themeFonts, themeVars } from './themes.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -9,13 +10,15 @@ function contrast(a: string, b: string) { const L1 = lum(rgb(a)), L2 = lum(rgb(b
 const hex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
 function mix(a: string, b: string, t: number) { const x = rgb(a), y = rgb(b); return '#' + [0, 1, 2].map(i => hex(x[i] * (1 - t) + y[i] * t)).join(''); }
 const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg) ? '#ffffff' : '#0b1220';   // readable text for a bg
-const FONTS = new Set(['Grotesk', 'Inter', 'Fraunces']);
-const font = (n: any, fb: string) => (FONTS.has(String(n)) ? String(n) : fb);
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string }): string {
   const t = (spec && spec.brand && spec.brand.tokens) || {};
   const bg = isHex(t.bg) ? t.bg.trim() : '#ffffff';
   const primary = isHex(t.primary) ? t.primary.trim() : '#4f46e5';
+  // The brief roots the visual identity: a deterministic THEME owns typography, rhythm and shape
+  // (fonts/scale/spacing/radius/border) — the model never authors any of it.
+  const theme = themeFor(ctx.theme, '');
+  const tf = themeFonts(theme);
   // GUARANTEE legibility deterministically (no guessing): derive the whole palette from bg + primary.
   const text = (isHex(t.text) && contrast(t.text, bg) >= 4.5) ? t.text.trim() : pickOn(bg);
   const onPrimary = pickOn(primary);
@@ -23,8 +26,8 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   const vars = `:root{` +
     `--primary:${primary};--on-primary:${onPrimary};--accent:${accent};--bg:${bg};` +
     `--surface:${isHex(t.surface) ? t.surface.trim() : mix(text, bg, 0.96)};--text:${text};` +
-    `--muted:${mix(text, bg, 0.42)};--line:${mix(text, bg, 0.86)};--radius:${/^\d+px$|^\d+rem$/.test(t.radius) ? t.radius : '14px'};` +
-    `--font-display:'${font(t.font_display, 'Grotesk')}';--font-body:'${font(t.font_body, 'Inter')}'}`;
+    `--muted:${mix(text, bg, 0.42)};--line:${mix(text, bg, 0.86)};` +
+    `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}}`;
 
   const brand = (spec && spec.brand && spec.brand.name) || 'Studio';
   const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s)).join('\n');
@@ -33,7 +36,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <style>${vars}
 ${DS_CSS}</style></head>
-<body>
+<body class="t-${theme}">
 ${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta)}
 <main>
 ${sections}

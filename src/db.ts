@@ -1,15 +1,33 @@
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
 
-export const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5439/agency';
+// Resolved lazily so a process (e.g. the demo) can point itself at a scratch DB before opening a pool.
+const dbUrl = () => process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5439/agency';
+const maskUrl = (u: string) => u.replace(/:[^:@/]*@/, ':***@');
 
 export function makePool(): pg.Pool {
-  return new pg.Pool({ connectionString: DATABASE_URL, max: 8 });
+  return new pg.Pool({ connectionString: dbUrl(), max: 8 });
 }
 
-// Apply the DDL (db/schema.sql) — drops + recreates the engine.
+// Create a database if it's missing (connects to the maintenance `postgres` db). For scratch/test DBs only.
+export async function ensureDatabase(name: string): Promise<void> {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(name)) throw new Error('bad database name: ' + name);
+  const admin = new pg.Pool({ connectionString: dbUrl().replace(/\/[^/?]+(\?|$)/, '/postgres$1'), max: 1 });
+  try { await admin.query(`create database ${name}`); }
+  catch (e: any) { if (e?.code !== '42P04') throw e; }   // 42P04 = already exists
+  finally { await admin.end(); }
+}
+
+// Apply the DDL (db/schema.sql) — DROPS + recreates the engine. Guarded: it refuses to wipe a board that
+// already has projects unless ALLOW_DB_RESET=1, so a test/demo run can never silently nuke a live board.
 export async function applySchema(pool: pg.Pool): Promise<void> {
+  let existing = 0;
+  try { existing = (await pool.query('select count(*)::int n from projects')).rows[0].n; }
+  catch (e: any) { if (e?.code !== '42P01') throw e; }   // 42P01 = no projects table yet → fresh DB, safe
+  if (existing > 0 && process.env.ALLOW_DB_RESET !== '1')
+    throw new Error(
+      `applySchema refused: 'projects' already has ${existing} row(s) — this looks like a LIVE board ` +
+      `(DATABASE_URL=${maskUrl(dbUrl())}). Point DATABASE_URL at a scratch DB, or set ALLOW_DB_RESET=1 to override.`);
   const sql = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8');
   await pool.query(sql);
 }

@@ -59,9 +59,11 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
     const fb = await pool.query("select detail from run_events where task_id=$1 and type in ('verify_failed','agent_error') order by id desc limit 1", [task.id]);
     if (fb.rows[0]) feedback = fb.rows[0].detail;
   }
-  const pages = (proj.rows[0].params && proj.rows[0].params.pages) || [];
+  const params = proj.rows[0].params || {};
+  const pages = params.pages || [];
+  const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
   const self = task.artifact ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -82,7 +84,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
         throw new Error('build did not return a valid spec (need brand + >=2 sections)');
       const slug = task.artifact.replace(/\.html$/, '');
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id });
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme });
       snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
     }

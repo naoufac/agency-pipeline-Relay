@@ -9,7 +9,9 @@ const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M2 emits <think> tags
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string } };
+import { themeFor, themeTone } from './themes.ts';
+
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -32,7 +34,7 @@ const ROLE: Record<string, string> = {
                '- {"type":"gallery","title":"...","images":["2-4 word photo search", "..."]}  (4-6 queries)\n' +
                '- {"type":"cta","headline":"...","body":"one line","cta":"label"}\n' +
                '- {"type":"form","title":"...","intro":"one line","cta":"Send","fields":[{"name":"name","label":"Full name"},{"name":"email","label":"Email","type":"email"},{"name":"message","label":"Message","type":"textarea"}]}  (a REAL form whose submissions are stored in the database — put one on a contact / get-in-touch / sign-up / stockists page)\n' +
-               'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way); fonts must be one of Grotesk, Inter, Fraunces. JSON ONLY.',
+               'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way). The system owns fonts, spacing, shape and layout (chosen from the brief) — you only supply copy, section order and 2 brand colours. JSON ONLY.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
 };
@@ -50,6 +52,8 @@ function buildUser(ctx: Ctx): string {
     s += `Shared top nav must link ALL pages (highlight the current one):\n`;
     s += ctx.pages.map(p => `  ${p.title} -> ${p.slug}.html`).join('\n') + '\n';
     s += `Use those exact relative hrefs (home is index.html). Build ONLY this one page.\n`;
+    const th = themeFor(ctx.theme, ctx.brief);
+    s += `\nDesign language: ${th}. Match the copy TONE to it — ${themeTone(th)}. (The system renders all visual design; you write copy + choose sections + 2 colours.)\n`;
   }
   return s;
 }
@@ -105,7 +109,7 @@ create table orders (
 
 function stub(department: string, brief: string): string {
   switch (department) {
-    case 'research':    return `Research for: ${brief}\nPremium urban market; cash-on-delivery common; FR/AR conventions.`;
+    case 'research':    return `Research for: ${brief}\n\nMarket: dense urban demand for fast, reliable service; customers skew 18-40, mobile-first, and value live tracking plus flexible payment (card, wallet, and cash on delivery are all common in this region). The category is crowded but fragmented, so trust, speed and transparent pricing are the real wedges. Positioning: the fastest honest option in the city — clear fees, genuine human support, and progress you can actually see. Key risks are supply-side reliability and first-order trust; mitigate with referral incentives, visible ETAs, and a no-quibble first-order guarantee.`;
     case 'branding':    return JSON.stringify({ palette: { primary: '#0B6E4F', accent: '#E9C46A', bg: '#FFFFFF', text: '#11201A' }, type: { display: 'Inter', body: 'Inter' }, radius: '12px' });
     case 'stack':       return `Stack decision: Supabase (Postgres) backend + Next.js PWA.`;
     case 'database':    return DB_SQL;
@@ -115,11 +119,20 @@ function stub(department: string, brief: string): string {
     case 'copywriting': return JSON.stringify({ hero: { headline: 'Welcome', subhead: 'Built by Relay', cta: 'Get started' }, about: { body: 'About us.' }, contact: { body: 'Reach us.' } });
     case 'auth':        return `Auth: phone + password, OTP, sessions.`;
     case 'frontend':    return `Screens built: browse, cart, checkout, track. (applies brand tokens)`;
-    case 'build':       return `<!doctype html><html><head><meta charset="utf-8"><title>${brief}</title>
-<style>body{margin:0;font-family:system-ui;background:#0B0E14;color:#EAEDF5}
-.hero{min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem}
-h1{font-size:clamp(2rem,6vw,4rem);background:linear-gradient(90deg,#7C7AFF,#36B37E);-webkit-background-clip:text;color:transparent}</style></head>
-<body><div class="hero"><div><h1>${brief}</h1><p>Generated offline by Relay (stub). Set MINIMAX_API_KEY for the real build.</p></div></div></body></html>`;
+    // The engine renders a SPEC (not HTML): return a valid brand + sections spec so the deterministic
+    // renderer (and the theme system) run fully offline. Real copy, no placeholders, contrasting colours.
+    case 'build':       return JSON.stringify({
+      brand: { name: 'Swift Lane', cta: 'Order now', tokens: { bg: '#0b0e14', primary: '#7c7aff', accent: '#36b37e' } },
+      sections: [
+        { type: 'hero', eyebrow: 'City-wide delivery', headline: 'Anything you need, at your door in under an hour', lead: 'Swift Lane connects you to the shops and kitchens nearby and brings your order over while it is still warm.', cta: 'Order now' },
+        { type: 'features', title: 'Why Swift Lane', intro: 'Built for speed and trust.', items: [
+          { title: 'Live tracking', body: 'Watch your courier move on the map from pickup to your door.' },
+          { title: 'Pay your way', body: 'Card, wallet, or cash on delivery — whatever suits you.' },
+          { title: 'Real support', body: 'A person, not a bot, the moment something needs sorting.' }] },
+        { type: 'split', eyebrow: 'For merchants', title: 'Grow without building your own fleet', body: 'List your menu, accept orders, and let our couriers handle the last mile. You keep your customers; we keep them moving.', cta: 'Partner with us' },
+        { type: 'form', title: 'Get early access', intro: 'Tell us your neighbourhood and we will let you know the day we launch near you.', cta: 'Request access' },
+      ],
+    });
     case 'integration': return `Integration: payments + maps wired; deploy config ready.`;
     case 'qa':          return `QA: no blocking gaps noted.`;
     default:            return `[${department}] completed for: ${brief}`;
