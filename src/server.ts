@@ -1,11 +1,13 @@
 // Relay — the live web app. One cohesive frontend (web/) served here, plus the JSON API.
 // The website IS the product: submit a brief, watch the agency build it live.
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
 import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
+import { SITES } from './verify.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -15,7 +17,8 @@ const STATIC: Record<string, string> = {
   '/': 'index.html', '/index.html': 'index.html',
   '/styles.css': 'styles.css', '/app.js': 'app.js',
 };
-const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'text/javascript' };
+const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'text/javascript',
+  png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp' };
 
 async function boardJSON(projectId?: string) {
   const p = projectId
@@ -28,7 +31,8 @@ async function boardJSON(projectId?: string) {
     `select us.seq as "from", ds.seq as "to" from task_dependencies d
      join tasks us on us.id=d.upstream_id join tasks ds on ds.id=d.downstream_id
      where us.project_id=$1`, [proj.id])).rows;
-  return { project: proj, tasks, edges };
+  const hasSite = existsSync(fileURLToPath(new URL(proj.id + '/index.html', SITES)));
+  return { project: proj, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null };
 }
 
 async function projectsJSON() {
@@ -57,6 +61,19 @@ const server = http.createServer(async (req, res) => {
     const path = url.pathname;
 
     if (path === '/healthz') return send(res, 200, 'text/plain', 'ok');
+
+    // serve the produced website(s): /sites/<projectId>/[file]
+    if (path.startsWith('/sites/')) {
+      let rel = decodeURIComponent(path.slice('/sites/'.length)).replace(/\.\.+/g, '');
+      if (rel === '' || rel.endsWith('/')) rel += 'index.html';
+      else if (!/\.[a-z0-9]+$/i.test(rel)) rel += '/index.html';
+      const f = fileURLToPath(new URL(rel, SITES));
+      if (existsSync(f) && statSync(f).isFile()) {
+        const ext = (f.split('.').pop() || '').toLowerCase();
+        return send(res, 200, MIME[ext] || 'application/octet-stream', readFileSync(f));
+      }
+      return send(res, 404, 'text/plain', 'site not found');
+    }
     if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(url.searchParams.get('id') || undefined)));
     if (path === '/api/projects') return send(res, 200, 'application/json', JSON.stringify(await projectsJSON()));
     if (path === '/api/kpi') return send(res, 200, 'application/json', JSON.stringify(await computeKpi(pool, url.searchParams.get('id') || undefined)));

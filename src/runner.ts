@@ -1,21 +1,24 @@
 import pg from 'pg';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
 import { runAgent, type Ctx } from './agents.ts';
-import { verify } from './verify.ts';
+import { verify, SITES } from './verify.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function reclaim(pool: pg.Pool): Promise<number> {
+  // resurrect crashed tasks in BOTH running and verifying (the slow render check lives in verifying)
   const r = await pool.query(
     `update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now()
-     where status='running' and lease_expires_at < now() returning id`);
+     where status in ('running','verifying') and lease_expires_at < now() returning id`);
   return r.rowCount ?? 0;
 }
 
 async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[]> {
   const r = await pool.query(
     `update tasks set status='running', claimed_by=$1,
-        lease_expires_at=now()+interval '60 seconds', attempts=attempts+1, updated_at=now()
+        lease_expires_at=now()+interval '240 seconds', attempts=attempts+1, updated_at=now()
      where id in (select id from tasks where status='ready' order by seq for update skip locked limit $2)
      returning *`, [runnerId, cap]);
   return r.rows;
@@ -38,9 +41,18 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
 
     await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
     await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
-    await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
 
-    const { ok, log } = await verify(pool, task.verify, content);   // deterministic check — not the agent's word
+    // REAL ARTIFACT: if this task writes a file, persist it to the project workspace on disk
+    if (task.artifact) {
+      const dir = new URL(task.project_id + '/', SITES);
+      mkdirSync(fileURLToPath(dir), { recursive: true });
+      let body = content.replace(/^\s*```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '');
+      const at = body.search(/<!doctype html|<html/i); if (at > 0) body = body.slice(at);
+      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
+    }
+
+    await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
+    const { ok, log } = await verify(pool, task, content);   // deterministic check — not the agent's word
     if (ok) {
       await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
       await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);

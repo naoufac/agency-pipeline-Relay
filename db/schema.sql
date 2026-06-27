@@ -29,6 +29,7 @@ create table tasks (
   department   text not null,
   status       task_status not null default 'blocked',
   verify       text not null default 'nonempty',  -- the automated check that must pass for status -> done
+  artifact     text,                              -- if set, the agent's output is written to sites/<project>/<artifact>
   attempts     int  not null default 0,
   max_attempts int  not null default 3,
   claimed_by   text,

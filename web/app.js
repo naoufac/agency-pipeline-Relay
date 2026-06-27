@@ -29,6 +29,9 @@ async function openOutput(seq){
     </div>
     <h3 class="drawer-title">${esc(o.title)}</h3>
     <div class="muted" style="font-size:12px;margin-bottom:14px">verify: <code>${esc(o.verify)}</code></div>
+    ${o.department === 'build' && o.status === 'done' ? `
+      <a class="btn btn-sm" target="_blank" rel="noopener" href="/sites/${viewId}/" style="margin-bottom:12px">Open the produced site ↗</a>
+      <img src="/sites/${viewId}/preview.png?t=${Date.now()}" alt="site preview" style="display:block;width:100%;border:1px solid var(--line);border-radius:10px;margin-bottom:14px"/>` : ''}
     <pre class="output">${esc(o.content) || '<span class="muted">— no output yet —</span>'}</pre>`;
   d.classList.add('open');
   d.querySelector('.x').onclick = () => d.classList.remove('open');
@@ -63,6 +66,7 @@ function dashboard(){
     <div class="board-head">
       <h3 id="blabel">Latest build</h3>
       <span id="counts" class="pill"></span>
+      <a id="opensite" class="btn btn-sm" target="_blank" rel="noopener" style="display:none">Open the site ↗</a>
       <div class="legend">${Object.keys(COLOR).map(k=>`<span><i class="dot s-${k}"></i>${k}</span>`).join('')}</div>
     </div>
     <div id="kpis" class="kpis"></div>
@@ -116,6 +120,8 @@ async function tick(){
     if (known.has(t.seq)) nodes.update(n); else { nodes.add(n); known.add(t.seq); }
   });
   d.edges.forEach(e => { const id='e'+e.from+'_'+e.to; if (!edges.get(id)) edges.add({ id, from:e.from, to:e.to }); });
+  const os = document.getElementById('opensite');
+  if (os) { if (d.site) { os.href = d.site; os.style.display = 'inline-flex'; } else os.style.display = 'none'; }
   try { renderKpis(await j('/api/kpi?id='+viewId)); } catch {}
 }
 

@@ -18,12 +18,12 @@ const ROLE: Record<string, string> = {
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',
   database:    'You are the Database department. Output ONLY a runnable PostgreSQL CREATE TABLE block for this app — no prose, no markdown fences.',
   design:      'You are the Design-system department. Using the brand tokens above, list the components and how the tokens map.',
-  media:       'You are the Media department. Describe the image/asset set to source for this app.',
-  content:     'You are the Copywriting department. Produce the key microcopy in the brand tone.',
+  media:       'You are the Art Direction department. Describe the visual/imagery direction (mood, hero imagery, iconography) for this website. Concrete and on-brief.',
+  content:     'You are the Content department. If asked for sitemap/IA, list the page sections in order. If asked for copy, write the actual final copy for each section in the brand tone. Real copy, not placeholders.',
   auth:        'You are the Auth department. Specify the accounts/authentication model.',
-  frontend:    'You are the Frontend department. List the screens and their components, applying the brand. Use the word "screen".',
-  integration: 'You are the Integration department. List the integrations to wire (payments, maps, etc.) and the deploy steps.',
-  qa:          'You are QA. Review the assembled upstream outputs. If they are coherent and complete, end your reply with the single word PASS; otherwise end with FAIL and why.',
+  build:       'You are the Build department. Using the brand tokens, sitemap, copy and art direction above, output a COMPLETE, polished, self-contained single-file website as ONE HTML document. Start with <!doctype html>. Inline ALL CSS in a <style> tag and any JS in a <script> tag — no external files, no build step, no frameworks. Apply the brand palette and typography EXACTLY. Use the real copy provided. Make it genuinely well-designed and responsive. Output ONLY the raw HTML — no markdown, no code fences, no commentary before or after.',
+  integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
+  qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
 };
 
 function buildUser(ctx: Ctx): string {
@@ -35,7 +35,7 @@ function buildUser(ctx: Ctx): string {
   return s;
 }
 
-async function callMiniMax(system: string, user: string): Promise<string> {
+async function callMiniMax(system: string, user: string, maxTokens = 1500): Promise<string> {
   const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
@@ -43,7 +43,7 @@ async function callMiniMax(system: string, user: string): Promise<string> {
       model: MODEL,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       temperature: 0.7,
-      max_tokens: 1024,
+      max_tokens: maxTokens,
     }),
   });
   if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -56,7 +56,7 @@ async function callMiniMax(system: string, user: string): Promise<string> {
 export async function runAgent(department: string, ctx: Ctx): Promise<string> {
   if (KEY) {
     const system = ROLE[department] || `You are the ${department} department of an automated agency. Do your part for the brief.`;
-    return await callMiniMax(system, buildUser(ctx));
+    return await callMiniMax(system, buildUser(ctx), department === 'build' ? 8000 : 1500);
   }
   return stub(department, ctx.brief);
 }
@@ -90,8 +90,13 @@ function stub(department: string, brief: string): string {
     case 'content':     return `Copy: premium, locally-proud microcopy set.`;
     case 'auth':        return `Auth: phone + password, OTP, sessions.`;
     case 'frontend':    return `Screens built: browse, cart, checkout, track. (applies brand tokens)`;
+    case 'build':       return `<!doctype html><html><head><meta charset="utf-8"><title>${brief}</title>
+<style>body{margin:0;font-family:system-ui;background:#0B0E14;color:#EAEDF5}
+.hero{min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem}
+h1{font-size:clamp(2rem,6vw,4rem);background:linear-gradient(90deg,#7C7AFF,#36B37E);-webkit-background-clip:text;color:transparent}</style></head>
+<body><div class="hero"><div><h1>${brief}</h1><p>Generated offline by Relay (stub). Set MINIMAX_API_KEY for the real build.</p></div></div></body></html>`;
     case 'integration': return `Integration: payments + maps wired; deploy config ready.`;
-    case 'qa':          return `QA harness ran build + smoke tests. Verdict: PASS.`;
+    case 'qa':          return `QA: no blocking gaps noted.`;
     default:            return `[${department}] completed for: ${brief}`;
   }
 }
