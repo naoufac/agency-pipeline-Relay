@@ -4,6 +4,13 @@ A running record of shipped advancements. Every entry is backed by a **determini
 
 ## 2026-06-27
 
+### Deterministic render engine + cleanup ✅
+The LLM no longer writes HTML — it picks copy, 2 brand colours, and a section list; a deterministic engine builds the page.
+- **What:** the `build` agent now emits a JSON **spec** (brand tokens + an ordered list of sections — hero/features/split/gallery/cta/form). `src/render.ts` `renderPage` turns that spec into the full self-contained page from hand-built **vetted components** (`src/components.ts`), so nav/spacing/fonts and **WCAG contrast** are correct **by construction** (the palette is derived deterministically from the 2 brand colours; the nav is a CSS-only hamburger that can't overflow). The model only chooses copy + colours + which sections. `src/media.ts` fills the `<img data-q>` slots with real **Pexels** photos served locally. The build still terminates in the unchanged `site_renders` gate.
+- **One engine, four layers:** this single render contract serves the **website**, the **editable CMS** (`src/cms.ts` instruments + re-overlays edits onto the page deterministically), the **full-stack + database** path (a `form` section posts to Postgres `site_submissions` → surfaced in the **Data** tab), and **visual QA**.
+- **Removed entirely:** the old Tailwind/excellence layer is **gone** — deleted `src/excellence.ts`, the ~120 MB `tools/tailwindcss` binary, `tools/setup.sh`, the `package.json` `postinstall`, and the `relay.service` `ExecStartPre`. `cms.shipHtml` is simplified to just strip the edit ids (`stripEditAttrs`). The whole "fresh clone ships un-styled because the binary is missing" failure mode no longer exists.
+- **Visible in-product:** the live `/#/docs` **System** page now shows this render-engine architecture.
+
 ### Roadmap 09 — Visual self-QA ✅ + mobile nav fix
 Relay now *looks at its own work* and reports problems.
 - **What:** after every build (and on demand via the QA tab), Relay screenshots each page at **phone (390px) + desktop (1280px)**, sends each to a **vision model (Gemini 2.5-flash)** that reports concrete, visible problems (broken/overflowing nav, truncation, low contrast, placeholder text, weak hierarchy) and a 1–10 score. Stored per page/viewport in `qa_reviews`, surfaced in a new **QA tab** (screenshot + score + issues) with a "Re-run review" button. `src/vision.ts` + `src/qa.ts`; `/api/qa` + `/api/qa/run`; auto-runs from `runLoop` on completion.

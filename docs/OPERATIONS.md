@@ -30,7 +30,7 @@ pgrep -af 'tunnel run anouf-chat' || pgrep -af cloudflared
 
 ## 1. What Relay is (one paragraph)
 
-A brief comes in via `POST /api/run`; an LLM planner (`src/planner.ts`) explodes it into a DAG of tasks stored in Postgres; a scheduler (`src/runner.ts` `runLoop`) claims ready tasks (`FOR UPDATE SKIP LOCKED` + lease reclaim, so it is restart-safe), each task is one MiniMax LLM call (`src/agents.ts`), every output passes a **deterministic verify gate** (`src/verify.ts` — zero-trust), and "build" tasks write a real self-contained HTML page to `sites/<projectId>/<slug>.html` after `applyExcellence()` (`src/excellence.ts`) compiles scoped Tailwind + inlines fonts. The HTTP server (`src/server.ts`) serves the dashboard (`web/`), the JSON API, and the produced sites at `/sites/<id>/`. **Postgres is the single source of truth**; the runner holds no state, so it can crash and resume.
+A brief comes in via `POST /api/run`; an LLM planner (`src/planner.ts`) explodes it into a DAG of tasks stored in Postgres; a scheduler (`src/runner.ts` `runLoop`) claims ready tasks (`FOR UPDATE SKIP LOCKED` + lease reclaim, so it is restart-safe), each task is one MiniMax LLM call (`src/agents.ts`), every output passes a **deterministic verify gate** (`src/verify.ts` — zero-trust). For "build" tasks the LLM no longer writes HTML at all: it emits a JSON **spec** (brand tokens + an ordered list of sections — hero/features/split/gallery/cta/form), and a deterministic renderer (`src/render.ts` `renderPage`) composes the full self-contained page from hand-built vetted components (`src/components.ts`) — deriving a WCAG-safe palette from the 2 brand colours so contrast is guaranteed, and a CSS-only hamburger nav that is responsive by construction. `src/media.ts` `processMedia` then fills the `<img data-q>` slots with real Pexels photos served locally; the runner instruments the page for the CMS, writes it to `sites/<projectId>/<slug>.html`, and verifies it via `site_renders`. The HTTP server (`src/server.ts`) serves the dashboard (`web/`), the JSON API, and the produced sites at `/sites/<id>/`. **Postgres is the single source of truth**; the runner holds no state, so it can crash and resume.
 
 ---
 
@@ -83,11 +83,10 @@ All 8 hostnames resolve to Cloudflare (orange-cloud `104.21.6.206` / `172.67.135
 | Thing | Location |
 |---|---|
 | App code | `/root/agency-pipeline/` (git repo; cwd for the server) |
-| Source | `src/` (`server.ts`, `planner.ts`, `runner.ts`, `verify.ts`, `agents.ts`, `excellence.ts`, `kpi.ts`, `db.ts`) |
+| Source | `src/` (`server.ts`, `planner.ts`, `runner.ts`, `verify.ts`, `agents.ts`, `render.ts`, `components.ts`, `media.ts`, `cms.ts`, `qa.ts`, `kpi.ts`, `db.ts`) |
 | Frontend | `web/` (`index.html`, `app.js`, `styles.css`) |
 | DB schema (DDL) | `db/schema.sql` — **destructive**: starts with `DROP TABLE … CASCADE`. See [§4.4](#44-database-schema). |
 | Produced websites (artifacts) | `/root/agency-pipeline/sites/<projectId>/` — `index.html`, other `<slug>.html`, `preview.png` (board thumbnail). **Gitignored, host-local, no backup.** |
-| Tailwind binary (120 MB) | `/root/agency-pipeline/tools/tailwindcss` — **gitignored**; fetched by `tools/setup.sh`. |
 | Inline fonts | `src/fonts.ts` (base64 WOFF2, committed) |
 | Env example | `.env.example` |
 | Tunnel config | `/root/.cloudflared/config.yml` (+ creds `269600e7-….json`, `cert.pem`) |
@@ -116,7 +115,7 @@ All 8 hostnames resolve to Cloudflare (orange-cloud `104.21.6.206` / `172.67.135
 
 ### 4.1 Relay HTTP server
 
-**Prereqs (once per box / fresh clone):** `npm install`, then `bash tools/setup.sh` to fetch the Tailwind binary (see [§7.7](#77-tailwind-binary-missing-on-a-fresh-clone)), `chromium-browser` on PATH (verified: `/usr/bin/chromium-browser`), and a reachable Postgres.
+**Prereqs (once per box / fresh clone):** `npm install`, `chromium-browser` on PATH (verified: `/usr/bin/chromium-browser`), and a reachable Postgres. That's the full set — there is no binary to vendor and no setup script to run (the deterministic render engine ships complete pages by construction).
 
 **Start (manual, current method):**
 ```bash
@@ -206,7 +205,7 @@ Do **not** edit `/etc/caddy/Caddyfile`. If `systemctl start caddy` reports a bin
 - Produced sites: `/root/agency-pipeline/sites/<projectId>/index.html` (+ other pages + `preview.png`).
 - Served at `https://board.naples.agency/sites/<projectId>/` (and `http://127.0.0.1:8787/sites/<id>/`).
 - The home-page screenshot `preview.png` is the board thumbnail (written by the index build's `site_renders` check, `verify.ts`).
-- ⚠️ `sites/` is **gitignored and host-local with no backup** — a host migration loses every shipped site. The HTML *source* also lives in Postgres (`task_outputs`), so the canonical content is recoverable from the DB, but the rendered/excellence-applied files on disk are not backed up. See [§8 G8](#8-durability-gaps--their-fixes).
+- ⚠️ `sites/` is **gitignored and host-local with no backup** — a host migration loses every shipped site. The HTML *source* also lives in Postgres (`task_outputs` / `page_snapshots`), so the canonical content is recoverable from the DB, but the rendered files on disk are not backed up. See [§8 G8](#8-durability-gaps--their-fixes).
 
 List recent projects and their on-disk sites:
 ```bash
@@ -302,14 +301,9 @@ docker exec -it ap-pg psql -U postgres -d agency -c \
 ```
 Then restart Relay (or it will pick them up on its next resume) and watch `run_events`. If MiniMax was the cause, fix the key/quota first.
 
-### 7.5 Broken images / un-styled "1998-look" output
+### 7.5 Broken images
 
-Two failure modes:
-1. **External/placeholder images** — handled deterministically: `runner.ts` strips external `<img src=http…>`, `url(http…)`, and `placeholder` assets before writing; `verify.ts` `site_renders` rejects any page that still references `https?:` assets, `app.css`, or `via.placeholder`. If a site shows broken images, check it isn't an **old** artifact from before this sanitizer — re-run the build.
-2. **Un-styled raw HTML (no Tailwind)** — `applyExcellence()` **silently no-ops and returns the page unchanged if `tools/tailwindcss` is missing** (`excellence.ts` line 26). The build still PASSES `site_renders` but ships ugly un-styled HTML. **Always confirm the binary exists** → [§7.7](#77-tailwind-binary-missing-on-a-fresh-clone). Verify a sample shipped page actually contains a compiled `<style>` block:
-   ```bash
-   grep -c '<style>' /root/agency-pipeline/sites/<ID>/index.html   # expect >=1
-   ```
+**External/placeholder images** — handled deterministically: `runner.ts`/`media.ts` strip external `<img src=http…>`, `url(http…)`, and `placeholder` assets before writing; `media.ts` `processMedia` fills `<img data-q>` slots with locally-served Pexels photos; `verify.ts` `site_renders` rejects any page that still references `https?:` assets, `app.css`, or `via.placeholder`. If a site shows broken images, check it isn't an **old** artifact from before this sanitizer — re-run the build. (Styling/nav/contrast can no longer be wrong: the deterministic renderer composes every page from vetted components with an inlined design-system `<style>` and a WCAG-safe palette, so the old "un-styled 1998-look" failure mode does not exist.)
 
 ### 7.6 Screenshots blank / `site_renders` failing for everything
 
@@ -320,17 +314,7 @@ chromium-browser --headless=new --no-sandbox --screenshot=/tmp/t.png --window-si
 ```
 If chromium is gone, install it; the verify call already passes `--no-sandbox --disable-gpu --disable-dev-shm-usage` for container environments.
 
-### 7.7 Tailwind binary missing on a fresh clone
-
-`tools/tailwindcss` (≈120 MB) is **gitignored** and absent after `git clone`. `applyExcellence()` silently no-ops without it (ships un-styled pages that still pass the gate).
-```bash
-ls -la /root/agency-pipeline/tools/tailwindcss     # if missing:
-bash /root/agency-pipeline/tools/setup.sh          # downloads v4.1.5 linux-x64, chmod +x
-/root/agency-pipeline/tools/tailwindcss --help | head -1   # confirm it runs
-```
-(Durability gap G3: this is not wired into install/boot and has no checksum/fallback.)
-
-### 7.8 Stub mode (fake sites that pass every gate)
+### 7.7 Stub mode (fake sites that pass every gate)
 
 If shipped sites all say *"Generated offline by Relay (stub)"*, `MINIMAX_API_KEY` was not in Relay's env at start (§3.1). Fix the env and restart Relay. Stub mode is **silent** — it does not error — so this is easy to miss; always run the key-present check after a restart.
 
@@ -344,7 +328,7 @@ The whole stack is fragile to reboot/crash: only **tailscaled** and the two dock
 |---|---|---|---|
 | **G1** | **cloudflared `anouf-chat` is a manual process (PPid=1), no systemd, no restart.** | Reboot/crash takes **all 8 `*.naples.agency`** offline permanently until a human restarts it. | Install `cloudflared.service` (`Restart=always`, references `--config /root/.cloudflared/config.yml`, **not** `service install`'s token mode). See [§10](#10-safe-migration-plan-cloudflared--durable-proxy). |
 | **G2** | **Relay is a manual `npm exec tsx src/server.ts` (PPid=1), no supervision.** Any uncaught crash/OOM/reboot kills the HTTP server + scheduler + boot-resume; in-flight `runLoop` promises die silently. | board/api/email go down and stay down. | Create `/etc/systemd/system/relay.service` (`Restart=always`, `RestartSec=2`, `WorkingDirectory=/root/agency-pipeline`, `ExecStart=/usr/bin/npm exec tsx src/server.ts`, `EnvironmentFile=/root/agency-pipeline/.env`, `After=docker.service`); `systemctl enable --now relay`. Add `process.on('unhandledRejection'/'uncaughtException')` handlers that log and exit so systemd restarts cleanly. |
-| **G3** | **Tailwind binary** (`tools/tailwindcss`, 120 MB, gitignored) absent on fresh clone; `applyExcellence` silently no-ops → ships un-styled HTML that still passes the gate. No checksum, single GitHub URL, no fallback. | Builds "pass" but look like 1998. | Wire `tools/setup.sh` into an npm `postinstall` or a systemd `ExecStartPre`; verify a sha256; implement the Open-Props inline fallback (referenced in `docs/RELAY-STACK-DECISION.md`) so a page is never un-styled; emit a loud `run_event`/log when it falls back instead of silently returning input. |
+| ~~**G3**~~ | ~~Tailwind binary absent on a fresh clone → un-styled pages that still pass the gate.~~ | — | **Resolved (2026-06-27)** — the Tailwind dependency was removed entirely by the deterministic render engine (`src/render.ts` + `src/components.ts`). There is no binary to vendor, no `setup.sh`, and no silent-no-op excellence step; pages are styled by construction, so this gap can no longer occur. |
 | **G4** | **No idempotent DB migrations.** `db/schema.sql` starts with `DROP TABLE … CASCADE`; `server.ts` never applies it; the only creators (`run.ts`/`demo.ts`) wipe all data. | Fresh DB → server 500s on every query; "fixing" it via run.ts destroys existing projects. | Split schema into `CREATE TABLE IF NOT EXISTS` / `CREATE OR REPLACE`, run it from `server.ts` boot before `listen()`, add a numbered `schema_migrations` table, gate destructive reset behind `RESET=1` only. |
 | **G5** | **Scheduler concurrency:** `claim()` selects ready tasks with **no `project_id` filter**, but boot-resume starts one `runLoop` per unfinished project and every `/api/run` starts another — all with the same hardcoded `runnerId='runner-1'`. N loops compete over one global pool; pool `max=8` (db.ts) vs `cap=4`/loop means 3+ concurrent projects exhaust connections and stall. | Slowdowns / stalls under concurrency; cross-project task claims. | Scope `claim()`/`reconcile()` by `project_id`; give each loop a unique `runnerId` (e.g. `${hostname}-${pid}-${projectId}`); or run ONE global scheduler; size the pg pool ≥ sum of loop caps; de-dupe boot-resume. |
 | **G6** | **Secret/env not validated; no `.env`, no dotenv loader.** Missing `MINIMAX_API_KEY` → silent stub mode that still passes every gate. `DATABASE_URL` defaults to a hardcoded dev DSN. | A restart from the wrong shell ships placeholder garbage with no error. | Validate required env at boot (fail loud + exit if key missing in prod, or badge `params.agent='stub'` in UI/KPIs). Load `.env` explicitly (dotenv or systemd `EnvironmentFile`). Remove the hardcoded password default. |
@@ -353,7 +337,7 @@ The whole stack is fragile to reboot/crash: only **tailscaled** and the two dock
 | **G9** | **ephemeris backend** (`python3 :8717`) and the dormant naples upstreams **dash/gab44/fleet\*** have no supervisor. | Even with a durable tunnel, these return 502/404 after reboot. | Each needs its own `Restart=always` systemd unit. **These are other projects — coordinate with their owners before authoring/enabling; out of scope for Relay ops.** |
 | **G10** | **Single point of failure:** all naples hostnames ride one cloudflared tunnel + Cloudflare edge (the "flaky" part). No Cloudflare API token on the box, so DNS changes are manual-dashboard-only. | Residual risk even after G1. | Accepted: keep custom domains via the durable tunnel; **Tailscale Funnel** (`anouf.tailbb043c.ts.net`) remains a redundant, systemd-supervised path to Relay. |
 
-**Priority order to make the stack "lasting":** G2 (Relay) and G1 (tunnel) first — they restore the public service automatically on reboot. Then G6 (so restarts don't silently ship stubs), G3 (so builds aren't un-styled), G7 (ephemeris durable), then G4/G5/G8 hardening. G9 with the other teams.
+**Priority order to make the stack "lasting":** G2 (Relay) and G1 (tunnel) first — they restore the public service automatically on reboot. Then G6 (so restarts don't silently ship stubs), G7 (ephemeris durable), then G4/G5/G8 hardening. G9 with the other teams. (G3 is resolved — the Tailwind dependency was removed.)
 
 ---
 

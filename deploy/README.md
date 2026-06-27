@@ -6,7 +6,7 @@ They are exact copies of what is installed in `/etc/systemd/system/`. Full runbo
 ## Units
 - **`systemd/relay.service`** — the Relay HTTP server backing `board/api/email.naples.agency`.
   Reads `/root/agency-pipeline/.env` (gitignored; holds `MINIMAX_API_KEY` + `DATABASE_URL`).
-  `ExecStartPre` vendors the Tailwind binary if missing so a fresh deploy never ships un-styled. `Restart=always`.
+  `Restart=always`, so a crash or reboot brings it straight back. (No build-time vendoring step — pages are built by the deterministic component renderer, so `npm install` is the only prerequisite.)
 - **`systemd/anouf-named-tunnel.service`** — cloudflared named tunnel `anouf-chat`
   (UUID `269600e7-db71-4e84-99ea-fae3019fea23`) serving every `*.naples.agency` hostname. `Restart=always`.
 - Postgres is the `ap-pg` Docker container, set to `--restart unless-stopped` (survives reboot).

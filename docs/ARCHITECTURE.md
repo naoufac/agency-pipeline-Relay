@@ -37,11 +37,12 @@ word), and the result is a self-contained, modern, multi-page site served at `/s
                          │               └─────────┬────────────────┘    │
                          │                   pass? │ yes                  │
                          │                         ▼                      │
-                         │   excellence.ts  ┌──────────────────┐         │
-                         │   (build tasks)  │ Tailwind compile │         │
-                         │                  │ + inline fonts   │         │
-                         │                  └────────┬─────────┘         │
-                         │                           ▼                   │
+                         │  render.ts +     ┌──────────────────────────┐  │
+                         │  components.ts   │ spec → vetted components │  │
+                         │  (build tasks)   │ → page (media.ts fills   │  │
+                         │                  │  Pexels images)          │  │
+                         │                  └────────────┬─────────────┘  │
+                         │                               ▼               │
                          │             sites/<project_id>/<slug>.html    │
                          └───────────────────────────┬──────────────────┘
                                                      ▼
@@ -76,7 +77,8 @@ browser render — says so (see §5).
    `runAgent(department, ctx)` (`agents.ts`).
 6. **Persist output.** The raw text goes to `task_outputs` (the previous current row is
    demoted, the new one is `is_current=true`). If the task has an `artifact` (build pages), the
-   output is sanitized, run through the **excellence layer**, and written to
+   agent's output is parsed as a **spec** and rendered into HTML by the deterministic component
+   renderer (real Pexels media filled in), instrumented for the CMS, and written to
    `sites/<project_id>/<artifact>` on disk.
 7. **Verify (the gate).** The task goes `verifying`, then `verify(pool, task, content)` runs the
    task's deterministic rule. **Pass →** `done` (which fires the unblock trigger, promoting
@@ -341,49 +343,101 @@ deterministic **stubs** keep the whole engine runnable end-to-end offline.
 - The only thing that differs between departments is a **one-line role** (`ROLE[department]`).
   `branding` must emit a JSON token object with WCAG-passing `text`/`bg`; `content`/`copywriting`
   must emit a single JSON object; `database` emits runnable Postgres DDL; etc.
-- The **`build` role is a full Tailwind design contract**: output one complete self-contained
-  HTML document for *this* page, with a shared sticky nav linking all pages, styled with
-  **Tailwind utility classes only** (no `<style>` block — the excellence layer compiles the CSS),
-  brand palette applied as Tailwind arbitrary values (`bg-[#0B6E4F]`), a high-2024-bar layout
-  (glass nav, large display headings, gradient accents, generous rhythm, real footer), and
-  **no external `<img>`** (visuals via CSS gradients/inline SVG).
+- The **`build` role writes no HTML or CSS at all** — it emits a JSON **spec** for *this* page and
+  nothing else. The contract is `{"brand":{"name","cta","tokens":{primary,bg,accent,font_display,
+  font_body}},"sections":[ …3–6 sections… ]}`. The model's job is the *decisions*: the brand name
+  and nav CTA, two brand colours (`primary` + `bg`, chosen for strong mutual contrast), a display
+  and body font (each ∈ {Grotesk, Inter, Fraunces}), and an ordered list of **sections** —
+  `hero` (every page opens with one), `features`, `split`, `gallery`, `cta`, `form` — each carrying
+  real, brief-specific copy (never bracketed placeholders or lorem ipsum). Image fields are
+  **2–4-word stock-photo search terms, not URLs**. The renderer — **not the model** — owns layout,
+  CSS, the responsive nav, spacing, fonts, and contrast (see §8). The build agent gets a larger
+  token budget (8000) since it is emitting structured copy for a whole page.
 - `buildContext` (`runner.ts`) assembles the `Ctx`: the brief, each upstream task's current
   output, optional retry feedback, the page set (from `params.pages`), and — for a build task —
   `self = {title, slug}` so the agent knows which page it's producing.
 
 ---
 
-## 8. The excellence layer (real design system, self-contained output)
+## 8. The deterministic render engine (vetted components, guaranteed-correct output)
 
-Only **build** tasks (those with an artifact) go through it. `processTask` first sanitizes the
-raw HTML, then calls `applyExcellence(body)` (`excellence.ts`), then writes the file.
+This is the core of how Relay produces shippable pages, and the central design decision of the
+system: **separate DECISION from CONSTRUCTION.** The model decides (copy, two brand colours, fonts,
+which sections in which order); the *system* constructs (layout, CSS, nav, spacing, contrast) from
+hand-built, vetted parts. Because the model never touches structure or styling, the things that
+make AI-built sites look broken — clashing colours, unreadable text, a nav that doesn't collapse on
+mobile, random spacing — **cannot be wrong by construction.** Nothing magic, just good logic.
 
-**Sanitizer (deterministic safety net, in `runner.ts`)** — a website must never ship broken
-external/placeholder images, so before excellence runs it:
-- strips Markdown code fences and slices to the first `<!doctype/<html`,
-- removes `<img src=http(s)…>` and any `<img …placeholder…>`,
-- replaces `url(http(s)…)` and `url(…placeholder…)` with a tasteful local gradient.
+Only **build** tasks (those with an artifact) go through it. In `processTask` the flow is:
+`firstSpec(content)` parses the agent's spec → `renderPage(spec)` → `processMedia` → `cms.instrument`
+→ write `cms.shipHtml(snapshot)` to disk.
 
-This means even if the agent ignores instructions, the artifact handed to the verify gate is
-already free of the asset references `site_renders` would reject.
+**`firstSpec(content)` (in `runner.ts`)** strips any Markdown fences and parses the *first*
+brace-balanced JSON object as the page spec. If it isn't a valid spec — no object, or fewer than
+2 sections — it **throws**, which routes the task back through the normal retry-with-feedback path.
+So a malformed model response is never written to disk; it just earns another attempt.
 
-**`applyExcellence(html)`** turns the page into one modern, self-contained file:
-1. Writes the page to a temp dir and compiles **Tailwind v4** with the **vendored standalone
-   binary** at `tools/tailwindcss` (GITIGNORED, ~120MB).
-2. Critically scopes the compile: the input CSS is
-   `@import "tailwindcss" source(none);  @source "<abs path to this page>";`. `source(none)`
-   disables Tailwind's broad auto-scan (which would crawl the whole tree, ~1 min); `@source`
-   limits scanning to **just this page**, so the compile is ~150ms and emits only the utilities
-   the page actually uses.
-3. Appends a base layer: **real base64 WOFF2 fonts** from `src/fonts.ts` (`FONT_FACES`),
-   smooth scroll, antialiasing, and display/serif-display heading families.
-4. Strips the license comment (it contains a URL that would trip the quality gate), drops any
-   stylesheet `<link>`/`app.css` the agent added, and **inlines the compiled `<style>` before
-   `</head>`** (falling back to before `<body>`/prepend).
+**`renderPage(spec, {pages, slug, title, projectId})` (`src/render.ts`)** assembles the full HTML
+document from the vetted components in `components.ts`. Two things it does are worth calling out:
 
-It **never throws** — on any failure it returns the input unchanged, so the excellence step can
-never break a build. The output is a single HTML file with no external dependencies, which is
-exactly what `site_renders` demands.
+1. **Derived, guaranteed-AA palette.** The model only supplies two colours (`bg` + `primary`).
+   `renderPage` *computes* the rest of the palette from them using relative-luminance + contrast
+   math: `text` (and `on-primary`) is whichever of near-white/near-black has the higher contrast
+   on its background, and `muted`/`line`/`surface` are luminance-mixes off that pair. A model-supplied
+   `text`/`accent` is honoured **only if** it independently clears the contrast threshold; otherwise
+   it's overridden. The result: **AA contrast (≥ 4.5:1 for body text) is guaranteed no matter which
+   two colours the model picked** — the model literally cannot produce unreadable text. Fonts are
+   likewise clamped to {Grotesk, Inter, Fraunces}.
+2. **Self-contained, marked output.** The page is one HTML file with the design-system CSS and
+   base64 fonts inlined — no external assets — and carries the marker `<!--relay:rendered-->` in its
+   `<head>`. `renderPage` also injects a tiny `relaySubmit()` script so any `form` section POSTs to
+   `/api/site/<projectId>/submit` (the full-stack layer below).
+
+**`src/components.ts` — the design system (the "skeleton").** Structure is composed from these
+vetted parts, so nav / spacing / fonts / contrast are correct *by construction*:
+- `DS_CSS` — the token-driven base CSS, including the inlined `FONT_FACES` (base64 WOFF2 from
+  `src/fonts.ts`) and a **CSS-only hamburger nav**: a hidden checkbox + label drive the menu via
+  `.nav-toggle:checked ~ .nav-links{display:flex}`, and a `@media(max-width:760px)` block collapses
+  the links into a dropdown. It is **responsive with zero JavaScript** — the nav cannot fail to
+  collapse on mobile because nothing dynamic is involved.
+- `navBar()` / `footer()` — the shared chrome, linking every page (current page gets `aria-current`).
+- `SECTIONS` — the record of section renderers (`hero`, `features`, `split`, `gallery`, `cta`,
+  `form`), each a pure `content → perfect HTML` function. Images are emitted as
+  `<img data-q="search terms">` placeholders for the media step to fill.
+
+**`processMedia(html, dirUrl)` (`src/media.ts`)** replaces every `<img data-q="…">` with a real,
+licensed **Pexels** photo: it searches Pexels for each query, **downloads** the file into the
+project's `assets/` dir, and rewrites the tag to a **local** `src`. So the page ships with real
+photography served from its own directory — **no hotlinks, no placeholders** — which is exactly what
+`site_renders` (a file:// screenshot) needs to see. With no `PEXELS_API_KEY`, the placeholders are
+simply dropped (text-only site) rather than left broken.
+
+**`cms.instrument` / `cms.shipHtml`.** After media, `cms.instrument` stamps stable `data-edit` ids
+on the text leaves (the editable source the CMS freezes — see the layers note in §8.1), and
+`cms.shipHtml` is just `stripEditAttrs(html)` — it drops those markers before writing the live file.
+The page is *already* a complete, self-contained document, so there is nothing else to finalize.
+
+**Same gate, zero new trust surface.** The rendered file then passes the **identical** `site_renders`
+gate as before (§5): ≥ 400 bytes, looks like HTML, no external/placeholder assets, and a real
+headless-Chromium screenshot that is non-blank. The build still *terminates* in a real browser
+render — we changed *how* the HTML is produced, not the proof that it's real.
+
+### 8.1 One engine, several layers
+
+The same render engine is the foundation for everything Relay ships; the **brief decides** which
+layers apply:
+
+- **Website** — the deterministically rendered, self-contained multi-page site (this section).
+- **Editable CMS** (`src/cms.ts`) — the rendered page is frozen as a snapshot in Postgres with stable
+  `data-edit` ids; an edit is a **pure string overlay** on that snapshot (no LLM, so the design can
+  never drift), re-published through the **same `site_renders` gate** to a `.tmp` and atomically
+  renamed over the live file only on pass.
+- **Full-stack + database** — a `form` section is a real form: it POSTs to
+  `/api/site/<id>/submit`, which stores the submission in Postgres (`site_submissions`), surfaced in
+  the project's Data tab.
+- **Visual QA** (`src/qa.ts` + `src/vision.ts`) — on project completion, `reviewSite` screenshots the
+  pages and has a vision model score them, recording the results in `qa_reviews` (fire-and-forget, so
+  it never blocks shipping).
 
 ---
 
@@ -419,8 +473,10 @@ A bare Node `http` server (no framework) on `0.0.0.0:${PORT||8787}`. It serves:
 | HTTP port | `PORT` env, default `8787` (`src/server.ts`) |
 | Schema / DDL | `db/schema.sql` (re-runnable; applied via `db.ts → applySchema`) |
 | Produced sites | `sites/<projectId>/` on disk (GITIGNORED) |
-| Tailwind binary | `tools/tailwindcss` (vendored, GITIGNORED, ~120MB) |
-| Inline fonts | `src/fonts.ts` (base64 WOFF2 `FONT_FACES`) |
+| Render engine | `src/render.ts` (spec → HTML; derives the WCAG-safe palette) |
+| Components | `src/components.ts` (`DS_CSS` + section renderers + CSS-only hamburger nav) |
+| Real media | `src/media.ts` (`processMedia`: Pexels photos downloaded locally) |
+| Inline fonts | `src/fonts.ts` (base64 WOFF2 `FONT_FACES`, inlined by `components.ts`) |
 | Web app | `web/` (`index.html`, `app.js` hash-router, `styles.css`) |
 
 Run targets (`package.json`): `npm run serve` (the live app), `npm run run -- "<brief>"`

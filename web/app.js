@@ -434,8 +434,8 @@ function review(){
   const F = [
     { g:'done', sev:'critical', t:'Unsupervised processes', v:'cloudflared and the Relay server ran as hand-started processes — a crash or reboot took every naples.agency hostname offline until someone restarted them by hand.', fix:'Both now run under systemd with Restart=always (enabled). Crash-tested: SIGKILL → respawn in 2–3s → board back to 200.' },
     { g:'done', sev:'high', t:'Secret lived only in memory', v:'MINIMAX_API_KEY and DATABASE_URL existed only inside the running process — there was no .env on disk, so any restart would boot Relay with no key.', fix:'Captured to a gitignored .env (mode 600) and loaded via the systemd EnvironmentFile.' },
-    { g:'done', sev:'high', t:'Fresh clone shipped un-styled', v:'The 120 MB Tailwind binary is gitignored; on a clean deploy the excellence step silently no-op’d and shipped 1998-look HTML that still passed the gate.', fix:'setup.sh is now idempotent + validates the binary; npm postinstall and the service’s ExecStartPre vendor it automatically.' },
-    { g:'done', sev:'high', t:'Silent failures (shipping a lie)', v:'On any excellence error the build silently returned raw HTML; an unset key silently switched to stub sites. Both were invisible — the opposite of “never lie”.', fix:'excellence.ts now logs loudly on missing binary / empty CSS / compile failure; server.ts prints a boot banner when the key is unset (stub mode).' },
+    { g:'done', sev:'high', t:'Build quality left to the model', v:'The original build asked the LLM to write raw HTML/CSS and a nav per page — so structure, spacing and the mobile menu varied site to site, and a clean deploy leaned on a gitignored 120 MB Tailwind binary that could silently no-op.', fix:'Replaced by a deterministic render engine: the model emits a JSON spec, vetted components build the page. Nav, fonts, spacing and WCAG contrast are correct by construction. The Tailwind binary and the entire excellence step were removed.' },
+    { g:'done', sev:'high', t:'Silent failures (shipping a lie)', v:'The build could silently return un-styled HTML on an error, and an unset API key silently switched to stub sites — both invisible, the opposite of “never lie”.', fix:'The deterministic renderer removed the silent-styling failure mode entirely (pages are complete by construction); server.ts prints a loud boot banner when the key is unset (stub mode).' },
     { g:'done', sev:'medium', t:'Postgres didn’t survive reboot', v:'The ap-pg container had restart policy “no”, so a host reboot would lose the database.', fix:'Set to unless-stopped (verified).' },
     { g:'done', sev:'medium', t:'Nothing was documented', v:'No runbook, no architecture doc, no agent guide — the whole system lived only in chat history.', fix:'Shipped README, ARCHITECTURE, an OPERATIONS runbook, an AGENTS guide, a HARDENING backlog and deploy/ unit files — plus this page.' },
     { g:'done', sev:'critical', t:'No database backups', v:'21 projects / 190 tasks / 203 outputs lived in one Postgres volume with no dump — if that disk died, every user’s work was gone. The box’s “crown-jewels” backup did not cover this DB.', fix:'Daily restorable pg_dump (every 6h, 14 kept). Verified: a 280 KB dump with real rows, gzip-integrity checked. First dump done.' },
@@ -446,7 +446,7 @@ function review(){
     { g:'defer', sev:'high', t:'Destructive schema bootstrap', v:'db/schema.sql opens with unconditional DROP TABLE … CASCADE and the server never applies it on boot — a fresh DB 500s, and run.ts/demo.ts drop already-shipped work.', fix:'Move to CREATE … IF NOT EXISTS, apply at boot before listen(), gate the reset behind RESET=1, add a numbered migrations/ dir.' },
     { g:'defer', sev:'high', t:'Stub mode still serves', v:'The new boot banner warns, but with no key Relay still serves stub sites that pass every gate.', fix:'Hard-exit in production, or badge the project as “stub” in the UI + KPI so it can never be mistaken for real work.' },
     { g:'defer', sev:'medium', t:'Scheduler pool exhaustion', v:'A global claim() + one runLoop per project, all tagged runnerId=runner-1; three concurrent projects can exhaust the Postgres pool (max 8).', fix:'Partly mitigated now — /api/run caps concurrent projects at 6. Still to do: scope claim/reconcile by project, unique runnerId per loop, size the pool to the loop count.' },
-    { g:'defer', sev:'medium', t:'Lease / reclaim race', v:'The 240 s task lease can be shorter than a slow render + Tailwind compile + LLM call, so a live task gets re-claimed → two writers hit the same artifact.', fix:'Make terminal writes conditional on claimed_by, heartbeat-extend the lease, only resurrect provably-dead owners.' },
+    { g:'defer', sev:'medium', t:'Lease / reclaim race', v:'The 240 s task lease can be shorter than a slow render + media download + LLM call, so a live task gets re-claimed → two writers hit the same artifact.', fix:'Make terminal writes conditional on claimed_by, heartbeat-extend the lease, only resurrect provably-dead owners.' },
     { g:'defer', sev:'medium', t:'No retry backoff', v:'Each task burns three full attempts with no backoff — a MiniMax 429 or outage gets hammered instead of paused.', fix:'Exponential backoff, fail-fast on identical repeated failures, a per-project circuit breaker.' },
     { g:'defer', sev:'low', t:'Shipped sites are ephemeral', v:'sites/ is gitignored and QA can overwrite the preview thumbnail; output is lost on a host migration.', fix:'Persist final verified HTML in Postgres / object storage; write QA’s screenshot to a distinct path.' },
     { g:'defer', sev:'low', t:'Frontend polish', v:'Polling cadence, vis-network loaded from a CDN without SRI, missing API-down states, a few accessibility gaps.', fix:'UX hardening — real but not stack-survival; scheduled separately.' },
@@ -487,45 +487,72 @@ function review(){
   </div>`;
 }
 
-/* ---------------- docs · visual system map ---------------- */
+/* ---------------- system · the production line, made visible ---------------- */
 function docsPage(){
+  // the production line: brief -> reliable product. The LLM DECIDES; the system BUILDS.
   const stages = [
-    { n:'1', t:'Brief', d:'You describe the site in a sentence.' },
-    { n:'2', t:'Plan', d:'An LLM explodes it into a dependency graph of tasks — one build per page, shared nav.' },
-    { n:'3', t:'Board', d:'The DAG lives in Postgres; an SQL trigger unblocks a task the moment its deps pass.' },
-    { n:'4', t:'Run', d:'A restart-safe runner claims ready tasks (FOR UPDATE SKIP LOCKED); each agent = one API call.' },
-    { n:'5', t:'Verify', d:'Every output passes a deterministic gate — never the agent’s word. Failures retry with feedback.' },
-    { n:'6', t:'Excellence', d:'Tailwind compiled + real fonts inlined, and real Pexels photography downloaded & served locally per page → one self-contained, modern file.' },
-    { n:'7', t:'Ship', d:'A real website served at /sites/:id you can open and share.' },
+    { n:'1', t:'Brief', d:'You describe the product in one sentence — a bakery page, a delivery app, anything.' },
+    { n:'2', t:'Plan', d:'An LLM explodes the brief into a dependency graph of tasks — one build per page, one shared navigation.' },
+    { n:'3', t:'Board', d:'The whole graph lives in Postgres. An SQL trigger unblocks a task the instant its dependencies pass, so the scheduler stays dumb and restart-safe.' },
+    { n:'4', t:'Spec', d:'The build agent never writes HTML. It returns a small JSON spec: the brand (name, two colours, fonts) and an ordered list of sections with the real copy.' },
+    { n:'5', t:'Render', d:'A deterministic renderer assembles the page from hand-built, vetted components. Navigation, spacing, fonts, the responsive menu and WCAG-safe colours are guaranteed by construction — the model cannot break them.' },
+    { n:'6', t:'Media', d:'Real photography is pulled from Pexels, downloaded and served locally — no hotlinks, no grey placeholders.' },
+    { n:'7', t:'Verify', d:'A headless browser proves the page actually renders — non-blank, structural, no external or placeholder assets. Never the agent’s word; a failure retries with the reason.' },
+    { n:'8', t:'Ship', d:'A real, self-contained website at /sites/:id you can open, edit and share.' },
+  ];
+  // the vetted pieces the renderer composes from — the puzzle, not the magic
+  const blocks = [
+    ['hero','A full-bleed opening: eyebrow, headline, subhead, call-to-action and a hero photo.'],
+    ['features','A titled grid of 3–4 value points.'],
+    ['split','Image beside text, reversible — story, product or proof.'],
+    ['gallery','A 4–6 image grid for work, menu or product shots.'],
+    ['cta','A focused band that asks for the one action.'],
+    ['form','A real form whose submissions are stored in the database.'],
+  ];
+  // one engine, many layers — the brief decides which apply. No discrimination.
+  const layers = [
+    { t:'Website', b:'live', d:'A multi-page site with one consistent navigation and brand across every page.' },
+    { t:'Editable CMS', b:'live', d:'Change any copy and republish through the same verified gate — re-checked, no LLM, so the design can’t drift.' },
+    { t:'Full-stack + database', b:'live · v1', d:'A form on the site writes real submissions to Postgres; the owner reads them in the Data tab.' },
+    { t:'Visual QA', b:'live', d:'Every finished site is screenshotted on mobile and desktop and scored by a vision model.' },
   ];
   const infra = [
     { t:'Relay server', d:'systemd · Restart=always', s:'ok' },
-    { t:'Cloudflare tunnel', d:'systemd · Restart=always', s:'ok' },
+    { t:'Cloudflare tunnel', d:'systemd · own dedicated tunnel', s:'ok' },
     { t:'Postgres', d:'Docker · unless-stopped', s:'ok' },
     { t:'DB backups', d:'pg_dump every 6h · 14 kept', s:'ok' },
     { t:'Uptime monitor', d:'5 min · Telegram alerts', s:'ok' },
-    { t:'Dedicated tunnel', d:'systemd · own tunnel · board/api/email', s:'ok' },
     { t:'Real photography', d:'Pexels · downloaded + served locally', s:'ok' },
     { t:'Production email', d:'SMTP · SPF/DKIM/DMARC aligned', s:'ok' },
-    { t:'Editable CMS', d:'edit copy · republish · re-verified', s:'ok' },
+    { t:'Visual QA', d:'vision model · mobile + desktop', s:'ok' },
   ];
   const verify = [
-    ['site_renders','headless Chromium screenshot must be non-blank, structural, no external/placeholder assets'],
-    ['wcag','AA contrast on declared text/bg — always binding on branding'],
-    ['json · json:keys','output must parse and contain the required keys'],
+    ['site_renders','headless Chromium screenshot must be non-blank + structural, with no external or placeholder assets'],
+    ['wcag','AA contrast on text vs background — derived by the renderer, so always binding'],
+    ['json · json:keys','output must parse and carry the required keys'],
     ['sql_applies','the SQL actually runs against Postgres'],
     ['min · contains · nonempty','length + substring floors'],
   ];
   const REPO='https://github.com/naoufac/agency-pipeline/blob/master';
   app.innerHTML = `<div class="container section">
-    <span class="eyebrow">● how it works</span>
-    <h1 style="margin-top:14px">Relay, end to end</h1>
-    <p class="lead" style="margin-top:14px">A brief becomes a real, verified website through a dependency graph of AI department-agents — every step proven before the next begins.</p>
+    <span class="eyebrow">● the system</span>
+    <h1 style="margin-top:14px">One prompt in, a reliable product out.</h1>
+    <p class="lead" style="margin-top:14px">Relay is a production line, not a magic trick. A brief becomes a real, verified website — or a full-stack app with a database — through a graph of steps where each one proves itself before the next begins. Nothing magic: just very good logic and a lot of attention to detail.</p>
 
-    <h2 class="rv-h">The pipeline</h2>
+    <h2 class="rv-h">The production line</h2>
     <div class="pipe">${stages.map((s,i)=>`<div class="pipe-node"><div class="pipe-n">${s.n}</div><h3>${s.t}</h3><p class="muted">${esc(s.d)}</p></div>${i<stages.length-1?'<div class="pipe-arrow">↓</div>':''}`).join('')}</div>
 
-    <div class="rv-decision" style="border-left-color:var(--st-done)"><h3>Zero-trust, always</h3><p class="muted">A step is “done” only when a deterministic check passes — the site actually renders, the contrast actually meets AA, the JSON actually parses. If a check can’t fail, it isn’t a check.</p></div>
+    <div class="rv-decision" style="border-left-color:var(--st-done)"><h3>Why it can’t go wrong — decision vs construction</h3><p class="muted">The model only <b style="color:var(--text)">decides</b>: the words, the structure that fits the brief, and two brand colours. The system <b style="color:var(--text)">builds</b>: every page is composed from the same vetted parts, so navigation, spacing, fonts and colour contrast are correct by construction. We don’t ask the model to draw a button — we hand it a button that already works.</p></div>
+
+    <h2 class="rv-h">The building blocks</h2>
+    <p class="muted" style="margin:6px 0 14px;max-width:72ch">A world-class site is great branding, the right sections — well-spaced and repeated — and a navigation that answers the need. These are the vetted pieces the renderer composes from. The puzzle we gather, not the magic.</p>
+    <div class="rv-list">${blocks.map(b=>`<div class="card rv-card"><code>${b[0]}</code><p class="muted" style="margin-top:8px">${esc(b[1])}</p></div>`).join('')}</div>
+
+    <h2 class="rv-h">Layers, one engine <span class="rv-count done">no discrimination</span></h2>
+    <p class="muted" style="margin:6px 0 14px;max-width:72ch">Website, CMS, database, QA — different use cases riding the same production line. The brief decides which apply. A bakery’s presentation and a delivery app come off the same line.</p>
+    <div class="layer-grid">${layers.map(x=>`<div class="card layer ok"><span class="lay-badge ok">${x.b}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
+
+    <div class="rv-decision"><h3>Zero-trust, always</h3><p class="muted">A step is “done” only when a deterministic check passes — the site actually renders, the contrast actually meets AA, the JSON actually parses, the SQL actually runs. If a check can’t fail, it isn’t a check.</p></div>
 
     <h2 class="rv-h">Verify gate</h2>
     <div class="rv-list">${verify.map(v=>`<div class="card rv-card"><code>${v[0]}</code><p class="muted" style="margin-top:8px">${esc(v[1])}</p></div>`).join('')}</div>
@@ -534,7 +561,7 @@ function docsPage(){
     <div class="layer-grid">${infra.map(x=>`<div class="card layer ${x.s}"><span class="lay-badge ${x.s}">${x.s==='ok'?'✓ supervised':'● in progress'}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
 
     <h2 class="rv-h">Data model</h2>
-    <p class="muted" style="margin:6px 0 0;max-width:70ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
+    <p class="muted" style="margin:6px 0 0;max-width:72ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. The CMS adds <code>page_snapshots</code> + <code>page_blocks</code>; the full-stack layer adds <code>site_submissions</code>; QA adds <code>qa_reviews</code>. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
 
     <h2 class="rv-h">Full written docs</h2>
     <div class="rv-list">

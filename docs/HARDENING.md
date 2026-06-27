@@ -10,12 +10,13 @@ and verified, **DEFER** are real but need load-testing or cross-tenant coordinat
   env from `.env`); Postgres `ap-pg` is `--restart unless-stopped`. Crash-tested: SIGKILL → respawn in 2–3s → board 200.
 - **Capture the secret.** `MINIMAX_API_KEY`/`DATABASE_URL` lived only in the running process (no `.env` on disk);
   now persisted to `/root/agency-pipeline/.env` (gitignored, mode 600) and loaded via systemd `EnvironmentFile`.
-- **Fresh-clone safety (Tailwind binary).** `tools/setup.sh` is now idempotent + validates the download;
-  `package.json` `postinstall` and `relay.service` `ExecStartPre` vendor it automatically. A redeploy can no
-  longer silently ship un-styled pages.
-- **No more silent lies.** `excellence.ts` now logs loudly (instead of silently returning raw HTML) when the
-  Tailwind binary is missing / compile fails / css is empty; `server.ts` logs a loud banner at boot if
-  `MINIMAX_API_KEY` is unset (stub mode), so stub output is never mistaken for real work.
+- **Fresh-clone safety — Tailwind removed entirely.** The whole un-styled-fresh-clone failure mode is gone:
+  the ~120 MB `tools/tailwindcss` binary, `tools/setup.sh`, the `package.json` `postinstall`, and the
+  `relay.service` `ExecStartPre` were all **deleted**. The deterministic render engine (`src/render.ts` +
+  `src/components.ts`) composes every page from vetted components with an inlined design-system `<style>`, so
+  pages are complete by construction — there is no binary to vendor and nothing a redeploy can leave un-styled.
+- **No more silent lies.** `server.ts` logs a loud banner at boot if `MINIMAX_API_KEY` is unset (stub mode),
+  so stub output is never mistaken for real work.
 - **Database backups (was MISSING).** 21 projects / 190 tasks / 203 outputs sat in one Postgres volume with no dump (the box's `crown-jewels` backup does not cover it). Added `relay-db-backup.sh` — restorable `pg_dump` every 6h, 14 kept; verified a 280 KB dump with real rows.
 - **Monitoring/alerting.** `relay-uptime-check.sh` pings `board.naples.agency` every 5 min and Telegram-alerts on any up↔down transition.
 - **Unbounded spend closed.** `/api/run` now has a per-IP rate-limit (5 / 15 min) + a global 6-concurrent-project cap (also shields the pg pool). Tested: 6th call → 429. Plus `process.on(uncaughtException/unhandledRejection)` so crashes exit clean for systemd.

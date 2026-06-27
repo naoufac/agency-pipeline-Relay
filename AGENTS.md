@@ -40,15 +40,16 @@ break. The essentials are also summarized in §7 below.
 |---|---|
 | `src/server.ts` | HTTP server on `0.0.0.0:8787`. Serves `web/` (static, mtime cache-busting), the JSON API (`/api/board`, `/api/projects`, `/api/kpi`, `/api/output`, `POST /api/run`), the produced sites under `/sites/<id>/*`, `/healthz`, and `/roadmap`→`/#/roadmap`. On boot it **resumes** every project that still has unfinished tasks (restart-safe). |
 | `src/planner.ts` | LLM planner: brief → `{pages, tasks}`. `validate()` is the spine: keeps 4–7 *thinking* tasks only, forces exactly one canonical `branding` task to `wcag`, content/copy → `json`, the rest → `min:280`, then appends **one render-verified build task per page** (`artifact=<slug>.html`, `verify=site_renders`) + a `qa` pass on Home. Stores `pages` in `projects.params`. Falls back to a small template plan if the LLM is unavailable. |
-| `src/runner.ts` | The whole scheduler (`runLoop`): `reclaim` (lease expiry → resurrect crashed tasks) → `reconcile` (promote ready via the `v_ready_tasks` view, a safety net) → `claim` (`FOR UPDATE SKIP LOCKED`) → `processTask`. `processTask` runs the agent, writes the artifact, fills `<img data-q>` with real Pexels photos (`processMedia`), runs the sanitizer (strips external `<img>`/`<script>`/`<link>`/`url(http…)`/placeholder so the page is self-contained), applies the excellence layer, then verifies. Retry-with-feedback: on a re-attempt it feeds the last failure reason back to the agent. |
+| `src/runner.ts` | The whole scheduler (`runLoop`): `reclaim` (lease expiry → resurrect crashed tasks) → `reconcile` (promote ready via the `v_ready_tasks` view, a safety net) → `claim` (`FOR UPDATE SKIP LOCKED`) → `processTask`. `processTask` runs the agent, then for a build task parses its JSON **spec** (`firstSpec` — first brace-balanced object, rejected if <2 sections) → `renderPage` (deterministic vetted components) → `processMedia` (fills `<img data-q>` with real Pexels photos) → `cms.instrument` (stamp `data-edit` ids + freeze the snapshot) → write `cms.shipHtml(snapshot)` → verify. On project completion it fires `reviewSite` (visual QA, fire-and-forget). Retry-with-feedback: on a re-attempt it feeds the last failure reason back to the agent. |
 | `src/verify.ts` | The verify rules — **the zero-trust gate.** `nonempty` · `contains:` · `min:N` (weak floors); `json` / `json:keys` · `wcag` (declared text/bg pair ≥ 4.5:1 AA) · `sql_applies` (runs the DDL in a rolled-back tx) · `site_renders` (headless chromium screenshot must be non-blank + structural HTML + no external/placeholder assets). Also exports `firstJson()` (parses the FIRST brace-balanced block) and `SITES` (the `sites/` URL). |
-| `src/agents.ts` | An agent is *just one API call*: `Ctx {brief, upstream, feedback?, pages?, self?}` in → text/artifact out. `ROLE` holds one system prompt per department; `build` is a Tailwind-utility-class design contract; `content`/`branding` emit a single JSON object. Provider = **MiniMax** (OpenAI-compatible). Exports `runAgent()` and the generic `llm()` (used by the planner). With no `MINIMAX_API_KEY`, deterministic **stubs** run so the whole engine works offline. |
-| `src/excellence.ts` | `applyExcellence(html)`: compiles the vendored Tailwind v4 standalone binary (`tools/tailwindcss`, gitignored, ~120MB) **scoped to just that one page** via `@import "tailwindcss" source(none); @source "<abs page>";` (~150ms, not ~1min) + inlines base64 WOFF2 fonts, then injects one `<style>` before `</head>`. **Never throws** — on any failure it returns the input unchanged. |
-| `src/fonts.ts` | Generated. The base64 `@font-face` WOFF2 blob (`FONT_FACES`) that `excellence.ts` inlines (Inter / Space Grotesk / Fraunces). Large; do not hand-edit. |
+| `src/agents.ts` | An agent is *just one API call*: `Ctx {brief, upstream, feedback?, pages?, self?}` in → text/artifact out. `ROLE` holds one system prompt per department; `build` is a strict JSON **spec** contract (brand tokens + an ordered list of 3–6 sections) — it writes no HTML/CSS; a deterministic renderer turns the spec into the page. `content`/`branding` emit a single JSON object. Provider = **MiniMax** (OpenAI-compatible); `build` gets a larger `max_tokens` (8000) than other roles (1500). Exports `runAgent()` and the generic `llm()` (used by the planner). With no `MINIMAX_API_KEY`, deterministic **stubs** run so the whole engine works offline. |
+| `src/render.ts` | The **deterministic renderer**. `renderPage(spec, {pages, slug, title, projectId})` composes the full HTML from vetted components — no LLM touches structure/CSS/nav. It **derives the whole WCAG-safe palette** (text/muted/lines/on-primary/surface) from just `bg`+`primary` via luminance/contrast math, so legibility is guaranteed regardless of which 2 colours the model picked. Stamps the marker `<!--relay:rendered-->` in `<head>` and injects a small `relaySubmit()` script (forms POST to `/api/site/<id>/submit`). |
+| `src/components.ts` | The **design system** the renderer composes from. `DS_CSS` = inlined base64 `FONT_FACES` + token-driven CSS with a **CSS-only checkbox hamburger nav** (`.nav-toggle:checked ~ .nav-links{display:flex}` at ≤760px) — responsive nav correct by construction. Exports `esc`, `navBar(brand,pages,current,ctaText)`, `footer(brand,pages)`, and the `SECTIONS` record (`hero`/`features`/`split`/`gallery`/`cta`/`form`). The `form` section renders a real `<form … onsubmit="return relaySubmit(event)">`. |
+| `src/fonts.ts` | Generated. The base64 `@font-face` WOFF2 blob (`FONT_FACES`) that the design system (`components.ts`, via `DS_CSS`) inlines (Inter / Space Grotesk / Fraunces). Large; do not hand-edit. |
 | `src/media.ts` | **Real media (roadmap 06).** The build agent emits `<img data-q="search terms">`; `processMedia` pulls a real licensed photo from **Pexels**, downloads it into `sites/<id>/assets/`, and rewrites the tag to a **local** `src` — so it renders in the `file://` gate AND passes the "no external asset" check. Existing photos only, never generation. No `PEXELS_API_KEY` → placeholders dropped (text-only site). |
 | `src/mailer.ts` | **Production email (roadmap 07).** `sendMail` / `verifyMailer` over authenticated SMTP (`nodemailer`) to the naples.agency mail server — SPF/DKIM/DMARC aligned, inbox-grade. Config from `SMTP_*` env (`/root/secrets/relay-smtp.env`, also the gitignored `.env`). |
 | `src/mail-cli.ts` | `npm run mail:test -- <to@addr>` — verify the SMTP connection + auth, then send a production test. |
-| `src/cms.ts` | **Editable CMS (roadmap 08).** Each build freezes the page's POST-media / PRE-excellence HTML (with stable `data-edit` ids stamped by `instrument()`) into `page_snapshots`, and its text leaves into `page_blocks`. Editing is a PURE string overlay on that frozen snapshot (`applyOverlay`, no LLM → design can't drift). `republishPage()` overlays drafts+dirty edits, runs the shared `shipHtml`/`finalize`, writes `<slug>.html.tmp`, runs the IDENTICAL `site_renders` gate, and atomically renames over the live file ONLY on pass. `cleanBody`/`shipHtml` are the shared build tail so build & republish never diverge. v1 = text; photos stay byte-identical. |
+| `src/cms.ts` | **Editable CMS (roadmap 08).** Each build freezes the deterministically-rendered page (post-media) — instrumented with stable `data-edit` ids by `instrument()` — into `page_snapshots`, and its text leaves into `page_blocks`. Editing is a PURE string overlay on that frozen snapshot (`applyOverlay`, no LLM → design can't drift). `republishPage()` overlays drafts+dirty edits, runs the shared `shipHtml`, writes `<slug>.html.tmp`, runs the IDENTICAL `site_renders` gate, and atomically renames over the live file ONLY on pass. `shipHtml` (now just strips the edit ids — the rendered page is already complete) is the shared build tail so build & republish never diverge. v1 = text; photos stay byte-identical. |
 | `src/kpi.ts` | `computeKpi`: the one source of truth for KPIs (API + CLI). **Honest by construction**: a deadlocked project (nothing can move but work remains) reports `status: 'blocked'`, not `'running'`; "verification rigor" counts **only** real checks (`sql_applies` / `site_renders` / `wcag` / `json*`), never the weak floors. |
 | `src/db.ts` | The `pg` Pool + helpers: `makePool`, `applySchema` (re-runnable DDL), `ev` (log a `run_event`), `counts`, `board`. `DATABASE_URL` defaults to the local docker Postgres on `:5439`. |
 | `src/run.ts` | CLI entrypoint: `npm run run -- "your brief"` — plan + run a brief to completion, print the board. (Re-applies the schema unless `RESET=0`.) |
@@ -58,7 +59,7 @@ break. The essentials are also summarized in §7 below.
 Other directories:
 - `db/schema.sql` — the engine as SQL: `projects`, `tasks`, `task_dependencies`, `task_outputs`, `run_events`, the `task_status` enum, the `v_ready_tasks` view, and the `trg_unblock` trigger that promotes downstream tasks the instant an upstream hits `done`. Re-runnable (drops + recreates).
 - `web/` — the frontend. `index.html` (nav: Your sites / Roadmap / About / + New, hamburger on mobile), `app.js` (hash router `#/`, `#/p/:id` tabs, `#/roadmap` visual timeline, in-place reconciling card updates), `styles.css` (design system + responsive).
-- `tools/` — `setup.sh` (vendors the Tailwind binary), `tailwindcss` (the gitignored binary), `render-*.mjs` (offline diagram renderers).
+- `tools/` — `render-*.mjs` (`render-dag.mjs` + `render-mindmap.mjs`, the offline SVG diagram renderers).
 - `assets/` — the source WOFF2 fonts (gitignored) that were base64'd into `src/fonts.ts`.
 - `docs/` — `SPEC.md`, `RELAY-STACK-DECISION.md`, `OPERATIONS.md`, diagrams.
 
@@ -102,14 +103,17 @@ honest. Breaking one is a regression even if everything still "looks" green.
    notes / scratchpad system. Don't push project state into an external memory store "to be helpful."
 
 7. **Sites are self-contained and gate-safe.** A produced page ships zero external references — all
-   CSS and fonts are inlined by `excellence.ts`, all imagery is CSS/SVG/inline. `site_renders`
-   actively rejects `src=http…`, `url(http…)`, external `<link>`, `app.css`, `via.placeholder`, and
-   unfilled `[Placeholder]` copy. Do not "optimize" by linking to a CDN — it will (correctly) fail
-   the gate and is also a durability liability.
+   CSS and fonts are inlined by the design system (`components.ts` `DS_CSS`), and every image is a
+   real photo downloaded locally (or dropped). `site_renders` actively rejects `src=http…`,
+   `url(http…)`, external `<link>`, `app.css`, `via.placeholder`, and unfilled `[Placeholder]` copy.
+   Do not "optimize" by linking to a CDN — it will (correctly) fail the gate and is also a durability
+   liability.
 
-8. **Excellence must never break a build.** `applyExcellence` is wrapped so any failure returns the
-   HTML unchanged. Keep it that way — the design layer is an enhancement, not a dependency of
-   shipping.
+8. **Structure is composed, not authored.** The page is assembled from vetted components in
+   `render.ts`/`components.ts`, so nav, spacing, fonts, and contrast are correct **by construction** —
+   the model only supplies copy, a section ordering, and 2 brand colours (`bg`+`primary`), and the
+   renderer derives the rest of the WCAG-safe palette deterministically. Don't move structure/CSS
+   decisions back into the LLM; if a section type is missing, add it to `SECTIONS`, not to a prompt.
 
 ---
 
@@ -136,8 +140,9 @@ then prove it with `npm run demo` and a real run. Don't gold-plate.
    may emit your department by name, make sure `validate()` keeps it (today it drops only `build`/`qa`
    from the thinking phase, which are re-added deterministically).
 3. If the department writes a file, give its task an `artifact` (e.g. `something.html`) — `runner.ts`
-   will persist `sites/<projectId>/<artifact>`, run the sanitizer + excellence layer, and
-   `site_renders` will verify it.
+   will persist `sites/<projectId>/<artifact>`. (For build pages specifically it renders the spec via
+   `render.ts`, fills Pexels media, and freezes the snapshot before write; a plain HTML artifact is
+   written as-is.) Either way `site_renders` will verify it.
 
 ### Add a page / change the page set
 - Pages come from the planner's `{pages}` (2–5, first must be `{slug:'index', title:'Home'}`) and are
@@ -175,14 +180,14 @@ then prove it with `npm run demo` and a real run. Don't gold-plate.
   first complete object; the prompts explicitly say "exactly one JSON object, no second block." If
   you change JSON handling, preserve this — naive `JSON.parse` on a two-block reply throws and would
   fail valid work.
-- **Tailwind source-scoping is what makes excellence fast.** The input CSS is
-  `@import "tailwindcss" source(none); @source "<abs page path>";`. `source(none)` disables v4's
-  whole-tree auto-scan (~1 min); `@source` scopes it to the single page (~150ms). Don't remove either
-  — and `@source` needs an **absolute** path to the temp page file.
-- **The sanitizer strips external/placeholder assets *before* verify.** `processTask` in `runner.ts`
-  removes external `<img>`, `url(http…)`, and placeholder images and replaces them with a gradient.
-  This is a safety net so a slightly-off agent output still ships; `site_renders` is the hard gate
-  that rejects anything that slips through. Keep both layers.
+- **`firstSpec` parses ONE brace-balanced spec, and rejects thin specs.** `firstSpec()` in
+  `runner.ts` walks braces for the first complete object and the build is rejected if it isn't a
+  valid spec with ≥2 sections (so a half-emitted reply can't ship). The build prompt says "JSON only,
+  no prose, no second block" for the same reason.
+- **`processMedia` never ships a broken `<img>`.** `media.ts` fills each `<img data-q="terms">` with a
+  real local Pexels photo; if a query can't be filled (or there's no `PEXELS_API_KEY`) the tag is
+  dropped entirely rather than left pointing at nothing. `site_renders` is the hard gate that rejects
+  any external/placeholder asset that slips through. Keep both layers.
 - **Cache-busting is automatic, by mtime.** Served `/sites/*` assets get `max-age=3600`; the Relay
   shell gets `no-cache` and mtime-stamped query strings. If you see "stale UI," it's almost never a
   caching bug in your change — check you actually saved the file.
@@ -206,15 +211,12 @@ then prove it with `npm run demo` and a real run. Don't gold-plate.
 Apply zero-trust to your *own* work. "I think it works" is not done. Run the deterministic checks:
 
 ```bash
-# 0. one-time after clone: vendor the Tailwind binary (~120MB, gitignored)
-bash tools/setup.sh
-
 # 1. local Postgres (the board)
 docker run -d --name ap-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=agency \
   -p 5439:5432 --restart unless-stopped postgres:16
 #   (on this host ap-pg already exists, restart policy = unless-stopped)
 
-npm install
+npm install                      # that's it after clone — no binary to vendor
 
 # 2. typecheck — a real check, not a vibe
 npm run build

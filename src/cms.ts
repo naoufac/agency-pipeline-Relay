@@ -1,16 +1,13 @@
-// CMS core (roadmap 08) — edit a page's content and re-publish ONE page through the SAME
-// verified path, deterministically. Design: the build freezes each page's POST-media /
-// PRE-excellence HTML (with stable data-edit ids on text leaves) as the editable source in
-// Postgres. An edit is a PURE STRING substitution on that frozen snapshot (no LLM, so the design
-// can never drift). Re-publish overlays the edits, runs the identical finalize (excellence) +
-// the identical site_renders gate against a <slug>.html.tmp, and only atomically renames it over
-// the live file ON PASS — so an unverified edit never reaches /sites. v1 = text editing; photos
-// stay byte-identical (they're already local in the snapshot). Pure functions never throw.
+// CMS core (roadmap 09) — edit a page's content and re-publish ONE page through the SAME
+// verified path, deterministically. Design: at build time the deterministically-rendered page
+// (real photos already local) is frozen with stable data-edit ids on its text leaves, as the
+// editable source in Postgres. An edit is a PURE STRING substitution on that frozen snapshot (no
+// LLM, so the design can never drift). Re-publish overlays the edits, runs the identical
+// site_renders gate against a <slug>.html.tmp, and only atomically renames it over the live file
+// ON PASS — so an unverified edit never reaches /sites. v1 = text editing. Pure functions never throw.
 import pg from 'pg';
 import { writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { processMedia } from './media.ts';
-import { applyExcellence } from './excellence.ts';
 import { verify, SITES } from './verify.ts';
 import { ev } from './db.ts';
 
@@ -20,21 +17,6 @@ const ATTRS = '(?:"[^"]*"|\'[^\']*\'|[^>"\'])*';   // quote-aware start-tag attr
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const decodeEntities = (s: string) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'");
 const labelFor = (tag: string) => ({ p: 'Paragraph', li: 'List item', button: 'Button', blockquote: 'Quote', figcaption: 'Caption', h1: 'Heading', h2: 'Subheading', h3: 'Subheading', h4: 'Subheading', h5: 'Subheading', h6: 'Subheading' } as Record<string, string>)[tag.toLowerCase()] || 'Text';
-
-// ---- the build tail, shared so build & republish can never diverge ----
-// fence-strip + doctype-slice + real Pexels media + strip every external/placeholder asset.
-export async function cleanBody(content: string, dirUrl: URL): Promise<string> {
-  let body = content.replace(/^\s*```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '');
-  const at = body.search(/<!doctype html|<html/i); if (at > 0) body = body.slice(at);
-  body = await processMedia(body, dirUrl);
-  return body
-    .replace(/<script\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[\s\S]*?<\/script>/gi, '')
-    .replace(/<link\b[^>]*\bhref\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')
-    .replace(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')
-    .replace(/<img\b[^>]*placeholder[^>]*?>/gi, '')
-    .replace(/url\(\s*["']?https?:\/\/[^)]*\)/gi, 'linear-gradient(135deg,#e9ecf3,#c9d2e3)')
-    .replace(/url\(\s*["']?[^)]*placeholder[^)]*\)/gi, 'linear-gradient(135deg,#e9ecf3,#c9d2e3)');
-}
 
 // stamp a stable data-edit id on each editable block-leaf, in document order. Idempotent.
 // CMS owns the data-edit namespace: any agent-authored data-edit ATTR is dropped (so ids can't collide),
@@ -53,11 +35,10 @@ export function stripEditAttrs(html: string): string {
   return html.replace(new RegExp(`(<(?:${TAGS})\\b)\\sdata-edit="e\\d+"`, 'gi'), '$1');
 }
 
-// the FINAL ship step. Deterministically-rendered pages already have their CSS/fonts inlined and a
-// proper responsive nav, so they skip the Tailwind/excellence pass; legacy LLM-HTML still gets it.
+// the FINAL ship step: drop the editing markers. The page is already a complete, deterministically
+// rendered document (CSS + fonts inlined, responsive nav) — nothing else to finalize.
 export function shipHtml(html: string): string {
-  const stripped = stripEditAttrs(html);
-  return stripped.includes('<!--relay:rendered-->') ? stripped : applyExcellence(stripped);
+  return stripEditAttrs(html);
 }
 
 export interface Block { block_id: string; kind: string; label: string; seq: number; value: string; read_only: boolean; }

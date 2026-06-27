@@ -7,7 +7,6 @@ Wants=network-online.target
 WorkingDirectory=/root/agency-pipeline
 EnvironmentFile=/root/agency-pipeline/.env
 Environment=NODE_ENV=production
-ExecStartPre=/usr/bin/bash -c '[ -x /root/agency-pipeline/tools/tailwindcss ] || /usr/bin/bash /root/agency-pipeline/tools/setup.sh'
 ExecStart=/usr/bin/tsx src/server.ts
 Restart=always
 RestartSec=2

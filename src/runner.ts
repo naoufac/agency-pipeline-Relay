@@ -72,7 +72,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
     await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
 
-    // REAL ARTIFACT: write the page AND freeze its editable snapshot (post-media, pre-excellence, with edit ids)
+    // REAL ARTIFACT: write the page AND freeze its editable snapshot (post-media, with edit ids for the CMS)
     let snapshot: string | null = null;
     if (task.artifact) {
       const dir = new URL(task.project_id + '/', SITES);
@@ -84,7 +84,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       const slug = task.artifact.replace(/\.html$/, '');
       const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id });
       snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
-      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml skips excellence (rendered marker)
+      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
     }
 
     await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
