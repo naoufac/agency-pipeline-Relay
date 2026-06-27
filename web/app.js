@@ -416,11 +416,13 @@ function roadmap(){
     { n:'05', t:'Production email', s:'done', d:'Production email from noreply@naples.agency — authenticated SMTP, SPF/DKIM/DMARC aligned (inbox-grade), wired in as a reusable mailer. Verified: live delivery to a real inbox.' },
     { n:'06', t:'Built to last', s:'done', d:'Relay, the tunnel and Postgres supervised by systemd (Restart=always) + daily DB backups + uptime alerts — survives crash/reboot, proven by kill-tests.' },
     { n:'07', t:'Visual self-QA', s:'done', d:'Relay screenshots every page (phone + desktop) and a vision model reads them for real problems, scoring each and surfacing it in a QA tab. Runs automatically on every build.' },
-    { n:'08', t:'Deterministic engine', s:'progress', d:'The build no longer guesses HTML — a vetted component library + a renderer compose every page from a structured spec, so nav, CSS, fonts, spacing and contrast cannot be wrong. The standard begins (~7/10); expanding the component library to push it higher. Replaces the old LLM-Tailwind “excellence” approach.' },
-    { n:'09', t:'Editable CMS', s:'progress', d:'In-place text editing → re-publish through the verified path works end to end. Next: edit the structured spec directly (blocks = component instances) — the real CMS model.' },
-    { n:'10', t:'Full-stack + database', s:'next', d:'The core mission: produced sites get a REAL backend — a Postgres schema, an API, forms that store data, dynamic content — not just static HTML.' },
-    { n:'11', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
-    { n:'12', t:'On demand', s:'next', d:'Payments / storefront / extra stacks — added only when a brief genuinely needs them.' },
+    { n:'08', t:'Deterministic engine', s:'done', d:'The build no longer guesses HTML — vetted components + a renderer compose every page from a structured spec, so navigation, CSS, fonts, spacing and contrast cannot be wrong. Replaces the old LLM-Tailwind “excellence” approach.' },
+    { n:'09', t:'Rooted identity', s:'done', d:'Every brief is classified into one of five design languages (editorial, modern, warm, bold, minimal); the renderer expands it into typography, rhythm and shape — so the same copy yields genuinely different studios, never one template wearing new colours.' },
+    { n:'10', t:'Full-stack + database', s:'done', d:'The core mission, live: an app or store brief gets a REAL, isolated Postgres schema — designed as a typed data model, compiled into flawless DDL (keys, relations, indexes, seeds), and read back on the page. Not static HTML.' },
+    { n:'11', t:'Interaction QA', s:'done', d:'A real browser then uses every finished site — clicks every button, types into and submits the form, checks the data came through, measures the layout on phone + desktop. Verification by interaction, not just a screenshot. The verdict shows on each project.' },
+    { n:'12', t:'Editable CMS', s:'progress', d:'In-place text editing → re-publish through the verified path works end to end. Next: edit the structured spec directly (blocks = component instances).' },
+    { n:'13', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
+    { n:'14', t:'Deeper database', s:'next', d:'Typed forms generated from the data model, relation-aware lists, an auth department, and safe migrations when a rebuild changes the model.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
   const done = P.filter(p=>p.s==='done').length;
@@ -536,13 +538,17 @@ function docsPage(){
     ['gallery','A 4–6 image grid for work, menu or product shots.'],
     ['cta','A focused band that asks for the one action.'],
     ['form','A real form whose submissions are stored in the database.'],
+    ['feed','A live list of the site’s own public submissions — a directory, wall or reviews.'],
+    ['collection','A live list rendered from the project’s real database table — products, menu, listings.'],
   ];
   // one engine, many layers — the brief decides which apply. No discrimination.
   const layers = [
     { t:'Website', b:'live', d:'A multi-page site with one consistent navigation and brand across every page.' },
     { t:'Editable CMS', b:'live', d:'Change any copy and republish through the same verified gate — re-checked, no LLM, so the design can’t drift.' },
-    { t:'Full-stack + database', b:'live · v1', d:'A form on the site writes real submissions to Postgres; the owner reads them in the Data tab.' },
+    { t:'Full-stack + database', b:'live', d:'An app/store brief gets its OWN isolated Postgres schema — a typed data model compiled into flawless DDL, seeded, read back on the page, and introspected in the Data tab.' },
+    { t:'Rooted identity', b:'live', d:'Five design languages; the brief picks one and the renderer expands it into typography, rhythm and shape — never one template recoloured.' },
     { t:'Visual QA', b:'live', d:'Every finished site is screenshotted on mobile and desktop and scored by a vision model.' },
+    { t:'Interaction QA', b:'live', d:'A real browser clicks every button, submits the form and checks the data — verdict shown on each project.' },
   ];
   const infra = [
     { t:'Relay server', d:'systemd · Restart=always', s:'ok' },
@@ -555,7 +561,8 @@ function docsPage(){
     { t:'Visual QA', d:'vision model · mobile + desktop', s:'ok' },
   ];
   const verify = [
-    ['site_renders','headless Chromium screenshot must be non-blank + structural, with no external or placeholder assets'],
+    ['site_renders','headless Chromium screenshot non-blank + structural, no external/placeholder assets, no dead buttons or unwired forms'],
+    ['app_db','the app’s own isolated Postgres schema actually provisions and has its tables'],
     ['wcag','AA contrast on text vs background — derived by the renderer, so always binding'],
     ['json · json:keys','output must parse and carry the required keys'],
     ['sql_applies','the SQL actually runs against Postgres'],
@@ -589,7 +596,7 @@ function docsPage(){
     <div class="layer-grid">${infra.map(x=>`<div class="card layer ${x.s}"><span class="lay-badge ${x.s}">${x.s==='ok'?'✓ supervised':'● in progress'}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
 
     <h2 class="rv-h">Data model</h2>
-    <p class="muted" style="margin:6px 0 0;max-width:72ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. The CMS adds <code>page_snapshots</code> + <code>page_blocks</code>; the full-stack layer adds <code>site_submissions</code>; QA adds <code>qa_reviews</code>. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
+    <p class="muted" style="margin:6px 0 0;max-width:72ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. The CMS adds <code>page_snapshots</code> + <code>page_blocks</code>; the full-stack layer adds <code>site_submissions</code>; visual QA adds <code>qa_reviews</code> and interaction QA <code>dogfood_reviews</code>. Each app/store project also gets its OWN isolated schema <code>app_&lt;id&gt;</code> holding its real tables — never mixed with the engine’s. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
 
     <h2 class="rv-h">Full written docs</h2>
     <div class="rv-list">
