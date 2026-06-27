@@ -21,7 +21,7 @@ process.on('uncaughtException', (e: any) => { console.error('uncaughtException',
 // /api/run spends real LLM tokens — guard it. Per-IP sliding window + a global concurrent-project cap
 // (the cap also protects the pg pool from the runner's pool-exhaustion failure mode).
 const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>();
-const RATE_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, PUB_MAX_PER_IP = 40, MAX_ACTIVE_PROJECTS = 6;
+const RATE_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, PUB_MAX_PER_IP = Number(process.env.PUB_MAX || 40), MAX_ACTIVE_PROJECTS = 6;
 function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   const now = Date.now();
   const arr = (map.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
