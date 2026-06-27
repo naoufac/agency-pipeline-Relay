@@ -16,6 +16,13 @@ html{ scroll-behavior:smooth; }
 body{ font-family:var(--font-body),system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
 h1,h2,h3,h4,.font-display{ font-family:var(--font-display),system-ui,sans-serif; letter-spacing:-0.02em; }
 .font-serif-display{ font-family:"Fraunces",Georgia,serif; letter-spacing:-0.01em; }
+/* mobile safety net — a produced site must never overflow or cut off its nav on a phone */
+html,body{ overflow-x:hidden; }
+@media (max-width:680px){
+  nav ul, header ul{ flex-wrap:wrap; }
+  nav > div, header > div, header > nav{ flex-wrap:wrap; gap:.45rem .8rem; }
+  nav, header{ max-width:100vw; }
+}
 `;
 
 export function tailwindAvailable(): boolean { return existsSync(TW); }
