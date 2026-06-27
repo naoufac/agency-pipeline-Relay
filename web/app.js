@@ -388,7 +388,7 @@ function docsPage(){
     { n:'3', t:'Board', d:'The DAG lives in Postgres; an SQL trigger unblocks a task the moment its deps pass.' },
     { n:'4', t:'Run', d:'A restart-safe runner claims ready tasks (FOR UPDATE SKIP LOCKED); each agent = one API call.' },
     { n:'5', t:'Verify', d:'Every output passes a deterministic gate — never the agent’s word. Failures retry with feedback.' },
-    { n:'6', t:'Excellence', d:'Tailwind compiled + real fonts inlined per page → one self-contained, modern file.' },
+    { n:'6', t:'Excellence', d:'Tailwind compiled + real fonts inlined, and real Pexels photography downloaded & served locally per page → one self-contained, modern file.' },
     { n:'7', t:'Ship', d:'A real website served at /sites/:id you can open and share.' },
   ];
   const infra = [
@@ -398,6 +398,8 @@ function docsPage(){
     { t:'DB backups', d:'pg_dump every 6h · 14 kept', s:'ok' },
     { t:'Uptime monitor', d:'5 min · Telegram alerts', s:'ok' },
     { t:'Dedicated tunnel', d:'systemd · own tunnel · board/api/email', s:'ok' },
+    { t:'Real photography', d:'Pexels · downloaded + served locally', s:'ok' },
+    { t:'Production email', d:'SMTP · SPF/DKIM/DMARC aligned', s:'ok' },
   ];
   const verify = [
     ['site_renders','headless Chromium screenshot must be non-blank, structural, no external/placeholder assets'],
