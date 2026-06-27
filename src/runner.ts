@@ -37,7 +37,13 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
      from task_dependencies d join tasks u on u.id=d.upstream_id
      left join task_outputs o on o.task_id=u.id and o.is_current
      where d.downstream_id=$1 order by u.seq`, [task.id]);
-  return { brief: proj.rows[0].brief, upstream: ups.rows };
+  // retry-with-feedback: on a re-attempt, tell the agent why its last try failed
+  let feedback = '';
+  if (task.attempts > 1) {
+    const fb = await pool.query("select detail from run_events where task_id=$1 and type in ('verify_failed','agent_error') order by id desc limit 1", [task.id]);
+    if (fb.rows[0]) feedback = fb.rows[0].detail;
+  }
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -54,6 +60,12 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       mkdirSync(fileURLToPath(dir), { recursive: true });
       let body = content.replace(/^\s*```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '');
       const at = body.search(/<!doctype html|<html/i); if (at > 0) body = body.slice(at);
+      // deterministic safety net: a website must never ship broken external/placeholder images
+      body = body
+        .replace(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')
+        .replace(/<img\b[^>]*placeholder[^>]*?>/gi, '')
+        .replace(/url\(\s*["']?https?:\/\/[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)")
+        .replace(/url\(\s*["']?[^)]*placeholder[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)");
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
     }
 

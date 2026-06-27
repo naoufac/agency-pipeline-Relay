@@ -7,12 +7,17 @@ export const SITES = new URL('../sites/', import.meta.url);
 
 // ---- helpers ----
 function stripFences(s: string) { return s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim(); }
+// parse the FIRST brace-balanced object/array (handles multiple concatenated JSON blocks)
 function firstJson(s: string): any {
   const t = stripFences(s);
-  const a = t.indexOf('{'), b = t.lastIndexOf('}');
-  const c = t.indexOf('['), d = t.lastIndexOf(']');
-  for (const [lo, hi] of [[a, b], [c, d]] as [number, number][]) {
-    if (lo >= 0 && hi > lo) { try { return JSON.parse(t.slice(lo, hi + 1)); } catch {} }
+  for (const open of ['{', '[']) {
+    const start = t.indexOf(open); if (start < 0) continue;
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    for (let i = start; i < t.length; i++) {
+      if (t[i] === open) depth++;
+      else if (t[i] === close) { depth--; if (depth === 0) { try { return JSON.parse(t.slice(start, i + 1)); } catch { break; } } }
+    }
   }
   return undefined;
 }
@@ -74,8 +79,14 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     if (!existsSync(index)) return { ok: false, log: 'no index.html produced' };
     const size = statSync(index).size;
     if (size < 400) return { ok: false, log: `index.html too small (${size}b)` };
-    const html = readFileSync(index, 'utf8').toLowerCase();
+    const raw = readFileSync(index, 'utf8');
+    const html = raw.toLowerCase();
     if (!/<html|<!doctype/.test(html.slice(0, 400)) || !/<body|<div|<section/.test(html)) return { ok: false, log: 'not valid HTML structure' };
+    // QUALITY GATE: a rendered page that references external assets or has unfilled placeholders is broken
+    if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|via\.placeholder/i.test(raw))
+      return { ok: false, log: 'broken: external asset reference — build visuals with CSS/SVG, never <img>/url() to external URLs' };
+    const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
+    if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };
     const shot = fileURLToPath(new URL('preview.png', dir));
     try {
       execFileSync('chromium-browser', ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',

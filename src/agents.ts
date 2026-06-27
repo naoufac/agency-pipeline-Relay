@@ -9,7 +9,7 @@ const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M2 emits <think> tags
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[] };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -19,7 +19,7 @@ const ROLE: Record<string, string> = {
   database:    'You are the Database department. Output ONLY a runnable PostgreSQL CREATE TABLE block for this app — no prose, no markdown fences.',
   design:      'You are the Design-system department. Using the brand tokens above, list the components and how the tokens map.',
   media:       'You are the Art Direction department. Describe the visual/imagery direction (mood, hero imagery, iconography) for this website. Concrete and on-brief.',
-  content:     'You are the Content department. Output ONLY valid JSON. For information architecture: {"sections":[{"id":"hero","title":"..."}, ...]} tailored to the brief. For copy: {"<sectionId>":{"headline":"...","body":"..."}, ...} with real copy. JSON only — no prose, no markdown.',
+  content:     'You are the Content department. Output ONLY ONE valid JSON object (a single object — never two blocks). For sitemap/IA: {"sections":[{"id":"hero","title":"..."}, ...]}. For copy: {"hero":{"headline":"...","body":"..."}, ...}. Exactly one JSON object, no prose, no markdown, no second block.',
   copywriting: 'You are the Copywriting department. Output ONLY valid JSON mapping section ids to final on-brand copy: {"hero":{"headline":"...","subhead":"...","cta":"..."},"about":{"body":"..."}, ...} with real copy for this brief. JSON only.',
   strategy:    'You are the Strategy department. Give a concrete, brief-specific plan: positioning, the sections the site needs and why, and the single key message. Plain text, specific.',
   auth:        'You are the Auth department. Specify the accounts/authentication model.',
@@ -29,7 +29,9 @@ const ROLE: Record<string, string> = {
 };
 
 function buildUser(ctx: Ctx): string {
-  let s = `BRIEF: ${ctx.brief}\n`;
+  let s = '';
+  if (ctx.feedback) s += `IMPORTANT — your previous attempt FAILED an automated check: ${ctx.feedback}\nProduce a corrected version that passes this check.\n\n`;
+  s += `BRIEF: ${ctx.brief}\n`;
   if (ctx.upstream.length) {
     s += `\nUPSTREAM RESULTS (the departments you depend on):\n`;
     for (const u of ctx.upstream) s += `\n[#${u.seq} ${u.department}]\n${u.content}\n`;
