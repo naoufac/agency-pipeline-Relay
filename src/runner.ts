@@ -15,6 +15,12 @@ async function reclaim(pool: pg.Pool): Promise<number> {
   return r.rowCount ?? 0;
 }
 
+// safety-net reconcile using the documented readiness VIEW (makes v_ready_tasks load-bearing):
+// promote any task whose upstreams are all done -> ready, even if the trigger ever missed it.
+async function reconcile(pool: pg.Pool): Promise<void> {
+  await pool.query("update tasks set status='ready', updated_at=now() where id in (select id from v_ready_tasks)");
+}
+
 async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[]> {
   const r = await pool.query(
     `update tasks set status='running', claimed_by=$1,
@@ -83,6 +89,7 @@ export async function runLoop(
 
   while (true) {
     await reclaim(pool);
+    await reconcile(pool);
     const claimed = await claim(pool, runnerId, cap);
     if (claimed.length === 0) {
       const c = await counts(pool, projectId);

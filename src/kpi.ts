@@ -31,7 +31,8 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
   const succ: any = {}; tasks.forEach(t => succ[t.seq] = []); edges.forEach((e: any) => succ[e.f].push(e.t));
   const memo: any = {}; const lp = (s: number): number => memo[s] ?? (memo[s] = 1 + (succ[s].length ? Math.max(...succ[s].map(lp)) : 0));
   const critical = total ? Math.max(...tasks.map(t => lp(t.seq))) : 0;
-  const realCheck = tasks.filter(t => t.verify && t.verify !== 'nonempty').length;
+  // honest: only genuinely deterministic, unfakeable checks count toward rigor
+  const realCheck = tasks.filter(t => ['sql_applies', 'site_renders'].includes(t.verify)).length;
   const chars = outs.reduce((s, o) => s + (o.len || 0), 0);
   const errors = ev['agent_error'] || 0, reworks = ev['verify_failed'] || 0;
   const finished = active === 0 && blocked === 0;
