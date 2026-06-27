@@ -82,8 +82,13 @@ function validate(plan: any, brief: string): Plan | null {
       verify: 'sql_applies', depends_on: [1], artifact: null });
   }
 
-  // bind every department to its REAL gate (database -> sql_applies, branding -> wcag, copy/content -> json)
-  for (const t of tasks) t.verify = verifyFor(t.department);
+  // bind every department to its REAL gate (database -> sql_applies, branding -> wcag, copy/content -> json);
+  // the data model also ships as a real schema.sql deliverable on disk (the runner writes it as-is).
+  let dbArtifactDone = false;
+  for (const t of tasks) {
+    t.verify = verifyFor(t.department);
+    if (t.verify === 'sql_applies' && !dbArtifactDone) { t.artifact = 'schema.sql'; dbArtifactDone = true; }
+  }
 
   // one render-verified BUILD per page (fans in from EVERY thinking step, incl. the schema), then QA on Home
   const thinkSeqs = tasks.map(t => t.seq);

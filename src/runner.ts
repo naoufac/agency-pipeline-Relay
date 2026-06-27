@@ -9,6 +9,10 @@ import { reviewSite } from './qa.ts';
 import { renderPage } from './render.ts';
 import { processMedia } from './media.ts';
 
+const stripFences = (s: string) => s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
+// a real .sql deliverable: drop any prose preamble, keep from the first CREATE TABLE (mirrors sql_applies)
+function sqlArtifact(content: string): string { const s = stripFences(content); const at = s.search(/create\s+table/i); return at >= 0 ? s.slice(at) : s; }
+
 // parse the FIRST brace-balanced JSON object from the build agent's spec output
 function firstSpec(s: string): any {
   const t = s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '');
@@ -62,7 +66,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const params = proj.rows[0].params || {};
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
-  const self = task.artifact ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
+  const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
   return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme };
 }
 
@@ -79,14 +83,20 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     if (task.artifact) {
       const dir = new URL(task.project_id + '/', SITES);
       mkdirSync(fileURLToPath(dir), { recursive: true });
-      // NEW ENGINE: the agent returns a SPEC; a deterministic renderer (vetted components) builds the page.
-      const spec = firstSpec(content);
-      if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
-        throw new Error('build did not return a valid spec (need brand + >=2 sections)');
-      const slug = task.artifact.replace(/\.html$/, '');
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme });
-      snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
-      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
+      if (task.artifact.endsWith('.html')) {
+        // PAGE: the agent returns a SPEC; a deterministic renderer (vetted components) builds the page.
+        const spec = firstSpec(content);
+        if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
+          throw new Error('build did not return a valid spec (need brand + >=2 sections)');
+        const slug = task.artifact.replace(/\.html$/, '');
+        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme });
+        snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
+        writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
+      } else {
+        // REAL NON-HTML DELIVERABLE (e.g. schema.sql): persist the agent's text artifact as-is.
+        const body = task.artifact.endsWith('.sql') ? sqlArtifact(content) : stripFences(content);
+        writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
+      }
     }
 
     await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
