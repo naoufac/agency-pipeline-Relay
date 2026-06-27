@@ -60,10 +60,16 @@ function validate(plan: any): Task[] | null {
   build.depends_on = tasks.filter(t => t.seq < build.seq && t.department !== 'qa').map(t => t.seq);
   // QA acceptance re-renders the finished site
   tasks.filter(t => t.department === 'qa').forEach(q => { q.verify = 'site_renders'; q.artifact = null; if (!q.depends_on.includes(build.seq)) q.depends_on = [build.seq]; });
+  // guarantee ONE canonical brand-tokens task so the wcag gate ALWAYS binds (not name-dependent):
+  // promote the first brand/design/visual task (or any middle task) to department 'branding'.
+  let bi = tasks.findIndex(t => /brand/.test(t.department));
+  if (bi < 0) bi = tasks.findIndex(t => /design|visual|look|style|art|theme|colou?r/.test(t.department));
+  if (bi < 0) bi = tasks.findIndex(t => !['research', 'strategy', 'build', 'qa'].includes(t.department));
+  if (bi >= 0) tasks[bi].department = 'branding';
   // deterministic per-department checks (guarantee honest rigor regardless of what the LLM chose)
   for (const t of tasks) {
     if (t.department === 'build' || t.department === 'qa') continue;
-    if (/brand/.test(t.department)) t.verify = 'wcag';                 // JSON tokens + AA contrast
+    if (t.department === 'branding') t.verify = 'wcag';                 // JSON tokens, AA-verified text/bg
     else if (/copy|content|writ/.test(t.department)) t.verify = 'json'; // sitemap / copy as valid JSON
     else t.verify = 'min:280';                                         // research/strategy/design/media: length floor
   }

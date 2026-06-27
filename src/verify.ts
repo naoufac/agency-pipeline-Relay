@@ -53,16 +53,14 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
   }
 
   if (rule === 'wcag') {
+    // strict: the tokens MUST declare the actual text & bg colours, and THAT pair must pass AA.
+    // (no 'best pair anywhere' fallback — that was gameable.)
     const obj = firstJson(content);
-    const hexes = (content.match(/#[0-9a-fA-F]{3,6}\b/g) || []);
-    if (!hexes.length) return { ok: false, log: 'no colours found' };
-    let pair: [string, string] | null = null;
     const p = obj?.palette || obj;
-    if (p?.text && p?.bg) pair = [p.text, p.bg];
-    let best = 0;
-    if (pair) best = contrast(pair[0], pair[1]);
-    else for (let i = 0; i < hexes.length; i++) for (let k = i + 1; k < hexes.length; k++) best = Math.max(best, contrast(hexes[i], hexes[k]));
-    return { ok: best >= 4.5, log: `best contrast ${best.toFixed(2)}:1 (need 4.5)` };
+    const hex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
+    if (!p || !hex(p.text) || !hex(p.bg)) return { ok: false, log: 'tokens must declare palette.text and palette.bg as hex' };
+    const c = contrast(p.text.trim(), p.bg.trim());
+    return { ok: c >= 4.5, log: `text/bg contrast ${c.toFixed(2)}:1 (need 4.5)` };
   }
 
   if (rule === 'sql_applies') {
