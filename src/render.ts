@@ -12,7 +12,7 @@ const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg
 const FONTS = new Set(['Grotesk', 'Inter', 'Fraunces']);
 const font = (n: any, fb: string) => (FONTS.has(String(n)) ? String(n) : fb);
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string }): string {
   const t = (spec && spec.brand && spec.brand.tokens) || {};
   const bg = isHex(t.bg) ? t.bg.trim() : '#ffffff';
   const primary = isHex(t.primary) ? t.primary.trim() : '#4f46e5';
@@ -39,5 +39,6 @@ ${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta)}
 ${sections}
 </main>
 ${footer(brand, ctx.pages)}
+<script>window.RELAY_PID=${JSON.stringify(ctx.projectId || '')};function relaySubmit(e){e.preventDefault();var f=e.target,d={};new FormData(f).forEach(function(v,k){d[k]=v});var m=f.querySelector('.rform-msg'),b=f.querySelector('button');if(b)b.disabled=true;fetch('/api/site/'+window.RELAY_PID+'/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({form:f.dataset.form,data:d})}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(){f.reset();if(m){m.hidden=false;m.textContent='Thanks — we got your message.'}}).catch(function(){if(m){m.hidden=false;m.textContent='Sorry, something went wrong — please try again.'}}).finally(function(){if(b)b.disabled=false});return false}</script>
 </body></html>`;
 }

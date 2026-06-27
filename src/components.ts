@@ -64,6 +64,14 @@ p{margin:0 0 1rem}
 .footer{border-top:1px solid var(--line);padding:44px 0;color:var(--muted)}
 .footer-inner{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
 .footer nav a{color:var(--muted);text-decoration:none;margin-left:18px}.footer nav a:hover{color:var(--text)}
+/* form (full-stack: posts to a real API -> Postgres) */
+.formwrap{max-width:560px}
+.rform{display:flex;flex-direction:column;gap:14px;margin-top:1.6rem}
+.rform label{display:flex;flex-direction:column;gap:6px;font-size:.88rem;font-weight:600;color:var(--text)}
+.rform input,.rform textarea{font:inherit;padding:.72rem .9rem;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);width:100%}
+.rform input:focus,.rform textarea:focus{outline:0;border-color:var(--primary)}
+.rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
+.rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
 `;
 
 export function navBar(brand: string, pages: any[], current: string, ctaText?: string) {
@@ -101,4 +109,19 @@ export const SECTIONS: Record<string, (s: any) => string> = {
   cta: (s) => `<section class="section"><div class="container"><div class="cta">
     <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${s.cta ? `<a class="btn" href="#">${esc(s.cta)}</a>` : ''}
   </div></div></section>`,
+  // FULL-STACK: a real form that posts to /api/site/<id>/submit -> Postgres
+  form: (s) => {
+    const fields = (Array.isArray(s.fields) && s.fields.length ? s.fields : [
+      { name: 'name', label: 'Full name' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'message', label: 'Message', type: 'textarea' }]);
+    return `<section class="section"><div class="container"><div class="formwrap">
+      ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+      <form class="rform" data-form="${esc(s.form || 'contact')}" onsubmit="return relaySubmit(event)">
+        ${fields.map((f: any) => f.type === 'textarea'
+          ? `<label>${esc(f.label)}<textarea name="${esc(f.name)}" required></textarea></label>`
+          : `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}" required></label>`).join('')}
+        <button class="btn" type="submit">${esc(s.cta || 'Send')}</button>
+        <p class="rform-msg" hidden></p>
+      </form>
+    </div></div></section>`;
+  },
 };

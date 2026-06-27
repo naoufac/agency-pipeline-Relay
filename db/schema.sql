@@ -140,3 +140,11 @@ create table if not exists qa_reviews (
 );
 create index if not exists qa_reviews_proj_ix on qa_reviews(project_id);
 create unique index if not exists qa_reviews_uk on qa_reviews(project_id,slug,viewport);
+create table if not exists site_submissions (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references projects(id) on delete cascade,
+  form        text not null default 'contact',
+  data        jsonb not null default '{}',
+  created_at  timestamptz not null default now()
+);
+create index if not exists site_submissions_proj on site_submissions(project_id, created_at desc);

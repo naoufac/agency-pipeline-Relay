@@ -146,7 +146,7 @@ const tabLink = (id, key, label, cur) =>
 
 function project(id, tab, seq){
   app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
-  let wasBuilt = false, prow = {}, editInit = false, qaInit = false;
+  let wasBuilt = false, prow = {}, editInit = false, qaInit = false, dataInit = false;
 
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
@@ -160,7 +160,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'edit','Edit',tab) : ''}${b.site ? tabLink(id,'qa','QA',tab) : ''}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'edit','Edit',tab) : ''}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
       </div>`;
   }
 
@@ -335,6 +335,20 @@ function project(id, tab, seq){
     await render();
   }
 
+  // ---- Data tab: form submissions stored in Postgres (the full-stack layer) ----
+  async function dataTab(){
+    const body = document.getElementById('pbody');
+    body.innerHTML = `<p class="muted" style="margin:4px 0 14px">Form submissions captured by this site, stored in Postgres — this site has a real backend, not just static pages.</p><div id="databody"><div class="muted" style="padding:18px 2px">Loading…</div></div>`;
+    let d; try { d = await j('/api/submissions?id=' + id); } catch { document.getElementById('databody').innerHTML = '<div class="empty">Couldn’t load submissions.</div>'; return; }
+    const el = document.getElementById('databody');
+    if (!d.submissions || !d.submissions.length) { el.innerHTML = `<div class="empty">No submissions yet. When someone fills in a form on this site, it lands here.</div>`; return; }
+    el.innerHTML = `<div class="kpi-label" style="margin-bottom:12px">${d.submissions.length} submission${d.submissions.length > 1 ? 's' : ''}</div>` + d.submissions.map(s => `
+      <div class="card" style="margin-bottom:12px">
+        <div class="row" style="justify-content:space-between"><span class="pill">${esc(s.form)}</span><span class="muted" style="font-size:12px">${new Date(s.created_at).toLocaleString()}</span></div>
+        <div style="margin-top:10px;display:grid;gap:6px">${Object.entries(s.data || {}).map(([k, v]) => `<div style="font-size:14px"><b style="color:var(--muted);font-weight:600">${esc(k)}</b> · ${esc(v)}</div>`).join('')}</div>
+      </div>`).join('');
+  }
+
   async function load(){
     let b; try { b = await j('/api/board?id=' + id); } catch { return; }
     if (!b.project){ app.innerHTML = `<div class="container section"><div class="empty">Project not found. <a href="#/">‹ Your sites</a></div></div>`; clearPoll(); return; }
@@ -348,6 +362,7 @@ function project(id, tab, seq){
     else if (tab === 'metrics') metricsTab();
     else if (tab === 'edit') { if (!editInit) { editInit = true; editTab(b); } }
     else if (tab === 'qa') { if (!qaInit) { qaInit = true; qaTab(); } }
+    else if (tab === 'data') { if (!dataInit) { dataInit = true; dataTab(); } }
     // resolution moment
     if (!wasBuilt && built && tab === 'site') { toast('✓ Done — your site is live'); }
     wasBuilt = built;
@@ -554,7 +569,7 @@ function router(){
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
-  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','edit','qa'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
+  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','edit','qa','data'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();
 
   document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === navPath));

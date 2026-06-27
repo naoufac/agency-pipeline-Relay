@@ -82,7 +82,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
         throw new Error('build did not return a valid spec (need brand + >=2 sections)');
       const slug = task.artifact.replace(/\.html$/, '');
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title });
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id });
       snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml skips excellence (rendered marker)
     }

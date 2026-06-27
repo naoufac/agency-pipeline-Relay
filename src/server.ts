@@ -29,10 +29,11 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   if (arr.length >= max) { map.set(ip, arr); return true; }
   arr.push(now); map.set(ip, arr); return false;
 }
-const QA_HITS = new Map<string, number[]>();
+const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
 const publishLimited = (ip: string) => limited(PUB_HITS, PUB_MAX_PER_IP, ip); // /api/page/publish: cheap + frequent during editing
 const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
+const formLimited = (ip: string) => limited(FORM_HITS, 30, ip);               // produced-site form submissions, anti-spam
 const WEB = new URL('../web/', import.meta.url);
 
 const STATIC: Record<string, string> = {
@@ -166,6 +167,26 @@ const server = http.createServer(async (req, res) => {
       if (!claim.rowCount) return send(res, 409, 'application/json', '{"error":"already publishing"}');
       republishPage(pool, id, slug).catch((e) => console.error('republish', id, slug, e?.message));   // fire-and-forget; status polled
       return send(res, 202, 'application/json', '{"ok":true,"state":"publishing"}');
+    }
+
+    // ---- Full-stack: a produced site's form posts here -> Postgres ----
+    const submitM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/submit$/i);
+    if (submitM && req.method === 'POST') {
+      const sid = submitM[1];
+      const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
+      if (formLimited(ip)) return send(res, 429, 'application/json', '{"error":"too many submissions — try again shortly"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+      const form = String(b.form || 'contact').slice(0, 60);
+      const data = (b.data && typeof b.data === 'object') ? b.data : {};
+      if (!(await pool.query('select 1 from projects where id=$1', [sid])).rows[0]) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      await pool.query('insert into site_submissions(project_id,form,data) values($1,$2,$3)', [sid, form, JSON.stringify(data)]);
+      return send(res, 200, 'application/json', '{"ok":true}');
+    }
+    if (path === '/api/submissions') {
+      const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
+      const r = await pool.query('select form, data, created_at from site_submissions where project_id=$1 order by created_at desc limit 200', [id]);
+      return send(res, 200, 'application/json', JSON.stringify({ submissions: r.rows }));
     }
 
     // ---- Visual QA: a vision model reads the produced pages + reports issues ----

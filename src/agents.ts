@@ -31,6 +31,7 @@ const ROLE: Record<string, string> = {
                '- {"type":"split","image":"2-4 word photo search","eyebrow":"...","title":"...","body":"a paragraph","cta":"label","reverse":false}\n' +
                '- {"type":"gallery","title":"...","images":["2-4 word photo search", "..."]}  (4-6 queries)\n' +
                '- {"type":"cta","headline":"...","body":"one line","cta":"label"}\n' +
+               '- {"type":"form","title":"...","intro":"one line","cta":"Send","fields":[{"name":"name","label":"Full name"},{"name":"email","label":"Email","type":"email"},{"name":"message","label":"Message","type":"textarea"}]}  (a REAL form whose submissions are stored in the database — put one on a contact / get-in-touch / sign-up / stockists page)\n' +
                'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way); fonts must be one of Grotesk, Inter, Fraunces. JSON ONLY.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
