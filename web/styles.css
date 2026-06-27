@@ -121,3 +121,36 @@ p{margin:0} .muted{color:var(--muted)} .faint{color:var(--faint)}
 .foot{margin-top:auto; border-top:1px solid var(--line); padding:var(--s5);
   display:flex; gap:var(--s4); justify-content:space-between; flex-wrap:wrap; font-size:13px; color:var(--muted)}
 .empty{color:var(--muted); padding:var(--s7); text-align:center; border:1px dashed var(--line); border-radius:var(--r3)}
+
+/* ---- KPI strip ---- */
+.kpis{display:grid; grid-template-columns:repeat(2,1fr); gap:var(--s3); margin:var(--s2) 0 var(--s4)}
+@media(min-width:680px){ .kpis{grid-template-columns:repeat(4,1fr)} }
+@media(min-width:1000px){ .kpis{grid-template-columns:repeat(8,1fr)} }
+.kpi{background:var(--surface); border:1px solid var(--line); border-radius:var(--r2); padding:var(--s3) var(--s3); border-top:2px solid var(--line)}
+.kpi-label{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em}
+.kpi-value{font-family:var(--font-display); font-weight:700; font-size:21px; margin:3px 0 1px; font-variant-numeric:tabular-nums}
+.kpi-sub{font-size:11px; color:var(--faint)}
+.kpi.tone-good{border-top-color:var(--st-done)} .kpi.tone-warn{border-top-color:var(--st-ready)}
+.kpi.tone-bad{border-top-color:var(--st-failed)} .kpi.tone-neutral{border-top-color:var(--accent)}
+.hint{font-size:12px; color:var(--faint); margin:0 0 var(--s2)}
+
+/* ---- KPI mini on project cards ---- */
+.kpi-mini{display:flex; gap:var(--s4); margin-top:var(--s4); font-size:12px; color:var(--muted)}
+.kpi-mini b{color:var(--text); font-variant-numeric:tabular-nums}
+.kpi-mini .warn b{color:var(--st-ready)}
+
+/* ---- output drawer (the human bridge) ---- */
+.drawer{position:fixed; top:0; right:0; height:100vh; width:min(560px,94vw); z-index:100;
+  background:var(--surface-2); border-left:1px solid var(--line); box-shadow:var(--shadow);
+  transform:translateX(102%); transition:transform .22s cubic-bezier(.2,.7,.2,1);
+  padding:var(--s5); overflow-y:auto}
+.drawer.open{transform:translateX(0)}
+.drawer-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--s4)}
+.drawer .x{background:var(--surface); border:1px solid var(--line); color:var(--muted); cursor:pointer;
+  width:34px; height:34px; border-radius:var(--r1); font-size:14px}
+.drawer .x:hover{color:var(--text)}
+.drawer-title{font-size:20px; margin-bottom:4px}
+.output{white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,'SF Mono',Menlo,monospace;
+  font-size:13px; line-height:1.6; color:var(--text); background:var(--ink); border:1px solid var(--line);
+  border-radius:var(--r2); padding:var(--s4); margin:0}
+code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); padding:1px 6px; border-radius:6px; font-size:12px}

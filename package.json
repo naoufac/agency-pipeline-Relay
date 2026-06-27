@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "demo": "tsx src/demo.ts",
     "run": "tsx src/run.ts",
-    "serve": "tsx src/server.ts"
+    "serve": "tsx src/server.ts",
+    "kpi": "tsx src/kpi-cli.ts"
   },
   "dependencies": {
     "pg": "^8.13.1"

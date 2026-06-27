@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { makePool } from './db.ts';
 import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
+import { computeKpi } from './kpi.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -36,7 +37,10 @@ async function projectsJSON() {
       count(t.*)::int as total,
       count(t.*) filter (where t.status='done')::int as done,
       count(t.*) filter (where t.status='failed')::int as failed,
-      count(t.*) filter (where t.status in ('running','verifying'))::int as active
+      count(t.*) filter (where t.status in ('running','verifying'))::int as active,
+      count(t.*) filter (where t.status='done' and t.attempts<=1)::int as firstpass,
+      count(t.*) filter (where t.verify <> 'nonempty')::int as realchecks,
+      coalesce(round(extract(epoch from (max(t.updated_at) - p.created_at)))::int,0) as wall
     from projects p left join tasks t on t.project_id=p.id
     group by p.id order by p.created_at desc limit 50`);
   return r.rows;
@@ -55,6 +59,14 @@ const server = http.createServer(async (req, res) => {
     if (path === '/healthz') return send(res, 200, 'text/plain', 'ok');
     if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(url.searchParams.get('id') || undefined)));
     if (path === '/api/projects') return send(res, 200, 'application/json', JSON.stringify(await projectsJSON()));
+    if (path === '/api/kpi') return send(res, 200, 'application/json', JSON.stringify(await computeKpi(pool, url.searchParams.get('id') || undefined)));
+    if (path === '/api/output') {
+      const r = await pool.query(
+        `select t.seq, t.title, t.department, t.status, t.verify, coalesce(o.content,'') as content
+         from tasks t left join task_outputs o on o.task_id=t.id and o.is_current
+         where t.project_id=$1 and t.seq=$2`, [url.searchParams.get('id'), Number(url.searchParams.get('seq'))]);
+      return send(res, 200, 'application/json', JSON.stringify(r.rows[0] || {}));
+    }
 
     if (path === '/api/run' && req.method === 'POST') {
       let raw = ''; for await (const c of req) raw += c;
