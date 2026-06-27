@@ -380,6 +380,63 @@ function review(){
   </div>`;
 }
 
+/* ---------------- docs · visual system map ---------------- */
+function docsPage(){
+  const stages = [
+    { n:'1', t:'Brief', d:'You describe the site in a sentence.' },
+    { n:'2', t:'Plan', d:'An LLM explodes it into a dependency graph of tasks — one build per page, shared nav.' },
+    { n:'3', t:'Board', d:'The DAG lives in Postgres; an SQL trigger unblocks a task the moment its deps pass.' },
+    { n:'4', t:'Run', d:'A restart-safe runner claims ready tasks (FOR UPDATE SKIP LOCKED); each agent = one API call.' },
+    { n:'5', t:'Verify', d:'Every output passes a deterministic gate — never the agent’s word. Failures retry with feedback.' },
+    { n:'6', t:'Excellence', d:'Tailwind compiled + real fonts inlined per page → one self-contained, modern file.' },
+    { n:'7', t:'Ship', d:'A real website served at /sites/:id you can open and share.' },
+  ];
+  const infra = [
+    { t:'Relay server', d:'systemd · Restart=always', s:'ok' },
+    { t:'Cloudflare tunnel', d:'systemd · Restart=always', s:'ok' },
+    { t:'Postgres', d:'Docker · unless-stopped', s:'ok' },
+    { t:'DB backups', d:'pg_dump every 6h · 14 kept', s:'ok' },
+    { t:'Uptime monitor', d:'5 min · Telegram alerts', s:'ok' },
+    { t:'Dedicated tunnel', d:'built · DNS cutover pending', s:'wip' },
+  ];
+  const verify = [
+    ['site_renders','headless Chromium screenshot must be non-blank, structural, no external/placeholder assets'],
+    ['wcag','AA contrast on declared text/bg — always binding on branding'],
+    ['json · json:keys','output must parse and contain the required keys'],
+    ['sql_applies','the SQL actually runs against Postgres'],
+    ['min · contains · nonempty','length + substring floors'],
+  ];
+  const REPO='https://github.com/naoufac/agency-pipeline/blob/master';
+  app.innerHTML = `<div class="container section">
+    <span class="eyebrow">● how it works</span>
+    <h1 style="margin-top:14px">Relay, end to end</h1>
+    <p class="lead" style="margin-top:14px">A brief becomes a real, verified website through a dependency graph of AI department-agents — every step proven before the next begins.</p>
+
+    <h2 class="rv-h">The pipeline</h2>
+    <div class="pipe">${stages.map((s,i)=>`<div class="pipe-node"><div class="pipe-n">${s.n}</div><h3>${s.t}</h3><p class="muted">${esc(s.d)}</p></div>${i<stages.length-1?'<div class="pipe-arrow">↓</div>':''}`).join('')}</div>
+
+    <div class="rv-decision" style="border-left-color:var(--st-done)"><h3>Zero-trust, always</h3><p class="muted">A step is “done” only when a deterministic check passes — the site actually renders, the contrast actually meets AA, the JSON actually parses. If a check can’t fail, it isn’t a check.</p></div>
+
+    <h2 class="rv-h">Verify gate</h2>
+    <div class="rv-list">${verify.map(v=>`<div class="card rv-card"><code>${v[0]}</code><p class="muted" style="margin-top:8px">${esc(v[1])}</p></div>`).join('')}</div>
+
+    <h2 class="rv-h">Built to last <span class="rv-count done">live</span></h2>
+    <div class="layer-grid">${infra.map(x=>`<div class="card layer ${x.s}"><span class="lay-badge ${x.s}">${x.s==='ok'?'✓ supervised':'● in progress'}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
+
+    <h2 class="rv-h">Data model</h2>
+    <p class="muted" style="margin:6px 0 0;max-width:70ch">Postgres: <code>projects</code> → <code>tasks</code> → <code>task_dependencies</code> (the DAG) + <code>task_outputs</code> (versioned, one current) + <code>run_events</code>. A trigger and the <code>v_ready_tasks</code> view define readiness in SQL, so the scheduler stays dumb and restart-safe.</p>
+
+    <h2 class="rv-h">Full written docs</h2>
+    <div class="rv-list">
+      <a class="card rv-card" href="${REPO}/docs/ARCHITECTURE.md" target="_blank" rel="noopener"><h3 class="rv-title">Architecture ↗</h3><p class="muted" style="margin-top:8px">How it really works, table by table.</p></a>
+      <a class="card rv-card" href="${REPO}/docs/OPERATIONS.md" target="_blank" rel="noopener"><h3 class="rv-title">Operations runbook ↗</h3><p class="muted" style="margin-top:8px">Deploy, restart, troubleshoot, survive reboot.</p></a>
+      <a class="card rv-card" href="${REPO}/AGENTS.md" target="_blank" rel="noopener"><h3 class="rv-title">Agent guide ↗</h3><p class="muted" style="margin-top:8px">For the next AI or dev continuing this.</p></a>
+      <a class="card rv-card" href="${REPO}/docs/HARDENING.md" target="_blank" rel="noopener"><h3 class="rv-title">Hardening backlog ↗</h3><p class="muted" style="margin-top:8px">What’s done vs tracked for scale.</p></a>
+    </div>
+    <p style="margin-top:40px;display:flex;gap:10px;flex-wrap:wrap"><a class="btn" href="#/review">See the review →</a><a class="btn btn-ghost" href="#/">Build a site</a></p>
+  </div>`;
+}
+
 /* ---------------- router ---------------- */
 function router(){
   clearPoll(); closeDrawer(false); navLinks?.classList.remove('open');
@@ -400,6 +457,7 @@ function router(){
   else if (seg[0] === 'new') { navPath = '/new'; newSite(); }
   else if (seg[0] === 'roadmap') { navPath = '/roadmap'; roadmap(); }
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
+  else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
   else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();

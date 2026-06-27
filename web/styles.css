@@ -287,3 +287,17 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
 .sev-medium{background:rgba(90,141,238,.16);color:var(--st-running)}
 .sev-low{background:var(--surface-2);color:var(--muted)}
 .sev-cross{background:rgba(160,108,213,.16);color:var(--st-verifying)}
+
+/* ============ docs · visual system map ============ */
+.pipe{display:flex;flex-direction:column;gap:8px;margin-top:20px;max-width:760px}
+.pipe-node{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r2);padding:14px 18px}
+.pipe-node h3{font-size:16px;margin-bottom:2px}
+.pipe-n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--surface-2);color:var(--accent-2);font-family:var(--font-display);font-weight:700;font-size:12px;float:right}
+.pipe-arrow{color:var(--faint);text-align:center;font-size:14px;line-height:1}
+.layer-grid{display:grid;gap:12px;margin-top:18px;grid-template-columns:1fr}
+@media(min-width:640px){ .layer-grid{grid-template-columns:repeat(3,1fr)} }
+.layer{padding:16px 18px}
+.layer.ok{border-left:3px solid var(--st-done)} .layer.wip{border-left:3px solid var(--st-ready)}
+.lay-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:var(--rpill)}
+.lay-badge.ok{background:rgba(54,179,126,.14);color:var(--st-done)} .lay-badge.wip{background:rgba(224,179,65,.16);color:var(--st-ready)}
+a.card.rv-card{display:block} a.card.rv-card:hover{border-color:var(--accent)}
