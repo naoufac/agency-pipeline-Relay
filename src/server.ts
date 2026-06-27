@@ -185,7 +185,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (path === '/api/submissions') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');
-      const r = await pool.query('select form, data, created_at from site_submissions where project_id=$1 order by created_at desc limit 200', [id]);
+      const form = url.searchParams.get('form');   // public feeds pass a form name; the operator's Data tab omits it (all forms)
+      const r = form
+        ? await pool.query('select form, data, created_at from site_submissions where project_id=$1 and form=$2 order by created_at desc limit 200', [id, form.slice(0, 60)])
+        : await pool.query('select form, data, created_at from site_submissions where project_id=$1 order by created_at desc limit 200', [id]);
       return send(res, 200, 'application/json', JSON.stringify({ submissions: r.rows }));
     }
 

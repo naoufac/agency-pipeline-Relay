@@ -113,6 +113,17 @@ export const SECTIONS: Record<string, (s: any) => string> = {
   cta: (s) => `<section class="section"><div class="container"><div class="cta">
     <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${s.cta ? `<a class="btn" href="#">${esc(s.cta)}</a>` : ''}
   </div></div></section>`,
+  // FULL-STACK read path: a LIVE list of the site's own submissions to one named form (a directory /
+  // listings / reviews / wall). Renders an empty-state at build/gate time (file://, no server) and is
+  // filled by the renderer's feed loader when served over HTTP. data-feed = the form name it reads.
+  feed: (s) => {
+    const form = esc(s.form || 'listing');
+    const empty = esc(s.empty || 'Nothing here yet — be the first to add one.');
+    return `<section class="section"><div class="container">
+      ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+      <div class="grid grid-3 feed" data-feed="${form}" style="margin-top:2.4rem"><p class="muted feed-empty">${empty}</p></div>
+    </div></section>`;
+  },
   // FULL-STACK: a real form that posts to /api/site/<id>/submit -> Postgres
   form: (s) => {
     const fields = (Array.isArray(s.fields) && s.fields.length ? s.fields : [
