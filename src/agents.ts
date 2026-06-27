@@ -14,14 +14,16 @@ export type Ctx = { brief: string; upstream: { seq: number; department: string; 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
   research:    'You are the Research department of an automated creative agency. From the brief, output concise market & positioning research. Plain text.',
-  branding:    'You are the Branding department. Output brand tokens — palette as hex codes, typography, radius — plus a one-line guide. You MUST include hex colours like #0B6E4F.',
+  branding:    'You are the Branding department. Output ONLY a JSON object of design tokens: {"palette":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex"},"type":{"display":"Font","body":"Font"},"radius":"12px"}. CRITICAL: text vs bg MUST meet WCAG AA contrast (>=4.5:1) — dark text on a light bg or vice-versa. JSON only, no prose.',
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',
   database:    'You are the Database department. Output ONLY a runnable PostgreSQL CREATE TABLE block for this app — no prose, no markdown fences.',
   design:      'You are the Design-system department. Using the brand tokens above, list the components and how the tokens map.',
   media:       'You are the Art Direction department. Describe the visual/imagery direction (mood, hero imagery, iconography) for this website. Concrete and on-brief.',
-  content:     'You are the Content department. If asked for sitemap/IA, list the page sections in order. If asked for copy, write the actual final copy for each section in the brand tone. Real copy, not placeholders.',
+  content:     'You are the Content department. Output ONLY valid JSON. For information architecture: {"sections":[{"id":"hero","title":"..."}, ...]} tailored to the brief. For copy: {"<sectionId>":{"headline":"...","body":"..."}, ...} with real copy. JSON only — no prose, no markdown.',
+  copywriting: 'You are the Copywriting department. Output ONLY valid JSON mapping section ids to final on-brand copy: {"hero":{"headline":"...","subhead":"...","cta":"..."},"about":{"body":"..."}, ...} with real copy for this brief. JSON only.',
+  strategy:    'You are the Strategy department. Give a concrete, brief-specific plan: positioning, the sections the site needs and why, and the single key message. Plain text, specific.',
   auth:        'You are the Auth department. Specify the accounts/authentication model.',
-  build:       'You are the Build department. Using the brand tokens, sitemap, copy and art direction above, output a COMPLETE, polished, self-contained single-file website as ONE HTML document. Start with <!doctype html>. Inline ALL CSS in a <style> tag and any JS in a <script> tag — no external files, no build step, no frameworks. Apply the brand palette and typography EXACTLY. Use the real copy provided. Make it genuinely well-designed and responsive. Output ONLY the raw HTML — no markdown, no code fences, no commentary before or after.',
+  build:       'You are the Build department. Upstream you receive brand tokens (JSON: palette hex + fonts), a sitemap (JSON sections) and copy (JSON keyed by section id). Output a COMPLETE, polished, self-contained single-file website as ONE HTML document starting with <!doctype html>. Inline ALL CSS in <style> and any JS in <script> — no external files/frameworks. Use the EXACT palette hex and fonts from the tokens, the section order from the sitemap, and the EXACT copy provided. Do NOT use <img> tags to external files (none exist and they would 404) — create all visuals with CSS gradients, colours, shapes and inline SVG. Make it responsive and genuinely well-designed. Output ONLY raw HTML — no markdown, no fences, no commentary.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
 };
@@ -87,12 +89,13 @@ create table orders (
 function stub(department: string, brief: string): string {
   switch (department) {
     case 'research':    return `Research for: ${brief}\nPremium urban market; cash-on-delivery common; FR/AR conventions.`;
-    case 'branding':    return `Brand tokens\nprimary=#0B6E4F  secondary=#E9C46A\ntypography=Inter  radius=12px`;
+    case 'branding':    return JSON.stringify({ palette: { primary: '#0B6E4F', accent: '#E9C46A', bg: '#FFFFFF', text: '#11201A' }, type: { display: 'Inter', body: 'Inter' }, radius: '12px' });
     case 'stack':       return `Stack decision: Supabase (Postgres) backend + Next.js PWA.`;
     case 'database':    return DB_SQL;
     case 'design':      return `Design system: brand tokens applied; 12 base components.`;
     case 'media':       return `Media: 20 product images sourced + brand assets.`;
-    case 'content':     return `Copy: premium, locally-proud microcopy set.`;
+    case 'content':     return JSON.stringify({ sections: [{ id: 'hero', title: 'Hero' }, { id: 'about', title: 'About' }, { id: 'contact', title: 'Contact' }] });
+    case 'copywriting': return JSON.stringify({ hero: { headline: 'Welcome', subhead: 'Built by Relay', cta: 'Get started' }, about: { body: 'About us.' }, contact: { body: 'Reach us.' } });
     case 'auth':        return `Auth: phone + password, OTP, sessions.`;
     case 'frontend':    return `Screens built: browse, cart, checkout, track. (applies brand tokens)`;
     case 'build':       return `<!doctype html><html><head><meta charset="utf-8"><title>${brief}</title>
