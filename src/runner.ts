@@ -68,6 +68,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       // deterministic safety net: a website must never ship broken external/placeholder images
       body = body
         .replace(/<script\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[\s\S]*?<\/script>/gi, '')   // strip external scripts (e.g. tailwind CDN) — we compile+inline
+        .replace(/<link\b[^>]*\bhref\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')               // strip external links (e.g. Google Fonts preconnect/css) — fonts are inlined
         .replace(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^>]*?>/gi, '')
         .replace(/<img\b[^>]*placeholder[^>]*?>/gi, '')
         .replace(/url\(\s*["']?https?:\/\/[^)]*\)/gi, "linear-gradient(135deg,#e9ecf3,#c9d2e3)")
