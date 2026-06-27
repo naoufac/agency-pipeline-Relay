@@ -10,9 +10,12 @@
     "run": "tsx src/run.ts",
     "serve": "tsx src/server.ts",
     "kpi": "tsx src/kpi-cli.ts",
+    "mail:test": "tsx src/mail-cli.ts",
     "postinstall": "[ -x tools/tailwindcss ] || bash tools/setup.sh"
   },
   "dependencies": {
+    "@types/nodemailer": "^8.0.1",
+    "nodemailer": "^9.0.1",
     "pg": "^8.13.1"
   },
   "devDependencies": {
