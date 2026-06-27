@@ -53,12 +53,11 @@ async function submitBrief(){
   try { const r = await j('/api/run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
         location.hash = '#/p/' + r.id; } catch { btn.textContent = 'Build my site →'; btn.disabled = false; }
 }
-function siteCard(p){
+// one card's inner HTML — STABLE preview URL (no cache-bust → browser caches it, never re-fetches)
+function cardInner(p){
   const st = projStatus(p), label = st === 'done' ? 'ready' : st;
-  return `<div class="card pcard" data-go="#/p/${p.id}">
-    <div class="thumb${p.site ? '' : ' noimg'}">
-      ${p.site ? `<img src="/sites/${p.id}/preview.png?ts=${Date.now()}" alt="" onerror="this.parentNode.classList.add('noimg');this.remove()"/>` : ''}
-    </div>
+  return `
+    <div class="thumb${p.site ? '' : ' noimg'}">${p.site ? `<img src="/sites/${p.id}/preview.png" alt="" loading="lazy" onerror="this.parentNode.classList.add('noimg');this.remove()"/>` : ''}</div>
     <div class="pcard-body">
       <div class="brief">${esc(p.brief)}</div>
       <div class="row" style="justify-content:space-between;margin-top:14px">
@@ -67,24 +66,42 @@ function siteCard(p){
           ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${p.site}">Open ↗</a>`
           : `<a class="btn btn-sm btn-ghost" href="#/p/${p.id}">Open project</a>`}
       </div>
-    </div></div>`;
+    </div>`;
 }
+// Home reconciles IN PLACE: each card created once; only re-rendered when its own data
+// changes (so finished cards + their images are never touched → no flicker/reload);
+// polling stops the instant nothing is building. No cache-busting, no full-grid churn.
 function home(){
-  app.innerHTML = `<div class="container">${briefBar()}<div id="sites"></div></div>`;
+  app.innerHTML = `<div class="container">${briefBar()}
+    <div id="bgroup" style="display:none"><div class="kpi-label" style="margin:28px 0 12px">Building</div><div id="bgrid" class="grid grid-3"></div></div>
+    <div id="rgroup" style="display:none"><div class="kpi-label" style="margin:28px 0 12px">Ready</div><div id="rgrid" class="grid grid-3"></div></div>
+    <div id="emptywrap"></div></div>`;
   document.getElementById('go').onclick = submitBrief;
   document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
-  const grp = (title, arr) => arr.length
-    ? `<div class="kpi-label" style="margin:28px 0 14px">${title}</div><div class="grid grid-3">${arr.map(siteCard).join('')}</div>` : '';
+  const cards = new Map();                                  // id -> { el, sig, building }
+  const bgrid = document.getElementById('bgrid'), rgrid = document.getElementById('rgrid');
   async function load(){
-    let list; try { list = await j('/api/projects'); } catch { return; }
-    const wrap = document.getElementById('sites'); if (!wrap) return;
-    if (!list.length){ wrap.innerHTML = `<div class="empty">No sites yet. Describe one above and Relay builds it.</div>`; return; }
-    const building = list.filter(p => projStatus(p) === 'running');
-    const rest = list.filter(p => projStatus(p) !== 'running');
-    wrap.innerHTML = grp('Building', building) + grp('Ready', rest);
-    wrap.querySelectorAll('.pcard').forEach(c => c.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = c.getAttribute('data-go'); }));
+    let list; try { list = await j('/api/projects'); } catch { return true; }
+    document.getElementById('emptywrap').innerHTML = list.length ? '' : `<div class="empty">No sites yet. Describe one above and Relay builds it.</div>`;
+    let building = 0;
+    for (const p of list){
+      const st = projStatus(p), isB = st === 'running'; if (isB) building++;
+      const sig = `${st}|${p.done}|${p.total}|${p.site ? 1 : 0}`;
+      let rec = cards.get(p.id);
+      if (!rec){
+        const el = document.createElement('div'); el.className = 'card pcard'; el.innerHTML = cardInner(p);
+        el.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = '#/p/' + p.id; });
+        rec = { el, sig, building: isB }; cards.set(p.id, rec); (isB ? bgrid : rgrid).appendChild(el);
+      } else if (rec.sig !== sig){                          // changed -> re-render THIS card only
+        rec.el.innerHTML = cardInner(p); rec.sig = sig;
+        if (rec.building !== isB){ (isB ? bgrid : rgrid).appendChild(rec.el); rec.building = isB; }
+      }                                                    // unchanged -> untouched (no reload)
+    }
+    document.getElementById('bgroup').style.display = bgrid.children.length ? '' : 'none';
+    document.getElementById('rgroup').style.display = rgrid.children.length ? '' : 'none';
+    return building > 0;
   }
-  load(); poll = setInterval(load, 4000);
+  load().then(b => { if (b) poll = setInterval(async () => { if (!(await load())) clearPoll(); }, 4000); });
 }
 
 function newSite(){

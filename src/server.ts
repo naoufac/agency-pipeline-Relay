@@ -72,7 +72,9 @@ const server = http.createServer(async (req, res) => {
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {
         const ext = (f.split('.').pop() || '').toLowerCase();
-        return send(res, 200, MIME[ext] || 'application/octet-stream', readFileSync(f));
+        res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'public, max-age=3600' });
+        res.end(readFileSync(f));
+        return;
       }
       return send(res, 404, 'text/plain', 'site not found');
     }
