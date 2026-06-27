@@ -1,47 +1,105 @@
-# agency-pipeline
+# Relay
 
-An autonomous **agency pipeline**: a brief comes in, a planner explodes it into a dependency graph of tasks, and a chain of AI calls fires stage-by-stage — parallel where independent, sequential where one feeds the next — like a real agency moving work between departments. Fully autonomous, zero-trust verification, real artifacts.
+Relay is an autonomous **agency pipeline**: you hand it a one-line brief, an LLM planner explodes it into a dependency DAG of tasks, AI "department agents" (research → branding → content → build → QA) run them stage-by-stage — parallel where independent, sequential where one feeds the next — every output passes a **deterministic verify gate** before it counts as done, and the result is a real, shippable, multi-page website served live at `/sites/<id>/`. The website *is* the product: submit a brief on the board and watch the agency build it in front of you.
 
-➡️ **[MISSION.md](MISSION.md)** — what we're building and the locked principles.
+## Locked principles (non-negotiable)
 
-## Docs
+These are the invariants. Change anything else, but not these.
 
-- **[docs/SPEC.md](docs/SPEC.md)** — the full architecture spec (data model, scheduler, agent contract, verification, worked example).
-- **[docs/board-supabase-vs-clickup.md](docs/board-supabase-vs-clickup.md)** — why Supabase is the engine.
-- **Visuals** (`docs/*.svg` / `*.png`): `mm-concept` (the idea), `mm-tech` (how it runs), `mm-architecture` (system), `dag-delivery` (dependency layers, worked example).
+1. **Autonomous — brief in, result out.** No human in the loop. The operator's only touchpoints are the brief and the finished site.
+2. **An agent is just one API call.** Context in (brief + the upstream outputs it depends on) → text/artifact out. No hidden internal structure, no multi-step agent frameworks. One department = one prompt = one call.
+3. **Zero-trust, deterministic verify.** A task is `done` only when an automated check passes — the SQL applies, the JSON parses, the contrast hits WCAG AA, the page actually renders in headless Chromium. Never an agent's word, never a human gate.
+4. **Real artifacts, not specs.** The agent returns HTML/JSON as text; the runner writes the file and runs the check against the file on disk.
+5. **Generic.** Nothing is hardcoded to one brand or vertical. The same pipeline ships a restaurant, a SaaS, or a portfolio — the planner adapts the page set and tasks to the brief.
+6. **The dashboard never lies.** State lives in Postgres and is reported honestly: a deadlocked project shows `blocked`, not "running"; only genuinely deterministic checks count toward "verification rigor". The runner is a thin, disposable, restart-safe loop over the database.
+
+## 60-second quickstart
+
+**Prerequisites:** Node 22+, Docker (for Postgres), `chromium-browser` on `PATH` (the render gate uses it).
+
+```bash
+# 1. clone + install
+git clone <this-repo> agency-pipeline && cd agency-pipeline
+npm install
+
+# 2. vendor the Tailwind v4 standalone binary (~120MB, gitignored) used by the excellence layer
+bash tools/setup.sh
+
+# 3. configure env (copy the template, then fill in the MiniMax key)
+cp .env.example .env
+#   DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5439/agency
+#   MINIMAX_API_KEY=<your key>          # leave blank to run with offline deterministic stubs
+#   MINIMAX_BASE_URL=https://api.minimax.io/v1
+#   MINIMAX_MODEL=MiniMax-Text-01
+
+# 4. start Postgres (the board / single source of truth)
+docker run -d --name ap-pg --restart unless-stopped \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=agency -p 5439:5432 postgres:16
+
+# 5. load the schema (DDL + unblock trigger + v_ready_tasks view)
+docker exec -i ap-pg psql -U postgres -d agency < db/schema.sql
+
+# 6. start Relay (web app + JSON API + the runner, on 0.0.0.0:8787)
+set -a && . ./.env && set +a        # load env into the shell
+npm exec tsx src/server.ts
+```
+
+Then open the board:
+
+- **Live:** https://board.naples.agency
+- **Local:** http://localhost:8787
+
+Type a brief (e.g. *"a specialty coffee roaster in Lisbon"*), submit, and the board fills in: the task DAG runs stage-by-stage, KPIs update live, and a real multi-page site appears under **Your sites** → its workspace → the live `/sites/<id>/` iframe.
+
+> **No MiniMax key?** Leave `MINIMAX_API_KEY` blank — the agents fall back to deterministic stubs so the whole engine (plan → run → verify → restart-safe resume) still works offline. Set the key for real, on-brief output.
 
 ## How it runs
 
 ```
-planner (1 call) ─► board (Supabase) ─► scheduler loop ─► done
-                                         find ready → run agent → store → verify → unblock → repeat
+brief
+  │  plan() — one LLM call
+  ▼
+planner ──► board (Postgres) ──► runLoop: claim ready → run agent → write artifact → verify → unblock → repeat ──► done
+            tasks · deps · outputs        (FOR UPDATE SKIP LOCKED, lease + reclaim = restart-safe)
 ```
 
-A task is **ready** when all upstream dependencies are `done`; finishing a task unblocks its successors. Completion = an automated check passing, never an agent's claim. State lives in Postgres, so the runner is disposable and restart-safe.
+A task is **ready** when all its upstream dependencies are `done`. Finishing a task fires the SQL `trg_unblock` trigger, which promotes any successor whose upstreams are now all done. The scheduler holds no graph logic — readiness is recomputed from the rows, so you can kill the server mid-run and the boot-resume picks up exactly where it left off.
 
-## Layout
+## Repo layout
 
 ```
-MISSION.md            north star
-docs/SPEC.md          the plan
-docs/                 visuals + board comparison
-tools/                offline SVG renderers for the diagrams
+README.md            you are here — what it is + quickstart
+MISSION.md           the north-star statement of the locked principles
+ROADMAP.md           history + forward plan (also live in-app at /#/roadmap)
+
+db/schema.sql        the engine: projects, tasks, task_dependencies, task_outputs,
+                     run_events + the unblock trigger + the v_ready_tasks view
+
+src/
+  server.ts          HTTP server: serves web/, the JSON API (/api/board|projects|kpi|output|run),
+                     the produced sites (/sites/<id>/*), boot-resumes unfinished projects, cache-busts assets
+  planner.ts         LLM planner: brief → {pages, tasks}; forces one render-verified build task per page
+                     and one canonical WCAG-checked branding task; falls back to a template if the LLM is down
+  runner.ts          runLoop: claim (SKIP LOCKED) + lease/reclaim, run the agent, sanitize + applyExcellence,
+                     write the artifact, verify, retry-with-feedback
+  agents.ts          the agent contract: a department role prompt + context → one MiniMax call → text/JSON/HTML
+  verify.ts          the zero-trust gates: nonempty · contains · min:N · json[:keys] · wcag · sql_applies · site_renders
+  excellence.ts      compiles vendored Tailwind v4 scoped to each page (~150ms) + inlines base64 WOFF2 fonts
+  fonts.ts           the base64 @font-face blocks inlined by the excellence layer
+  kpi.ts             computeKpi: honest KPIs (real checks only; deadlock ⇒ 'blocked', never 'running')
+  db.ts              pg Pool + small DB helpers
+  demo.ts / run.ts / kpi-cli.ts   CLI entry points (demo proves crash + restart resumability)
+
+web/                 the dashboard: index.html (nav), app.js (hash router #/ , #/p/:id, #/roadmap), styles.css
+tools/               setup.sh (vendors Tailwind), the offline SVG diagram renderers
+assets/              the WOFF2 source fonts
+sites/               the produced websites (gitignored) — one dir per project id
+docs/                the deep docs (architecture, spec, infra decisions, diagrams)
 ```
 
-## Run it
+## Where to go next
 
-```bash
-docker run -d --name ap-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=agency -p 5439:5432 postgres:16
-npm install
-npm run build            # typecheck (a real check)
-npm run demo             # plan -> run -> CRASH after 3 steps -> restart -> finish, with assertions
-npm run run -- "build a delivery app"   # plan + run a brief to completion
-```
-
-`db/schema.sql` is the engine (DDL + unblock trigger + `v_ready_tasks`). `src/`: `planner` (brief → DAG), `runner` (the scheduler loop), `agents` (one API call each), `verify` (the deterministic checks).
-
-**Agents use MiniMax** (OpenAI-compatible). Set `MINIMAX_API_KEY` (and optionally `MINIMAX_MODEL`, `MINIMAX_BASE_URL`) to go live; with no key, deterministic stubs run so the engine still works offline. See `.env.example`.
-
-## Status
-
-**MVP engine works and is proven.** `npm run demo` plans a brief, runs it stage-by-stage, **crashes after 3 steps, restarts, and finishes** — asserting against the DB: 11/11 tasks verified `done`, the unblock trigger fired 10×, and the database task's SQL was verified by actually applying it on Postgres. Next: swap stub agents for live Claude calls; LLM planner; real Supabase.
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how the pieces fit: the data model, the scheduler loop, the agent contract, every verify rule, and the excellence layer, with a worked example.
+- **[docs/OPERATIONS.md](docs/OPERATIONS.md)** — running it for real: the Postgres container, starting/supervising the server, the proxy/tunnel that fronts `board.naples.agency`, surviving reboots, and what *not* to touch on the host.
+- **[AGENTS.md](AGENTS.md)** — the guide for an AI agent working *on* this repo: the invariants, the verify-or-it-isn't-done rule, and where each concern lives.
+- **[MISSION.md](MISSION.md)** / **[ROADMAP.md](ROADMAP.md)** — the principles and the plan. `docs/SPEC.md` is the original full spec; `docs/*.svg` are the architecture diagrams.

@@ -23,7 +23,10 @@ export function tailwindAvailable(): boolean { return existsSync(TW); }
 // Returns the page with compiled Tailwind + inline fonts injected. Never throws — on any
 // failure it returns the input unchanged so a build is never broken by the excellence step.
 export function applyExcellence(html: string): string {
-  if (!existsSync(TW)) return html;
+  if (!existsSync(TW)) {
+    console.error('[excellence] tailwindcss binary missing at ' + TW + ' — shipping UN-STYLED html. Run `bash tools/setup.sh`.');
+    return html;
+  }
   let dir: string | null = null;
   try {
     dir = mkdtempSync(join(tmpdir(), 'relay-tw-'));
@@ -35,13 +38,13 @@ export function applyExcellence(html: string): string {
     execFileSync(TW, ['-i', join(dir, 'in.css'), '-o', join(dir, 'out.css'), '--minify'], { timeout: 20000, stdio: 'ignore' });
     let css = readFileSync(join(dir, 'out.css'), 'utf8');
     css = css.replace(/^\s*\/\*[\s\S]*?\*\//, '').trim();           // strip leading license comment (contains a URL)
-    if (!css) return html;
+    if (!css) { console.error('[excellence] tailwind produced empty css — shipping un-styled html.'); return html; }
     const style = `<style>${css}</style>`;
     // drop any stylesheet <link> / app.css the agent may have added; inline our compiled CSS instead
     let out = html.replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, '').replace(/<link\b[^>]*app\.css[^>]*>/gi, '');
     if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, style + '</head>');
     if (/<body[^>]*>/i.test(out)) return out.replace(/(<body[^>]*>)/i, '$1' + style);
     return style + out;
-  } catch { return html; }
+  } catch (e: any) { console.error('[excellence] compile failed — shipping un-styled html:', e?.message ?? e); return html; }
   finally { if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch {} } }
 }

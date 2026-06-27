@@ -11,6 +11,7 @@ import { SITES } from './verify.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
+if (!process.env.MINIMAX_API_KEY) console.error('⚠️  MINIMAX_API_KEY not set — Relay will ship STUB sites, not real work. Set it in .env before serving production traffic.');
 const WEB = new URL('../web/', import.meta.url);
 
 const STATIC: Record<string, string> = {

@@ -1,0 +1,16 @@
+[Unit]
+Description=Anouf Chat tunnel (cloudflared, named tunnel — no 100s timeout)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel --config /root/.cloudflared/config.yml run anouf-chat
+Restart=always
+RestartSec=5
+User=root
+WorkingDirectory=/root/.cloudflared
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
