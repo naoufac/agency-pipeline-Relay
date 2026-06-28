@@ -259,7 +259,7 @@ const server = http.createServer(async (req, res) => {
       let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
       if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
       const id = await plan(pool, brief);
-      runLoop(pool, id, { cap: 4 }).catch((e) => console.error('run', id, e?.message));  // fire-and-forget; board shows it live
+      runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('run', id, e?.message));  // fire-and-forget; board shows it live
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
 
@@ -287,7 +287,7 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 (async () => {
   try {
     const r = await pool.query("select distinct project_id from tasks where status in ('ready','running','verifying','blocked')");
-    for (const row of r.rows) runLoop(pool, row.project_id, { cap: 4 }).catch(() => {});
+    for (const row of r.rows) runLoop(pool, row.project_id, { cap: 4, review: true }).catch(() => {});
     if (r.rows.length) console.log('resuming', r.rows.length, 'unfinished project(s)');
   } catch (e: any) { console.error('resume failed', e?.message); }
 })();

@@ -16,10 +16,9 @@
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
-    "@types/ws": "^8.18.1",
     "nodemailer": "^9.0.1",
     "pg": "^8.13.1",
-    "ws": "^8.21.0"
+    "playwright": "^1.61.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

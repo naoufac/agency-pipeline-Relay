@@ -7,11 +7,9 @@
 //   npm run theme:check
 import { mkdirSync, writeFileSync, existsSync, statSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { renderPage } from './render.ts';
+import { screenshot, closeBrowser } from './browser.ts';
 import { THEME_NAMES, type ThemeName } from './themes.ts';
-const execFileP = promisify(execFile);
 
 const OUT = new URL('../sites/_themecheck/', import.meta.url);
 
@@ -71,11 +69,7 @@ function staticGate(html: string): string | null {
 }
 
 async function shoot(path: string, shot: string, w: number, h: number) {
-  try {
-    await execFileP('chromium-browser', ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-      '--hide-scrollbars', '--force-device-scale-factor=1', '--screenshot=' + shot, `--window-size=${w},${h}`,
-      '--virtual-time-budget=7000', 'file://' + path], { timeout: 45000, killSignal: 'SIGKILL' });
-  } catch {}
+  try { writeFileSync(shot, await screenshot('file://' + path, { width: w, height: h })); } catch {}
   return existsSync(shot) ? statSync(shot).size : 0;
 }
 
@@ -124,6 +118,7 @@ async function main() {
   }
 
   console.log(failures ? `\nFAILED: ${failures}/${THEME_NAMES.length} themes have problems` : `\nOK: all ${THEME_NAMES.length} themes render, pass the gate, and meet AA — output in sites/_themecheck/`);
+  await closeBrowser();
   process.exit(failures ? 1 : 0);
 }
 main();

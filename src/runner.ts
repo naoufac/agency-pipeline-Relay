@@ -152,7 +152,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
 // maxSteps lets us simulate a crash mid-run to prove resumability.
 export async function runLoop(
   pool: pg.Pool, projectId: string,
-  opts: { runnerId?: string; cap?: number; maxSteps?: number } = {}
+  opts: { runnerId?: string; cap?: number; maxSteps?: number; review?: boolean } = {}
 ): Promise<{ stopped: string; steps: number }> {
   const runnerId = opts.runnerId ?? 'runner-1';
   const cap = opts.cap ?? 4;
@@ -177,9 +177,11 @@ export async function runLoop(
   const c = await counts(pool, projectId);
   const done = (c.blocked + c.ready + c.running) === 0 && c.failed === 0;
   await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
-  if (done) {
-    reviewSite(pool, projectId).catch(() => {});            // auto visual-QA (vision model) on completion
-    dogfoodSite(pool, projectId).catch(() => {});           // auto interaction-QA: a real browser uses the site
+  // auto-review only in the SERVER context (opts.review). CLI/demo/scratch runs don't launch a browser
+  // (it would keep a short-lived process alive and isn't wanted for offline tests).
+  if (done && opts.review) {
+    reviewSite(pool, projectId).catch(() => {});            // visual QA + board thumbnail
+    dogfoodSite(pool, projectId).catch(() => {});           // interaction QA: a real browser uses the site
   }
   return { stopped: done ? 'complete' : 'blocked', steps };
 }
