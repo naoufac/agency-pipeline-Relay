@@ -40,8 +40,14 @@ The schema compiler is live; next: **typed forms generated from the model** (a f
 ### Wider component library (in progress)
 Shipped: **pricing · testimonials · FAQ · stats** (+ hero/features/split/gallery/cta/form/feed/collection). Next: team, menu, logos, and per-section variants — so more briefs map cleanly onto vetted parts; the puzzle grows, the renderer stays deterministic.
 
-### Trustworthy review (in progress)
-The interaction reviewer (`dogfood`) now drives a real browser over CDP: every link load-tested, every CTA labelled + targeted, the form typed + submitted + verified, layout measured — auto-run on completion, verdict shown on each project card. Open item (see `docs/RETRO.md`): an accuracy pass on the reviewer's own headless fetches.
+### Trustworthy review ✅
+The interaction reviewer (`dogfood`) drives a real browser over CDP: every link load-tested, every CTA labelled + targeted, the form typed + submitted + verified, layout measured — auto-run on completion, verdict shown on each project card. Now **accurate**: collections are judged against the data API (rows-in-DB-but-0-rendered = a real render bug, not "empty"), forms by DB persistence (truth), not message timing. A `theme:check` gate also parses every emitted inline `<script>` as JS, so a broken client script can never ship.
+
+### NEXT (architecture) — Self-correcting loop
+The reviewer's verdict is not yet **load-bearing**: `dogfood` runs after completion and *logs*, but its findings don't feed back. Close the loop — on a high-severity finding, re-open the affected page build with the finding injected as feedback (reuse retry-with-feedback), rebuild, re-review, capped at N rounds; mark the project truly done only when interaction review passes (else flag it honestly). This completes "autonomous + zero-trust + no human in the loop" for content-level defects; system-level defects still surface to a developer + a gate.
+
+### NEXT (architecture) — Validated build-spec contract
+Robustness against malformed LLM specs is currently scattered as defensive patches in the renderer (CTA object→text, collection table fallback, …). Centralize it: one deterministic `validate/normalize` layer for the build spec (mirroring `planner.validate()`) that coerces/repairs/rejects at the boundary — making the `[object Object]`/wrong-table class structurally impossible, not patched.
 
 ### Stack router (when it earns its keep)
 The archetype classifier is the first cut. An SSG (e.g. Eleventy) only where Markdown-owned layout (blog/docs) is genuinely better; the component renderer stays the default.
