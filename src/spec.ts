@@ -269,6 +269,45 @@ export function resolveBrand(brandingContent: string, fallbackName = 'Studio', a
   return { name, cta: navCtaFor(archetype), tokens };
 }
 
+// ---- COPY-SPECIFICITY GATE (moved here from verify.ts so it can run at COMPOSE, the retryable stage) ----
+// High-precision scan for UNAMBIGUOUS template slop — every pattern is residue that never appears in real
+// marketing copy, so it can't false-fail genuine writing. Pure + exported (re-exported by verify.ts).
+export function copySlop(html: string): string | null {
+  const visible = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
+  const SLOP: [RegExp, string][] = [
+    [/lorem ipsum|dolor sit amet/i, 'lorem ipsum filler'],
+    [/\byour (tagline|headline|sub-?headline|company|business|brand|slogan|name|text|content|product|service)s? here\b/i, '"your … here" placeholder'],
+    [/\b(tagline|headline|sub-?headline|content|copy|description|text|name|slogan)s? goes? here\b/i, '"… goes here" placeholder'],
+    [/\b(insert|add|enter|type) (your |the )?(tagline|headline|name|text|content|copy|description|details|logo)\b[^.]{0,16}\bhere\b/i, '"insert … here" placeholder'],
+    [/\{\{\s*[\w.]+\s*\}\}/, 'unrendered template token ({{…}})'],
+    [/\b(todo|tbd|fixme)\b/i, 'TODO/TBD left in copy'],
+    [/@example\.(com|org|net)\b/i, 'placeholder example.com email'],
+    [/\bexample\.(com|org)\b/i, 'placeholder example.com link'],
+  ];
+  for (const [re, why] of SLOP) { const m = visible.match(re); if (m) return `${why}: "${m[0].trim().slice(0, 40)}"`; }
+  return null;
+}
+
+// Deep-collect every copy string from a page's sections (headlines, bodies, items, plans, faqs, …).
+function collectText(v: any, out: string[]): void {
+  if (v == null) return;
+  if (typeof v === 'string') { out.push(v); return; }
+  if (Array.isArray(v)) { for (const x of v) collectText(x, out); return; }
+  if (typeof v === 'object') { for (const k of Object.keys(v)) collectText(v[k], out); }
+}
+// Slop check for the COMPOSED site copy. CRITICAL: strip {{brand}} (and any {{…}}) first — those are the
+// system's intended brand token, filled deterministically at render, NOT slop. Returns a reason, or null.
+export function siteCopySlop(pages: { sections: any[] }[]): string | null {
+  const out: string[] = [];
+  for (const p of (pages || [])) collectText(p.sections, out);
+  const text = out.join(' \n ').replace(/\{\{[^}]*\}\}/g, ' ');   // legit brand tokens are NOT slop
+  const s = copySlop(text);
+  if (s) return s;
+  const ph = text.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);   // [Bracketed Placeholder]
+  if (ph) return `unfilled placeholder "${ph[0]}"`;
+  return null;
+}
+
 // ---- SITE MODEL (the CMS): ONE composition for the WHOLE website ----
 // The site is generated ONCE as a single model — every page's sections in one object — instead of one LLM
 // call per page. brand/theme/nav are single sources owned elsewhere (branding lock + planner). normalizeSite
@@ -293,6 +332,10 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     out.push({ slug: pg.slug, title: pg.title, sections: spec.sections });
   }
   if (out.length < (pages || []).length) errors.push(`only ${out.length}/${(pages || []).length} pages composed cleanly`);
+  // COPY GATE at the RETRYABLE stage: reject slop/placeholders now (compose retries with feedback) instead of
+  // letting it reach the deterministic render, where a retry can't fix it. {{brand}} is ignored (not slop).
+  const slop = siteCopySlop(out);
+  if (slop) errors.push(`slop/placeholder copy — ${slop}. Write real, specific copy for THIS brief: no lorem ipsum, no [Placeholders], no "… here", no example.com.`);
   return { site: { pages: out }, repairs, errors };
 }
 

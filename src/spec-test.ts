@@ -3,7 +3,7 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop, } from './verify.ts';
-import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent, normalizeDataModel } from './spec.ts';
+import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent, normalizeDataModel, siteCopySlop, normalizeSite } from './spec.ts';
 import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
 
@@ -241,6 +241,26 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   const r = normalizeDataModel('{"entities":[{"name":"characters","seed":[{"name":"Kaido","bounty":4611100000}]}]}');
   ok('normDataModel: int4 overflow clamped', r.ok === true && r.model.entities[0].seed[0].bounty <= 2147483647);
   ok('normDataModel: clamp recorded as repair', r.ok === true && r.repairs.some(x => /clamp/i.test(x)));
+}
+
+// ---- COPY GATE moved to COMPOSE: slop rejected at the retryable stage; {{brand}} token is NOT slop ----
+{
+  ok('siteCopySlop: lorem caught', !!siteCopySlop([{ sections: [{ type: 'hero', headline: 'Hi' }, { type: 'features', items: [{ title: 'A', body: 'Lorem ipsum dolor sit amet' }] }] }]));
+  ok('siteCopySlop: [Placeholder] caught', !!siteCopySlop([{ sections: [{ type: 'hero', headline: 'Welcome to [Studio Name]' }] }]));
+  ok('siteCopySlop: {{brand}} token is NOT slop', siteCopySlop([{ sections: [{ type: 'hero', headline: 'Welcome to {{brand}}', lead: '{{brand}} ships fast' }] }]) === null);
+  ok('siteCopySlop: real copy passes', siteCopySlop([{ sections: [{ type: 'hero', headline: 'Stone-fired pizza in Porto', lead: 'Open Tue–Sun, 6pm till late' }] }]) === null);
+
+  const pages = [{ slug: 'index', title: 'Home' }, { slug: 'about', title: 'About' }];
+  const slopModel = { pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Real specific headline for the shop' }, { type: 'features', items: [{ title: 'A', body: 'real body copy about the shop' }] }] },
+    { slug: 'about', title: 'About', sections: [{ type: 'hero', headline: 'Our story' }, { type: 'cta', headline: 'Lorem ipsum dolor sit amet' }] },
+  ] };
+  ok('normalizeSite: REJECTS composed slop (compose will retry)', normalizeSite(slopModel, pages, {}).errors.some(e => /slop|lorem/i.test(e)));
+  const cleanModel = { pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Welcome to {{brand}}' }, { type: 'features', items: [{ title: 'Fast', body: 'We deliver across the city in under an hour' }] }] },
+    { slug: 'about', title: 'About', sections: [{ type: 'hero', headline: 'About {{brand}}' }, { type: 'cta', headline: 'Join {{brand}} today' }] },
+  ] };
+  ok('normalizeSite: clean {{brand}} model has NO slop error', !normalizeSite(cleanModel, pages, {}).errors.some(e => /slop/i.test(e)));
 }
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);

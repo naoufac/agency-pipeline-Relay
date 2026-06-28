@@ -2,6 +2,7 @@ import pg from 'pg';
 import { existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as appdb from './appdb.ts';
+import { copySlop } from './spec.ts';
 
 export const SITES = new URL('../sites/', import.meta.url);
 
@@ -29,24 +30,9 @@ function contrast(a: string, b: string) { const L1 = lum(rgb(a)), L2 = lum(rgb(b
 //   nonempty · contains:<s> · min:<n>            (weak floors)
 //   json · json:k1,k2 · wcag                      (real: structured output the build consumes)
 //   sql_applies · site_renders                    (real: actually runs/renders)
-// copy-specificity floor (R3): scan VISIBLE text for UNAMBIGUOUS template slop and return a reason
-// (else null). High-precision by design — every pattern is template residue that never appears in real
-// marketing copy, so it can't false-fail genuine writing. Pure + exported so it's unit-tested (spec:check).
-export function copySlop(html: string): string | null {
-  const visible = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
-  const SLOP: [RegExp, string][] = [
-    [/lorem ipsum|dolor sit amet/i, 'lorem ipsum filler'],
-    [/\byour (tagline|headline|sub-?headline|company|business|brand|slogan|name|text|content|product|service)s? here\b/i, '"your … here" placeholder'],
-    [/\b(tagline|headline|sub-?headline|content|copy|description|text|name|slogan)s? goes? here\b/i, '"… goes here" placeholder'],
-    [/\b(insert|add|enter|type) (your |the )?(tagline|headline|name|text|content|copy|description|details|logo)\b[^.]{0,16}\bhere\b/i, '"insert … here" placeholder'],
-    [/\{\{\s*[\w.]+\s*\}\}/, 'unrendered template token ({{…}})'],
-    [/\b(todo|tbd|fixme)\b/i, 'TODO/TBD left in copy'],
-    [/@example\.(com|org|net)\b/i, 'placeholder example.com email'],
-    [/\bexample\.(com|org)\b/i, 'placeholder example.com link'],
-  ];
-  for (const [re, why] of SLOP) { const m = visible.match(re); if (m) return `${why}: "${m[0].trim().slice(0, 40)}"`; }
-  return null;
-}
+// copy-specificity floor (R3): copySlop now lives in spec.ts so it can gate at COMPOSE (the retryable stage),
+// not only at render. Re-exported here for existing importers (eval.ts, spec-test.ts). Render keeps it as a backstop.
+export { copySlop };
 
 // STRUCTURAL INVARIANT — "one website = one navigation = one logo".
 // The renderer composes EXACTLY one <nav class="nav"> + EXACTLY one <a class="nav-brand"> by
