@@ -8,6 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
+import { normalizeSpec } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
@@ -100,19 +101,14 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       const dir = new URL(task.project_id + '/', SITES);
       mkdirSync(fileURLToPath(dir), { recursive: true });
       if (task.artifact.endsWith('.html')) {
-        // PAGE: the agent returns a SPEC; a deterministic renderer (vetted components) builds the page.
-        const spec = firstSpec(content);
-        if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
-          throw new Error('build did not return a valid spec (need brand + >=2 sections)');
+        // PAGE: the agent returns a SPEC; the BUILD-SPEC CONTRACT (src/spec.ts) validates/normalizes/repairs
+        // it (or REJECTS the unfixable back into retry-with-feedback), then a deterministic renderer builds the page.
+        const raw = firstSpec(content);
         const slug = task.artifact.replace(/\.html$/, '');
-        // GUARANTEE the catalog shows: on the main/shop page, if no collection targets the primary table, add one
-        const primaryTable = (ctx as any).primaryTable;
-        if (primaryTable && /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/.test(slug)) {
-          const secs = Array.isArray(spec.sections) ? spec.sections : (spec.sections = []);
-          if (!secs.some((x: any) => x?.type === 'collection' && x?.table === primaryTable))
-            secs.splice(Math.min(1, secs.length), 0, { type: 'collection', title: 'Browse', intro: '', table: primaryTable });
-        }
-        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable });
+        const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+        if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
+        if (repairs.length) console.error(`[spec] ${task.project_id}/${slug}: ${repairs.join(' · ')}`);
+        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
       } else {
