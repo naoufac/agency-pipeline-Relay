@@ -160,3 +160,14 @@ create table if not exists dogfood_reviews (
   at          timestamptz not null default now()
 );
 create index if not exists dogfood_reviews_proj on dogfood_reviews(project_id, at desc);
+
+-- spec_findings: dogfood captures for the (inactive) evolver. Pure capture, no automation yet.
+create table if not exists spec_findings (
+  id bigserial primary key,
+  project_id uuid not null references projects(id) on delete cascade,
+  finding text not null,
+  selector text,
+  screenshot_path text,
+  created_at timestamptz not null default now()
+);
+create index if not exists spec_findings_project_idx on spec_findings(project_id, created_at desc);
