@@ -123,3 +123,34 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
 3. update PROGRESS.md with v2 results
 4. decision: A/B test openrouter vs direct MiniMax (Nao asked)
 5. decision: switch remote to agency-pipeline-Relay (Nao's call)
+
+## 2026-06-28 — Day 1 update (15:35 UTC, after 5h unattended)
+
+### claude v3 + v4 committed (autonomous, no input)
+- R3 `0059f7e R3: content dept reliability — role rewrite + normalizeContent`
+  - src/agents.ts (2 +/- ROLE.content rewritten: single-shape rule + self-check)
+  - src/spec.ts (+29 normalizeContent: extract-or-merge, reject unfixable)
+  - src/spec-test.ts (+32 tests)
+  - src/runner.ts (+15 wire normalizeContent for content dept before storage)
+  - 74 ins / 4 del, 4 files
+  - root cause from claude: "model emitted two concatenated blocks / braces-in-strings that the naive json verify gate (firstJson) could not parse"
+- R4 `f7f2433 R4: planner watchdog — 60s timeout + cron`
+  - src/planner.ts (+13/-1 Promise.race 60s timeout)
+  - watchdog script `/root/zoro-planner-watchdog.sh` (local, not in repo)
+  - crontab entry: `*/5 * * * * /root/zoro-planner-watchdog.sh >> /var/log/zoro-planner-watchdog.log 2>&1`
+
+### cron heartbeat (15 fires in 5h, every 30 min)
+- kept state visible during my absence
+- one material flag fired at 15:30: "claude exited with 2 uncommitted file(s)" — that was my own brief files, now committed (8e3b169)
+- claude sessions cleanly exited, no orphan processes
+
+### services + infra
+- disk 64% (26GB free), 2.3GB RAM used
+- relay.service + relay-tunnel.service + anouf-named-tunnel.service all active
+- prove2.log stale (last touched 09:22) — eval didn't run during unattended window; harmless
+
+### what's left (the queue)
+- R5: openrouter web plugin scope reduction — planner should NOT use web:true (the bottleneck). Direct MiniMax for planner/strategy; web:true only for research. Single 1-line fix.
+- A/B test infrastructure: instrument per-call provider + latency so we can measure openrouter vs direct on real data
+- a94d539a autopsy — the failed project. what specifically broke?
+- dogfood self-correct live test — need a content-level failure to exercise the new spec_findings capture path
