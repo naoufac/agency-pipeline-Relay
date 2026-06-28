@@ -119,4 +119,15 @@ An agent cannot self-report it; static HTML cannot pass it.
   deleted. tsc 0 diagnostics; app.js parses; 0 editor refs left. (DB tables
   `page_snapshots`/`page_blocks` left inert for now; dropped in a migration when the CMS edit path
   lands, to avoid an irreversible drop on the shared prod DB mid-feature.)
-- ⏳ Adapters (Directus → … → Craft) + the `served_from_cms` gate — **not built yet.**
+- ✅ **Directus adapter — built + PROVEN** (`src/cms/directus.ts`). A real shared Directus runs on
+  `ap-pg` (`deploy/relay-cms-up.sh`); `npm run prove:directus` builds a 2-page site ON it and the
+  `served_from_cms` gate passes incl. the **mutation proof** (`[index#N · about#N · mutation-proof:PASS]`).
+- ✅ **`served_from_cms` gate** (`src/cms/gate.ts`) — CMS-agnostic; sentinel write-through proof.
+- ✅ **Registry, all 5 present** (`src/cms/registry.ts`, `npm run cms:status`): directus=proven;
+  payload/drupal=pending (free, standable, adapters not written yet); sanity=blocked (needs a Sanity
+  account + write token); craft=blocked (needs a purchased $299 licence + phone-home). The registry
+  falls back to the proven Directus for an unbuilt choice — never fakes.
+- ⏳ **Not done yet:** wire the adapter into the live generation runner (so produced sites build on
+  their CMS by default — pending a scratch-DB end-to-end proof before prod); Payload + Drupal
+  adapters/standups; `served_from_cms` inside `verify.ts`/`dogfood`. Sanity + Craft await operator
+  credentials/licence.
