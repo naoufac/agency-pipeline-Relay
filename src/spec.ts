@@ -269,6 +269,33 @@ export function resolveBrand(brandingContent: string, fallbackName = 'Studio', a
   return { name, cta: navCtaFor(archetype), tokens };
 }
 
+// ---- SITE MODEL (the CMS): ONE composition for the WHOLE website ----
+// The site is generated ONCE as a single model — every page's sections in one object — instead of one LLM
+// call per page. brand/theme/nav are single sources owned elsewhere (branding lock + planner). normalizeSite
+// validates the composed model against the planner's page list: every declared page must be present and pass
+// the per-page spec contract (hero-first, >=2 real sections, catalog injection). Pages render deterministically
+// from this. Returns the normalized pages, or REJECTS the unfixable into retry-with-feedback.
+export type SiteResult = { site: { pages: { slug: string; title: string; sections: any[] }[] }; repairs: string[]; errors: string[] };
+export function normalizeSite(raw: any, pages: { slug: string; title: string }[], base: { tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string } = {}): SiteResult {
+  const repairs: string[] = []; const errors: string[] = [];
+  const out: { slug: string; title: string; sections: any[] }[] = [];
+  const rawPages: any[] = (raw && Array.isArray(raw.pages)) ? raw.pages : [];
+  if (!rawPages.length) { errors.push('site model has no pages[]'); return { site: { pages: [] }, repairs, errors }; }
+  const bySlug = new Map<string, any>();
+  for (const p of rawPages) { const s = str(p && p.slug).toLowerCase(); if (s) bySlug.set(s, p); }
+  for (const pg of (pages || [])) {
+    const composed = bySlug.get(pg.slug.toLowerCase())
+      || rawPages.find((p: any) => str(p.title).toLowerCase() === pg.title.toLowerCase());
+    if (!composed) { errors.push(`page "${pg.slug}" missing from the composed site model`); continue; }
+    const { spec, repairs: r, errors: e } = normalizeSpec({ sections: composed.sections }, { slug: pg.slug, tables: base.tables, forms: base.forms, primaryTable: base.primaryTable });
+    for (const x of r) repairs.push(`${pg.slug}: ${x}`);
+    if (e.length) { errors.push(`page "${pg.slug}": ${e.join('; ')}`); continue; }
+    out.push({ slug: pg.slug, title: pg.title, sections: spec.sections });
+  }
+  if (out.length < (pages || []).length) errors.push(`only ${out.length}/${(pages || []).length} pages composed cleanly`);
+  return { site: { pages: out }, repairs, errors };
+}
+
 // THE CONTRACT. Always returns a result; `errors.length > 0` means REJECT (caller throws -> retry-with-feedback).
 export function normalizeSpec(raw: any, ctx: SpecCtx = {}): SpecResult {
   const repairs: string[] = []; const errors: string[] = [];

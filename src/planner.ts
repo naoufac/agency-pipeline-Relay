@@ -63,7 +63,7 @@ function validate(plan: any, brief: string): Plan | null {
     title: String(t.title || `Step ${i + 1}`).slice(0, 90),
     department: (String(t.department || 'work').toLowerCase().replace(/[^a-z0-9_]/g, '') || 'work').slice(0, 20),
     verify: 'nonempty', depends_on: Array.isArray(t.depends_on) ? t.depends_on.map(Number).filter(Number.isFinite) : [], artifact: null,
-  })).filter((t: Task) => !['build', 'qa'].includes(t.department));
+  })).filter((t: Task) => !['build', 'qa', 'compose', 'render'].includes(t.department));
   if (tasks.length < 2) return null;
   tasks.sort((a, b) => a.seq - b.seq);
   const rm: Record<number, number> = {}; tasks.forEach((t, i) => (rm[t.seq] = i + 1));
@@ -90,14 +90,18 @@ function validate(plan: any, brief: string): Plan | null {
     if (t.verify === 'app_db' && !dbArtifactDone) { t.artifact = 'schema.sql'; dbArtifactDone = true; }
   }
 
-  // one render-verified BUILD per page (fans in from EVERY thinking step, incl. the schema), then QA on Home
+  // CMS-FIRST: the site is ONE model. A single COMPOSE step (fanning in from every thinking step incl. the
+  // schema) generates the whole site — brand-locked, every page's sections — once. Then each page is a
+  // DETERMINISTIC RENDER projecting that one model (no per-page generation, no per-page LLM). QA last.
   const thinkSeqs = tasks.map(t => t.seq);
   let seq = tasks.length;
-  const pageBuilds: Task[] = pages.map(pg => ({ seq: ++seq, title: `Build the ${pg.title} page`, department: 'build', verify: 'site_renders', depends_on: thinkSeqs, artifact: `${pg.slug}.html` }));
+  const composeSeq = ++seq;
+  const compose: Task = { seq: composeSeq, title: 'Compose the site (one CMS → all pages)', department: 'compose', verify: 'site_model', depends_on: thinkSeqs, artifact: null };
+  const pageRenders: Task[] = pages.map(pg => ({ seq: ++seq, title: `Render the ${pg.title} page`, department: 'render', verify: 'site_renders', depends_on: [composeSeq], artifact: `${pg.slug}.html` }));
   // QA acceptance runs AFTER every page is on disk and asserts the whole site is one coherent identity
-  // (each page exactly 1 nav + 1 logo; all pages share ONE logo + ONE palette) via the site_consistent gate.
-  const qa: Task = { seq: ++seq, title: 'QA — acceptance (1 nav · 1 logo · 1 palette, every page)', department: 'qa', verify: 'site_consistent', depends_on: pageBuilds.map(b => b.seq), artifact: null };
-  return { tasks: [...tasks, ...pageBuilds, qa], pages, theme, archetype };
+  // (each page exactly 1 nav + 1 logo; all pages share ONE logo + ONE palette + ONE nav) via site_consistent.
+  const qa: Task = { seq: ++seq, title: 'QA — acceptance (1 nav · 1 logo · 1 palette, every page)', department: 'qa', verify: 'site_consistent', depends_on: pageRenders.map(b => b.seq), artifact: null };
+  return { tasks: [...tasks, compose, ...pageRenders, qa], pages, theme, archetype };
 }
 
 // Hard wall-clock cap on the planner's LLM call. It flows through the shared llm()/callLLM, which already

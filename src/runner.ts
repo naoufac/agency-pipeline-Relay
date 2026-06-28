@@ -8,7 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
-import { normalizeSpec, normalizeContent, normalizeDataModel, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
+import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
@@ -61,15 +61,16 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   // passes (see processTask). For a build, read it. If it's somehow not set yet, derive it DETERMINISTICALLY
   // from the upstream branding output — resolveBrand() always returns a complete palette. NEVER the page spec.
   let brand = params.brand;
-  if (!brand && task.department === 'build') {
+  if (!brand && (task.department === 'build' || task.department === 'compose')) {
     const bj = ups.rows.find((u: any) => u.department === 'branding');
     if (bj) brand = resolveBrand(bj.content, undefined, params.archetype);
   }
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
+  const site = params.site;   // the composed CMS (set by the compose task); a render projects its page from it
   // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
   // (the main public list — products/listings/menu — so a collection reliably shows real data)
   let tables: string[] = []; const forms: Record<string, any[]> = {}; let primaryTable = '';
-  if (task.department === 'build') {
+  if (['build', 'compose', 'render'].includes(task.department)) {
     try {
       const desc = await appdb.describeSchema(pool, task.project_id);
       tables = desc.tables.map((t: any) => t.table);
@@ -80,85 +81,105 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
     } catch {}
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms, primaryTable, brand };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms, primaryTable, brand, site };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
   try {
     const ctx = await buildContext(pool, task);
-    const result = await runAgentTracked(task.department, ctx);  // the agent: text in -> text + per-call meta out
-    // A/B instrumentation (Task 10): record which provider/model served this call + latency, BEFORE anything else,
-    // so even a failed call is captured. Then preserve the existing agent_error retry path by re-throwing on failure.
-    await ev(pool, task.project_id, task.id, 'llm_call', JSON.stringify(result.meta));
-    if (!result.meta.ok) throw new Error(result.meta.error || 'llm call failed');
-    let content = result.text;
-
-    // CONTENT-dept reliability gate (R3): the content role serves two shapes and the model sometimes emits
-    // two concatenated blocks / braces-in-strings that the naive json verifier can't parse -> retries. Normalize
-    // to ONE clean object BEFORE we store it (so downstream gets clean JSON) and before verify (so the json gate
-    // sees a single re-serialized object), or REJECT the unfixable into the existing retry-with-feedback loop.
-    if (task.department === 'content') {
-      const r = normalizeContent(content);
-      if (r.ok === false) throw new Error('content rejected: ' + r.errors.join('; '));
-      for (const rep of r.repairs) console.error(`[content] ${task.project_id}: ${rep}`);
-      content = JSON.stringify(r.spec);  // feed normalized JSON to next stage
-    }
-
-    // DATABASE-dept reliability gate (R7): the database role emits a JSON DATA MODEL that appdb.provision()
-    // compiles into real Postgres. Models truncate / fence / emit `tables` instead of `entities` (-> "no
-    // tables in the data model") and seed real-world integers that blow PG INT4 (-> "integer out of range").
-    // Normalize + CLAMP into ONE clean model BEFORE we store it (clean JSON downstream) and BEFORE verify
-    // (so app_db provision parses + seeds it), or REJECT the unfixable into the existing retry-with-feedback loop.
-    if (task.department === 'database') {
-      const r = normalizeDataModel(content);
-      if (r.ok === false) throw new Error('database rejected: ' + r.errors.join('; '));
-      for (const rep of r.repairs) console.error(`[datamodel] ${task.project_id}: ${rep}`);
-      content = JSON.stringify(r.model);
-    }
-
-    await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
-    await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
-
-    // REAL ARTIFACT: write the page AND freeze its editable snapshot (post-media, with edit ids for the CMS)
+    let content = '';
     let snapshot: string | null = null;
-    if (task.artifact) {
-      const dir = new URL(task.project_id + '/', SITES);
+    const dir = new URL(task.project_id + '/', SITES);
+
+    if (task.department === 'render') {
+      // DETERMINISTIC PROJECTION (no LLM call): a render reads its page from the composed site model (the ONE
+      // CMS in params.site) and renders it with the LOCKED brand. Every page is a view of the SAME source, so
+      // brand/nav/theme/palette cannot drift — the page is, by construction, consistent with the whole site.
+      const slug = String(task.artifact || 'index.html').replace(/\.html$/, '');
+      const siteModel = (ctx as any).site;
+      const page = (siteModel && Array.isArray(siteModel.pages)) ? siteModel.pages.find((p: any) => p.slug === slug) : null;
+      if (!page) throw new Error(`render: page "${slug}" missing from the composed site model`);
+      const spec: any = { brand: {}, sections: page.sections };
+      const canon = (ctx as any).brand || brandIdentity(spec);
+      applyBrand(spec, canon);                                          // FORCE the one identity onto the projection
       mkdirSync(fileURLToPath(dir), { recursive: true });
-      if (task.artifact.endsWith('.html')) {
-        // PAGE: the agent returns a SPEC; the BUILD-SPEC CONTRACT (src/spec.ts) validates/normalizes/repairs
-        // it (or REJECTS the unfixable back into retry-with-feedback), then a deterministic renderer builds the page.
+      const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+      snapshot = cms.instrument(await processMedia(rendered, dir));     // real photos -> stamp edit ids for the CMS
+      writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));
+      content = JSON.stringify(page);
+      await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+      await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+    } else {
+      const result = await runAgentTracked(task.department, ctx);  // the agent: text in -> text + per-call meta out
+      // A/B instrumentation (Task 10): record provider/model + latency BEFORE anything else (even a failed call),
+      // then preserve the existing agent_error retry path by re-throwing on failure.
+      await ev(pool, task.project_id, task.id, 'llm_call', JSON.stringify(result.meta));
+      if (!result.meta.ok) throw new Error(result.meta.error || 'llm call failed');
+      content = result.text;
+
+      // CONTENT-dept reliability gate (R3): normalize the two-shape content output to ONE clean object, or REJECT.
+      if (task.department === 'content') {
+        const r = normalizeContent(content);
+        if (r.ok === false) throw new Error('content rejected: ' + r.errors.join('; '));
+        for (const rep of r.repairs) console.error(`[content] ${task.project_id}: ${rep}`);
+        content = JSON.stringify(r.spec);  // feed normalized JSON to next stage
+      }
+
+      // DATABASE-dept reliability gate (R7): recover + CLAMP the data model into ONE clean object, or REJECT.
+      if (task.department === 'database') {
+        const r = normalizeDataModel(content);
+        if (r.ok === false) throw new Error('database rejected: ' + r.errors.join('; '));
+        for (const rep of r.repairs) console.error(`[datamodel] ${task.project_id}: ${rep}`);
+        content = JSON.stringify(r.model);
+      }
+
+      // COMPOSE-dept: the WHOLE site as ONE model (the CMS). Validate EVERY planned page is present + renderable
+      // against the spec contract, then store it in params.site — the single source every render projects from —
+      // or REJECT the unfixable into retry-with-feedback. No page renders until this passes the site_model gate.
+      if (task.department === 'compose') {
         const raw = extractFirstJson(content);
-        const slug = task.artifact.replace(/\.html$/, '');
-        const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
-        if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
-        if (repairs.length) console.error(`[spec] ${task.project_id}/${slug}: ${repairs.join(' · ')}`);
-        // BRAND LOCK (deterministic, not a request to the model): the ONE site identity is already locked
-        // into params.brand at branding-completion (and re-derived in buildContext as a backstop). FORCE it
-        // onto this page — name, nav button AND palette — so the renderer can NEVER use the model's per-page
-        // brand or colours. brandIdentity(spec) is only an absolute last resort if no canonical brand exists.
-        const canon = (ctx as any).brand || brandIdentity(spec);
-        await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
-        applyBrand(spec, canon);
-        // clean page <title>: the page's nav title (e.g. "Our Story"), NOT the internal task name ("Build the … page")
-        const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
-        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
-        snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
-        writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
-      } else {
-        // REAL NON-HTML DELIVERABLE. schema.sql = the COMPILED, perfect DDL (from the data model);
-        // other artifacts = the agent's text as-is.
-        let body = stripFences(content);
-        if (task.artifact.endsWith('.sql')) { try { body = appdb.compileDDL(content).ddl; } catch { body = sqlArtifact(content); } }
-        writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
+        const { site, repairs, errors } = normalizeSite(raw, ctx.pages || [], { tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+        if (errors.length) throw new Error('site compose rejected: ' + errors.join('; '));
+        if (repairs.length) console.error(`[compose] ${task.project_id}: ${repairs.join(' · ')}`);
+        await pool.query("update projects set params = jsonb_set(params, '{site}', $2::jsonb, true) where id=$1", [task.project_id, JSON.stringify(site)]);
+        content = JSON.stringify(site);
+      }
+
+      await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+      await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+
+      // NON-RENDER ARTIFACTS: a non-html deliverable (schema.sql etc.), or the LEGACY single-page build (.html,
+      // still used by the eval harness). The CMS pipeline writes pages via the 'render' branch above.
+      if (task.artifact) {
+        mkdirSync(fileURLToPath(dir), { recursive: true });
+        if (task.artifact.endsWith('.html')) {
+          const raw = extractFirstJson(content);
+          const slug = task.artifact.replace(/\.html$/, '');
+          const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+          if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
+          if (repairs.length) console.error(`[spec] ${task.project_id}/${slug}: ${repairs.join(' · ')}`);
+          const canon = (ctx as any).brand || brandIdentity(spec);
+          await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
+          applyBrand(spec, canon);
+          const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
+          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+          snapshot = cms.instrument(await processMedia(rendered, dir));
+          writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));
+        } else {
+          let body = stripFences(content);
+          if (task.artifact.endsWith('.sql')) { try { body = appdb.compileDDL(content).ddl; } catch { body = sqlArtifact(content); } }
+          writeFileSync(fileURLToPath(new URL(task.artifact, dir)), body);
+        }
       }
     }
 
     await pool.query("update tasks set status='verifying', updated_at=now() where id=$1", [task.id]);
     const { ok, log } = await verify(pool, task, content);   // deterministic check — not the agent's word
     if (ok) {
-      // LOCK the ONE site identity the moment Branding passes — deterministically, BEFORE any page build can
-      // be claimed (every build depends on branding). resolveBrand() always yields a complete palette, so the
-      // build path can FORCE it onto every page. This is the single source of truth; no page can ever drift.
+      // LOCK the ONE site identity the moment Branding passes — deterministically, BEFORE compose/render run
+      // (both depend on branding). resolveBrand() always yields a complete palette, so render can FORCE it onto
+      // every page. This is the single source of truth; no page can ever drift.
       if (task.department === 'branding') {
         try {
           const ar = await pool.query("select params->>'archetype' as a from projects where id=$1", [task.project_id]);
@@ -168,7 +189,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       }
       await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);
       await ev(pool, task.project_id, task.id, 'task_done', `#${task.seq} ${task.department} [${task.verify}]`);
-      // freeze the editable snapshot + blocks for the CMS (normal builds only, never a republish)
+      // freeze the editable snapshot + blocks for the CMS (rendered/built pages only, never a republish)
       if (snapshot && task.artifact && !task.source) {
         try { await cms.syncBlocks(pool, task.project_id, task.artifact.replace(/\.html$/, ''), task.artifact, snapshot); }
         catch (e: any) { console.error('cms syncBlocks', e?.message ?? e); }

@@ -181,5 +181,22 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     return { ok: true, log: `${files.length} pages consistent — 1 nav/1 logo each · logo ${JSON.stringify([...logos][0])} · palette ${[...palettes][0]} · nav [${[...navs][0]}]` };
   }
 
+  if (rule === 'site_model') {
+    // CMS-FIRST acceptance: the compose step stored the WHOLE-site model in params.site. Prove it covers
+    // every planned page and each page is a valid, renderable spec (hero-first, >= 2 real sections) BEFORE
+    // any deterministic render runs. A bad model rejects here into retry-with-feedback — pages never render
+    // from a broken CMS.
+    const r = await pool.query("select params->'site' as site, params->'pages' as pages from projects where id=$1", [task.project_id]);
+    const site = r.rows[0]?.site; const planned = Array.isArray(r.rows[0]?.pages) ? r.rows[0].pages : [];
+    const ps = (site && Array.isArray(site.pages)) ? site.pages : [];
+    if (!ps.length) return { ok: false, log: 'no composed site model (params.site empty)' };
+    if (ps.length < planned.length) return { ok: false, log: `site model covers ${ps.length}/${planned.length} planned pages` };
+    for (const p of ps) {
+      if (!Array.isArray(p.sections) || p.sections.length < 2) return { ok: false, log: `page "${p.slug}" has <2 sections` };
+      if (p.sections[0]?.type !== 'hero') return { ok: false, log: `page "${p.slug}" must open with a hero` };
+    }
+    return { ok: true, log: `site model ok — ${ps.length} pages composed (one CMS)` };
+  }
+
   return { ok: false, log: 'unknown verify rule: ' + rule };
 }
