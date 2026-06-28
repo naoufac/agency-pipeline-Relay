@@ -6,17 +6,17 @@
   "description": "Autonomous agency pipeline: brief -> planner -> dependency DAG of AI calls, stage-by-stage, zero-trust verification, Supabase/Postgres board.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "demo": "tsx src/demo.ts",
-    "run": "tsx src/run.ts",
-    "serve": "tsx src/server.ts",
-    "worker": "tsx src/worker.ts",
-    "kpi": "tsx src/kpi-cli.ts",
-    "theme:check": "tsx src/theme-check.ts",
-    "spec:check": "tsx src/spec-test.ts",
-    "stress": "tsx _stress.ts",
-    "eval": "tsx src/eval.ts",
-    "dogfood": "tsx src/dogfood-cli.ts",
-    "mail:test": "tsx src/mail-cli.ts"
+    "demo": "set -a; . ./.env 2>/dev/null; set +a; tsx src/demo.ts",
+    "run": "set -a; . ./.env 2>/dev/null; set +a; tsx src/run.ts",
+    "serve": "set -a; . ./.env 2>/dev/null; set +a; tsx src/server.ts",
+    "worker": "set -a; . ./.env 2>/dev/null; set +a; tsx src/worker.ts",
+    "kpi": "set -a; . ./.env 2>/dev/null; set +a; tsx src/kpi-cli.ts",
+    "theme:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/theme-check.ts",
+    "spec:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/spec-test.ts",
+    "stress": "set -a; . ./.env 2>/dev/null; set +a; tsx _stress.ts",
+    "eval": "set -a; . ./.env 2>/dev/null; set +a; tsx src/eval.ts",
+    "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
+    "mail:test": "set -a; . ./.env 2>/dev/null; set +a; tsx src/mail-cli.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
