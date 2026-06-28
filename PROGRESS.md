@@ -214,3 +214,18 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
 - dogfood self-correct live test (need a real content/database defect to exercise spec_findings capture)
 - A/B metrics population (R6 instrumentation in place; no new projects since deploy → no data yet)
 - next dept hotspot after database, if a94d539a-class failures recur
+
+## 2026-06-28 — Day 1 update (17:18 UTC)
+
+### R8 shipped (manually — claude hit 5-hour rate limit mid-fix)
+- commit `9500b41 R8: eval — fix .env loading, kill the STUB-mode theater`
+- root cause: `src/agents.ts` + `src/eval.ts` read `process.env` directly; npm scripts don't load `.env`. production works via systemd EnvironmentFile. dev/CI invocation always saw empty env → STUB mode → theater 100% pass.
+- fix: prepend `set -a; . ./.env 2>/dev/null; set +a;` to every tsx-based npm script. silent if .env missing.
+- **verified LIVE eval at 17:11 UTC:**
+  - runtime **7m 2.8s** (vs <5s for stub)
+  - 5/5 pages pass
+  - avg specificity **87.6/100** (vs 50/100 for stub — real specificity data)
+  - avg **333 words/page** (vs 154 for stub)
+  - **1 rejected spec** caught (coffeery home page)
+  - 0 errors
+- **R1–R7 fixes confirmed working in LIVE mode.** the 0 agent_errors post-R3 wasn't theater — R3/R7 are doing real work.
