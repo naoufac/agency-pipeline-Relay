@@ -74,6 +74,18 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* pricing */
+.price-amt{font-family:var(--font-display);font-size:2.2rem;font-weight:700;margin:.4rem 0}.price-amt span{font-size:1rem;color:var(--muted);font-weight:500}
+.card.price.feat{border-color:var(--primary);border-width:2px}
+.price-feats{list-style:none;padding:0;margin:1rem 0;display:grid;gap:.5rem}.price-feats li{color:var(--muted);padding-left:1.4rem;position:relative}.price-feats li:before{content:"✓";position:absolute;left:0;color:var(--accent);font-weight:700}
+.card.price .btn{margin-top:.6rem;width:100%;justify-content:center}
+/* testimonials */
+.quote .qtext{font-size:1.05rem;margin:0 0 1rem;color:var(--text)}.quote .qby{display:flex;flex-direction:column;gap:2px}
+/* faq accordion */
+.faq-item{border-bottom:1px solid var(--line)}.faq-item summary{cursor:pointer;font-weight:600;padding:1rem 0;list-style:none}.faq-item summary::-webkit-details-marker{display:none}.faq-item summary:after{content:"+";float:right;color:var(--muted)}.faq-item[open] summary:after{content:"–"}.faq-item p{padding:0 0 1.1rem}
+/* stats */
+.stats{text-align:center}.stat-n{font-family:var(--font-display);font-size:clamp(2rem,5vw,2.8rem);font-weight:700;color:var(--primary);line-height:1}
+@media(max-width:560px){.stats{grid-template-columns:1fr 1fr}}
 /* theme hero alignment — body carries .t-<theme>, set deterministically by the renderer */
 .t-bold .hero-inner{margin-left:auto;margin-right:auto;text-align:center}
 .t-bold .hero .lead{margin-left:auto;margin-right:auto}
@@ -127,6 +139,32 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   cta: (s, o) => `<section class="section"><div class="container"><div class="cta">
     <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${btn(o, s.cta, s.link)}
   </div></div></section>`,
+  // pricing — tiered plans (one may be featured)
+  pricing: (s, o) => `<section class="section"><div class="container">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="grid grid-3" style="margin-top:2.6rem">${(s.plans || []).slice(0, 3).map((p: any) => `<div class="card price${p.featured ? ' feat' : ''}">
+      ${p.featured ? '<span class="eyebrow">Most popular</span>' : ''}<h3>${esc(p.name)}</h3>
+      <div class="price-amt">${esc(p.price)}${p.period ? `<span>/${esc(p.period)}</span>` : ''}</div>
+      ${p.body ? `<p class="muted">${esc(p.body)}</p>` : ''}
+      <ul class="price-feats">${(p.features || []).slice(0, 8).map((f: string) => `<li>${esc(f)}</li>`).join('')}</ul>
+      ${p.cta ? `<a class="btn" href="${href(o, p.link, p.cta)}">${esc(p.cta)}</a>` : ''}
+    </div>`).join('')}</div></div></section>`,
+  // testimonials — quote cards
+  testimonials: (s) => `<section class="section"><div class="container">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="grid grid-3" style="margin-top:2.4rem">${(s.items || []).slice(0, 6).map((t: any) => `<div class="card quote">
+      <p class="qtext">“${esc(t.quote)}”</p><div class="qby"><b>${esc(t.name)}</b>${t.role ? `<span class="muted">${esc(t.role)}</span>` : ''}</div>
+    </div>`).join('')}</div></div></section>`,
+  // faq — CSS-only accordion (native <details>)
+  faq: (s) => `<section class="section"><div class="container" style="max-width:820px">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}
+    <div class="faq" style="margin-top:1.8rem">${(s.items || []).slice(0, 10).map((f: any) => `<details class="faq-item"><summary>${esc(f.q)}</summary><p class="muted">${esc(f.a)}</p></details>`).join('')}</div>
+  </div></section>`,
+  // stats — big-number band
+  stats: (s) => `<section class="section"><div class="container">
+    ${s.title ? `<h2 style="text-align:center;margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
+    <div class="grid grid-3 stats">${(s.items || []).slice(0, 4).map((x: any) => `<div class="stat"><div class="stat-n">${esc(x.value)}</div><div class="muted">${esc(x.label)}</div></div>`).join('')}</div>
+  </div></section>`,
   // LIVE DB read: a list rendered from the project's REAL database table (data-table). Empty-state at
   // build/gate time (file://); filled from /api/site/:id/data/:table when served over HTTP.
   collection: (s, o) => {

@@ -40,6 +40,15 @@ function sampleSpec(theme: ThemeName) {
         { title: 'Delivery', body: 'We ship on a schedule you can plan a launch around.' },
         { title: 'Support', body: 'We stay long after launch, because the first week is never the last.' } ] },
       { type: 'split', eyebrow: 'Our approach', title: 'Built with care, measured twice', body: 'Every engagement starts with the same question and ends with something you are proud to put your name on. We work in small teams, in the open, with no surprises at the end.', cta: 'Read our approach' },
+      { type: 'stats', title: 'By the numbers', items: [{ value: '12 yrs', label: 'in business' }, { value: '480+', label: 'projects shipped' }, { value: '98%', label: 'would refer us' }] },
+      { type: 'pricing', title: 'Simple pricing', intro: 'No surprises.', plans: [
+        { name: 'Starter', price: '$0', period: 'mo', body: 'For trying it out.', features: ['One project', 'Community support'], cta: 'Start free' },
+        { name: 'Pro', price: '$29', period: 'mo', featured: true, body: 'For working teams.', features: ['Unlimited projects', 'Priority support', 'Custom domain'], cta: 'Get Pro' },
+        { name: 'Studio', price: '$99', period: 'mo', body: 'For agencies.', features: ['Everything in Pro', 'White-label', 'SLA'], cta: 'Contact us' }] },
+      { type: 'testimonials', title: 'What clients say', items: [
+        { quote: 'They shipped in a week what others quoted a quarter for.', name: 'Dana R.', role: 'Founder, Northwind' },
+        { quote: 'Calm, fast, and the result just worked.', name: 'Sam O.', role: 'Head of Ops' }] },
+      { type: 'faq', title: 'Questions', items: [{ q: 'How long does it take?', a: 'Most projects ship within two weeks.' }, { q: 'Do you offer support?', a: 'Yes — every plan includes it.' }] },
       { type: 'cta', headline: 'Ready when you are', body: 'Tell us what you are building and we will tell you, honestly, whether we are the right fit.', cta: 'Book a call' },
       { type: 'feed', title: 'From the community', intro: 'Recent additions from people like you.', form: 'listing', empty: 'Be the first to add yours.' },
       { type: 'collection', title: 'On the menu', intro: 'A few of our favourites.', table: 'items', empty: 'Menu coming soon.' },
