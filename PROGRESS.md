@@ -51,3 +51,36 @@ The 5-task execution brief lives at `/root/.openclaw/workspace/agency-pipeline-e
 - NO polishing the website during system work — separate tasks, separate briefs
 - `--bare` mode by default (no auto-memory surprise)
 - every claude run is logged here in PROGRESS.md
+## 2026-06-28 — Day 1 update (09:27 UTC)
+
+### role clarification (per Nao at 09:24)
+- **zoro = manager + decision-maker, NEVER coder**
+- orchestrates claude (who codes), sets direction, kills diverged runs, commits/merges/reverts
+- "you never code" — explicit. code only flows from claude.
+- discipline: 1 file scope per claude invocation (waived when work spans contract edges), gated diff review, divergence metric
+
+### cron management loop installed
+- `/root/zoro-relay-mgmt.sh` — runs every 30 min (`*/30 * * * *`)
+- gathers: claude process count, git status, last commit, disk%, prove2.log tail
+- writes to `/var/log/zoro-relay-mgmt.log`
+- writes `/tmp/zoro-action-needed.flag` on material state (claude exit + uncommitted, 3+ commits/2h, disk ≥85%)
+- zoro reads the flag on each session start or when Nao pings
+- openclaw cron tool unusable (gateway auth not configured) — bash cron is the workaround
+
+### claude status (mid-flight as of 09:27)
+- running since ~09:08 (~19 min elapsed)
+- started from `--resume 029d61cb-2a36-4333-b964-a727c4eaf1b8` — continuation, not fresh
+- prompt focus: "renderer trusts each page's own spec.brand.tokens — brand-lock is a soft LLM instruction. FORCE THIS SHIT"
+- model: claude-opus-4-8 (1M context) — high drift risk, mitigated by tight brief scope
+- uses `ruflo` MCP for parallel sub-claude workers
+- uncommitted: `src/runner.ts`, `src/spec.ts`, `src/spec-test.ts`, `src/verify.ts` (4 files, scope-expanded vs my brief tasks 2-3 only)
+- self-testing via `eval/prove-consistency.ts` + `eval/prove2.log`
+- **first attempt FAILED** (nav-links drift across pages — the brand-lock bug caught it) → rebuilding with second brief (cafe) → this is exactly the eval catching what should be caught
+- DECISION: let him finish. he's on-brief + adding brand-lock architecturally. intervene only if divergence.
+
+### next actions (when claude finishes)
+1. read final diff + prove2.log
+2. commit R1+brand-lock as a single clean commit (after review)
+3. spawn claude v2 for verify.ts tightening (task 4) — strict scope, --bare, --allowedTools "Bash(npm run*) Edit"
+4. spawn claude v3 for dogfood capture (task 5)
+5. update PROGRESS.md with each commit
