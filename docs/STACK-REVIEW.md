@@ -36,3 +36,22 @@ Not "optimise what's here" — question what should exist. Trigger: chromium bre
 1. **Now (kills the pain, no rewrite):** remove the screenshot from `site_renders`; move QA + dogfood to Playwright + a single persistent browser. Eliminates the recurring breakage across every build and makes the reviewer robust.
 2. **Next (scale to 1000):** artifacts → R2; runner → worker processes; managed Postgres + pgbouncer; dedicated host.
 3. **Later:** managed browser service if local browser ops outgrow one box; LLM governor tuning.
+
+---
+
+## Status — applied vs. blocked (this review, "apply all")
+
+**✅ APPLIED & DEPLOYED (commit `4cc1d3e`, `systemctl restart relay.service`, health=ok):**
+1. **Screenshot removed from the verify hot path.** `site_renders` is now static (structural HTML · no external assets · no dead CTA · wired forms). Chromium left every build. Biggest fragility + throughput + cost win.
+2. **One persistent Playwright browser** (`src/browser.ts`) behind dogfood + qa + theme:check. Killed spawn-per-call chromium + hand-rolled CDP-over-`ws` (dropped `ws`/`@types/ws`, added `playwright`). The "chromium didn't come up" / CDP startup-race class is gone. Verified: theme:check 5/5, demo PASS + clean exit, dogfood runs + accurately flags a broken site.
+3. **Board thumbnail off the hot path** — `qa.ts` writes `preview.png` once per completion, non-gating.
+
+**✅ CODE-READY, OPT-IN, DEFAULT UNCHANGED (committed, NOT flipped on prod):**
+4. **Runner → worker split.** `src/worker.ts` (polls Postgres, unique `runnerId`, safe many-at-once via `SKIP LOCKED`+leases) + `deploy/systemd/relay-worker.service` + `npm run worker`. The web server's in-process build is gated behind `RELAY_BUILD!=='0'` so default behaviour is identical. **Flip when concurrent builds exceed ~a dozen:** set `Environment=RELAY_BUILD=0` on `relay.service`, `daemon-reload && restart relay`, then `systemctl enable --now relay-worker` (run N of them). *Honest note: not load-justified at single-operator scale — flipping it now would be optimising something that doesn't need to exist yet. Left as capacity-on-demand.*
+
+**⛔ BLOCKED — needs YOUR decision / external accounts (cannot be applied unilaterally, and not load-justified yet):**
+5. **Artifacts → object storage (R2/S3).** *Exact steps when you decide:* create a Cloudflare R2 bucket + API token; add `STORAGE=r2`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` to `.env`; add `src/storage.ts` (a `put(key,bytes)/url(key)` seam — local-disk default, R2 adapter behind the env flag) and route the `sites/<id>/…` writes in `runner.ts`/`media.ts`/`cms.ts` through it. Required ONLY for stateless multi-worker on separate hosts + durability against box loss. *Deliberately NOT pre-built:* a local→local seam with no R2 behind it is churn — build it the day R2 (or a second host) lands.
+6. **Managed Postgres + pgbouncer off the shared box.** *Steps:* provision Supabase/Neon/RDS; set `DATABASE_URL` to it (+ a pgbouncer/transaction-pool URL); migrate the board with `pg_dump`/`pg_restore` from `ap-pg`; raise `pg.Pool` ceilings only behind pgbouncer. Needed once N workers exhaust a single `Pool(max:8)`. Needs your cloud account.
+7. **Dedicated build host.** Move builds + the one browser off the shared box (the chromium contention was partly the constrained shared box) onto a sized host behind the existing Cloudflare tunnel. Needs your host/provider choice. Do not touch the co-tenant services on the current box.
+
+**Bottom line:** every code-level item in this review is applied or committed-and-opt-in. Items 5–7 are genuinely external (your R2 / Postgres / host accounts) AND not yet load-justified — documented to-the-step so they're a config change, not a project, the day load (or a durability requirement) earns them.

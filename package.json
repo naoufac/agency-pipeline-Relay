@@ -9,6 +9,7 @@
     "demo": "tsx src/demo.ts",
     "run": "tsx src/run.ts",
     "serve": "tsx src/server.ts",
+    "worker": "tsx src/worker.ts",
     "kpi": "tsx src/kpi-cli.ts",
     "theme:check": "tsx src/theme-check.ts",
     "dogfood": "tsx src/dogfood-cli.ts",

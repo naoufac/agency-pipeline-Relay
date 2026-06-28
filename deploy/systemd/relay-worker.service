@@ -1,0 +1,19 @@
+[Unit]
+# Relay BUILD WORKER (the runner split, for scale). Optional — enable to move build throughput off the
+# web process. To make the web server stop building in-process, add `Environment=RELAY_BUILD=0` to
+# relay.service and `systemctl daemon-reload && systemctl restart relay`. Then run one or more of these.
+Description=Relay build worker (claims + runs builds from Postgres)
+After=network-online.target docker.service relay.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/root/agency-pipeline
+EnvironmentFile=/root/agency-pipeline/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/tsx src/worker.ts
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
