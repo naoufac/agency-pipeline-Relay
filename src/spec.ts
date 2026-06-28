@@ -37,6 +37,35 @@ export function extractFirstJson(s: string): any {
   return null;
 }
 
+// CONTENT-dept normaliser (R3): the content role serves TWO shapes (IA sitemap + page copy) under one
+// department, and the model sometimes violates "one JSON object" by emitting two concatenated blocks — or
+// puts a stray { } inside a copy string, which the json verify gate's naive brace counter can't parse.
+// normalizeContent recovers BOTH: string-aware first pass, then a flat-merge of concatenated objects.
+export type ContentResult = { ok: true; spec: any; repairs: string[] } | { ok: false; errors: string[] };
+export function normalizeContent(raw: string): ContentResult {
+  const repairs: string[] = []; const errors: string[] = [];
+  if (!raw) { errors.push('empty content output'); return { ok: false, errors }; }
+  // first pass: standard extractFirstJson
+  const first = extractFirstJson(raw);
+  if (first !== undefined && first !== null) return { ok: true, spec: first, repairs: [] };
+  // second pass: try to merge two concatenated objects
+  const blocks: any[] = [];
+  const re = /\{[^{}]*\}/g;  // naive — top-level only
+  let m; while ((m = re.exec(raw)) !== null) { try { blocks.push(JSON.parse(m[0])); } catch {} }
+  if (blocks.length === 0) { errors.push('no valid JSON object in content output'); return { ok: false, errors }; }
+  // merge if multiple
+  if (blocks.length > 1) {
+    repairs.push(`merged ${blocks.length} concatenated JSON objects`);
+    const merged: any = {};
+    for (const b of blocks) {
+      if (b && typeof b === 'object') Object.assign(merged, b);
+    }
+    return { ok: true, spec: merged, repairs };
+  }
+  errors.push('content output has braces but no valid object');
+  return { ok: false, errors };
+}
+
 // the ONLY section types the renderer knows — mirror of SECTIONS in components.ts. Keep in sync.
 const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form']);
 const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/;

@@ -3,7 +3,7 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop, } from './verify.ts';
-import { extractFirstJson, applyBrand, resolveBrand, navCtaFor } from './spec.ts';
+import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent } from './spec.ts';
 import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
 
@@ -181,6 +181,36 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   applyBrand(pageOwnCta, { name: 'Z', cta: 'Get in touch', tokens: { bg: '#fff', primary: '#111' } });
   ok('applyBrand: per-page nav button label overwritten', pageOwnCta.brand.cta === 'Get in touch');
   ok('applyBrand: per-page ctaLink stripped (target resolved deterministically)', pageOwnCta.brand.ctaLink === undefined);
+}
+
+// ---- CONTENT normaliser (R3): one role serves two shapes; recover one-object-or-merge, reject the unfixable ----
+// 1) a clean single JSON object passes untouched (no repairs)
+{
+  const r = normalizeContent('{"sections":[{"id":"hero","title":"Home"},{"id":"about","title":"About"}]}');
+  ok('normContent: valid single object → ok', r.ok === true && Array.isArray(r.spec.sections) && r.spec.sections.length === 2);
+  ok('normContent: valid single object → no repairs', r.ok === true && r.repairs.length === 0);
+}
+// 2) two concatenated blocks (the "never two blocks" violation) where the string-aware pass can't take the
+//    first as-is → flat second pass merges the sitemap + copy objects into one
+{
+  const r = normalizeContent('{"sections": }{"id":"hero","title":"Home"}{"hero":"Welcome to Lume"}');
+  ok('normContent: concatenated blocks → merged ok', r.ok === true && r.spec.title === 'Home' && r.spec.hero === 'Welcome to Lume');
+  ok('normContent: merge recorded as a repair', r.ok === true && r.repairs.some(x => /merged/.test(x)));
+}
+// 3) one valid object followed by an invalid one → first object kept (first pass wins, untouched)
+{
+  const r = normalizeContent('{"sections":[{"id":"hero"}]}{not valid json');
+  ok('normContent: valid first + invalid second → first kept', r.ok === true && Array.isArray(r.spec.sections) && r.repairs.length === 0);
+}
+// 4) empty string → rejected (feeds retry-with-feedback, never a silent pass)
+{
+  const r = normalizeContent('');
+  ok('normContent: empty → rejected', r.ok === false && r.errors.length > 0);
+}
+// 5) a truncated object with no closing brace → rejected
+{
+  const r = normalizeContent('{"sections":[{"id":"hero","title":"Home"');
+  ok('normContent: truncated/no-closing → rejected', r.ok === false && r.errors.length > 0);
 }
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);

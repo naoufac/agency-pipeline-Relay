@@ -8,7 +8,7 @@ import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { renderPage } from './render.ts';
-import { normalizeSpec, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
+import { normalizeSpec, normalizeContent, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 
@@ -86,7 +86,18 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
   try {
     const ctx = await buildContext(pool, task);
-    const content = await runAgent(task.department, ctx);     // the agent: text in -> text out (MiniMax or stub)
+    let content = await runAgent(task.department, ctx);        // the agent: text in -> text out (MiniMax or stub)
+
+    // CONTENT-dept reliability gate (R3): the content role serves two shapes and the model sometimes emits
+    // two concatenated blocks / braces-in-strings that the naive json verifier can't parse -> retries. Normalize
+    // to ONE clean object BEFORE we store it (so downstream gets clean JSON) and before verify (so the json gate
+    // sees a single re-serialized object), or REJECT the unfixable into the existing retry-with-feedback loop.
+    if (task.department === 'content') {
+      const r = normalizeContent(content);
+      if (r.ok === false) throw new Error('content rejected: ' + r.errors.join('; '));
+      for (const rep of r.repairs) console.error(`[content] ${task.project_id}: ${rep}`);
+      content = JSON.stringify(r.spec);  // feed normalized JSON to next stage
+    }
 
     await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
     await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
