@@ -2,7 +2,7 @@ import pg from 'pg';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
-import { runAgent, type Ctx } from './agents.ts';
+import { runAgentTracked, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import * as cms from './cms.ts';
 import { reviewSite } from './qa.ts';
@@ -86,7 +86,12 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
   try {
     const ctx = await buildContext(pool, task);
-    let content = await runAgent(task.department, ctx);        // the agent: text in -> text out (MiniMax or stub)
+    const result = await runAgentTracked(task.department, ctx);  // the agent: text in -> text + per-call meta out
+    // A/B instrumentation (Task 10): record which provider/model served this call + latency, BEFORE anything else,
+    // so even a failed call is captured. Then preserve the existing agent_error retry path by re-throwing on failure.
+    await ev(pool, task.project_id, task.id, 'llm_call', JSON.stringify(result.meta));
+    if (!result.meta.ok) throw new Error(result.meta.error || 'llm call failed');
+    let content = result.text;
 
     // CONTENT-dept reliability gate (R3): the content role serves two shapes and the model sometimes emits
     // two concatenated blocks / braces-in-strings that the naive json verifier can't parse -> retries. Normalize

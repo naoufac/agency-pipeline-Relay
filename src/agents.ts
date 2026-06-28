@@ -89,63 +89,99 @@ function buildUser(ctx: Ctx): string {
   return s;
 }
 
+// Per-call instrumentation for the openrouter-vs-minimax A/B (Task 10): every live call reports which
+// provider+model served it, how long it took, whether web search was on, and whether it succeeded.
+export type LLMResult = { text: string; meta: { provider: 'openrouter' | 'minimax-direct'; model: string; latencyMs: number; web: boolean; ok: boolean; error?: string } };
+
 // the single live call. Prefer OpenRouter (MiniMax + optional web search); else MiniMax-direct.
-async function callLLM(system: string, user: string, maxTokens: number = 16000, web: boolean): Promise<string> {
+// Returns the text AND per-call meta. On failure it returns ok:false (no throw) with the captured error —
+// the string wrappers (llmText/llm/runAgent) still yield '' on failure exactly as the old throw-path did
+// (planner: empty→null; runner: re-throws after logging meta so the agent_error retry path is unchanged).
+export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean } = {}): Promise<LLMResult> {
+  const t0 = Date.now();
+  const web = !!opts.web;
+  // provider/model are FIXED by the SAME openrouter-first logic as before — instrumentation only observes it.
+  const provider: 'openrouter' | 'minimax-direct' = OR_KEY ? 'openrouter' : 'minimax-direct';
+  const model = OR_KEY ? OR_MODEL : MODEL;
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
-  if (OR_KEY) {
-    const body: any = { model: OR_MODEL, messages, temperature: 0.7, max_tokens: maxTokens };
-    // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
-    if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
-    // cap reasoning for ALL calls — web/no-web — so it can't starve the output token budget
-    body.reasoning = { effort: 'low' };
-    const res = await fetch(`${OR_BASE}/chat/completions`, {
+  try {
+    if (OR_KEY) {
+      const body: any = { model: OR_MODEL, messages, temperature: 0.7, max_tokens: maxTokens };
+      // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
+      if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
+      // cap reasoning for ALL calls — web/no-web — so it can't starve the output token budget
+      body.reasoning = { effort: 'low' };
+      const res = await fetch(`${OR_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${OR_KEY}`, 'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      const data: any = await res.json();
+      const text = data?.choices?.[0]?.message?.content;  // reasoning lands in a separate field; content is clean
+      if (!text || !String(text).trim()) {
+        const fin = data?.choices?.[0]?.finish_reason;
+        throw new Error(fin === 'length'
+          ? 'OpenRouter: truncated before content — raise max_tokens (reasoning ate the budget)'
+          : 'OpenRouter: empty response ' + JSON.stringify(data).slice(0, 200));
+      }
+      return { text: String(text), meta: { provider: 'openrouter', model: OR_MODEL, latencyMs: Date.now() - t0, web, ok: true } };
+    }
+    // legacy MiniMax-direct (no web search)
+    const res = await fetch(`${BASE}/chat/completions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${OR_KEY}`, 'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
-      },
-      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
       signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
-    if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data: any = await res.json();
-    const text = data?.choices?.[0]?.message?.content;  // reasoning lands in a separate field; content is clean
-    if (!text || !String(text).trim()) {
-      const fin = data?.choices?.[0]?.finish_reason;
-      throw new Error(fin === 'length'
-        ? 'OpenRouter: truncated before content — raise max_tokens (reasoning ate the budget)'
-        : 'OpenRouter: empty response ' + JSON.stringify(data).slice(0, 200));
-    }
-    return String(text);
+    const text = data?.choices?.[0]?.message?.content;
+    if (!text || !String(text).trim()) throw new Error('MiniMax: empty response ' + JSON.stringify(data).slice(0, 200));
+    return { text: String(text), meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
+  } catch (e: any) {
+    return { text: '', meta: { provider, model, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
   }
-  // legacy MiniMax-direct (no web search)
-  const res = await fetch(`${BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
-    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data: any = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text || !String(text).trim()) throw new Error('MiniMax: empty response ' + JSON.stringify(data).slice(0, 200));
-  return String(text);
+}
+
+// string-returning form (drops the meta) for callers that just want the text.
+export async function llmText(system: string, user: string, maxTokens: number = 3000, opts: { web?: boolean } = {}): Promise<string> {
+  return (await callLLM(system, user, maxTokens, opts)).text;
 }
 
 // generic text call (used by the planner); '' when no provider so callers fall back. opts.web = ground in live web search.
+// BACKWARD COMPAT: unchanged signature + string return — a thin wrapper around llmText, guarded so an offline
+// (no-provider) process returns '' without a doomed network attempt, exactly as before.
 export async function llm(system: string, user: string, maxTokens = 3000, opts: { web?: boolean } = {}): Promise<string> {
-  return LIVE ? callLLM(system, user, maxTokens, !!opts.web) : '';
+  return LIVE ? llmText(system, user, maxTokens, opts) : '';
 }
 
-export async function runAgent(department: string, ctx: Ctx): Promise<string> {
+// meta-returning form of llm() for callers that want the A/B instrumentation (provider/latency/ok).
+export async function llmTracked(system: string, user: string, maxTokens = 3000, opts: { web?: boolean } = {}): Promise<LLMResult> {
+  if (LIVE) return callLLM(system, user, maxTokens, opts);
+  return { text: '', meta: { provider: OR_KEY ? 'openrouter' : 'minimax-direct', model: 'none', latencyMs: 0, web: !!opts.web, ok: false, error: 'no provider configured' } };
+}
+
+// run one department agent and return its text + per-call meta (the runner logs the meta to run_events).
+export async function runAgentTracked(department: string, ctx: Ctx): Promise<LLMResult> {
   if (LIVE) {
     const system = ROLE[department] || `You are the ${department} department of an automated agency. Do your part for the brief.`;
     const web = WEB_DEPTS.has(department);
     // reasoning models need headroom; build emits a large spec; web calls synthesize search results.
     const maxTokens = department === 'build' ? 8000 : (web ? 4000 : 3000);
-    return await callLLM(system, buildUser(ctx), maxTokens, web);
+    return await callLLM(system, buildUser(ctx), maxTokens, { web });
   }
-  return stub(department, ctx.brief);
+  // offline deterministic fallback — synthesize a uniform meta so the runner's instrumentation still records it.
+  return { text: stub(department, ctx.brief), meta: { provider: OR_KEY ? 'openrouter' : 'minimax-direct', model: 'stub', latencyMs: 0, web: WEB_DEPTS.has(department), ok: true } };
+}
+
+// BACKWARD COMPAT: string-returning entry point used by the eval harness (src/eval.ts). Unchanged contract.
+export async function runAgent(department: string, ctx: Ctx): Promise<string> {
+  return (await runAgentTracked(department, ctx)).text;
 }
 
 // ---- offline deterministic fallback (no key) ----

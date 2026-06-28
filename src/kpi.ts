@@ -40,6 +40,16 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
   const pct = (n: number, d: number) => d ? Math.round(100 * n / d) : 0;
   const rigor = pct(realCheck, total);
 
+  // A/B instrumentation (Task 10): provider split + latency across ALL projects over the last 7 days, read from
+  // the per-call meta the runner writes to run_events (type='llm_call'). detail is TEXT, so cast ::jsonb; the
+  // timestamp column is `at` (not created_at). Global (no project filter) — this settles the openrouter A/B.
+  const providers = (await pool.query(
+    `select detail::jsonb->>'provider' as p, count(*) n,
+            round(avg((detail::jsonb->>'latencyMs')::int))::int avg_ms
+     from run_events where type='llm_call' and at > now() - interval '7 days'
+     group by 1 order by n desc`)).rows;
+  const provTotal = providers.reduce((s: number, p: any) => s + Number(p.n), 0) || 1;
+
   const kpis: Kpi[] = [
     { group: 'quality',    key: 'completion',  label: 'Completion',        value: pct(done, total) + '%', sub: `${done}/${total} shipped`,             tone: done === total && total ? 'good' : failed ? 'bad' : 'warn' },
     { group: 'quality',    key: 'firstpass',   label: 'First-pass verify', value: pct(firstPass, done || 1) + '%', sub: `${firstPass}/${done} no retry`, tone: deadlocked ? 'bad' : (firstPass === done ? 'good' : 'warn') },
@@ -49,6 +59,22 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
     { group: 'signal',     key: 'parallel',    label: 'Parallelism',       value: critical ? (total / critical).toFixed(2) + '×' : '—', sub: `${total}→${critical} layers`, tone: 'neutral' },
     { group: 'signal',     key: 'reliability', label: 'Agent reliability', value: pct(attempts - errors, attempts || 1) + '%', sub: `${errors} err / ${attempts} calls`, tone: deadlocked ? 'bad' : (errors === 0 ? 'good' : 'warn') },
     { group: 'signal',     key: 'rigor',       label: 'Verification rigor', value: rigor + '%', sub: `${realCheck}/${total} real checks`,                tone: rigor >= 60 ? 'good' : rigor >= 40 ? 'warn' : 'bad' },
+    {
+      group: 'signal',
+      key: 'llm_provider',
+      label: 'LLM provider split (7d)',
+      value: providers.map((p: any) => `${p.p} ${Math.round(100 * Number(p.n) / provTotal)}%`).join(' · ') || '—',
+      sub: providers.map((p: any) => `${p.p}: ${p.n} calls, avg ${p.avg_ms}ms`).join(' · ') || 'no data yet',
+      tone: 'neutral',
+    },
+    {
+      group: 'efficiency',
+      key: 'llm_latency',
+      label: 'LLM latency (avg, 7d)',
+      value: providers.length ? `${providers.reduce((s: number, p: any) => s + Number(p.avg_ms), 0) / providers.length | 0}ms` : '—',
+      sub: providers.map((p: any) => `${p.p} ${p.avg_ms}ms`).join(' · ') || 'no data yet',
+      tone: 'neutral',
+    },
   ];
 
   return {
