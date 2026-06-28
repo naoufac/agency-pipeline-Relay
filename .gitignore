@@ -7,3 +7,4 @@ chrome.err
 sites/
 tools/tailwindcss
 assets/*.woff2
+eval/
