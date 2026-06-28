@@ -28,8 +28,9 @@ export function extractFirstJson(s: string): any {
       if (--depth === 0) {
         const slice = t.slice(a, i + 1);
         try { return JSON.parse(slice); } catch { /* fall through to lenient repair */ }
-        // common LLM defects that strict JSON rejects: JS-style escaped apostrophe (\') and trailing commas.
-        try { return JSON.parse(slice.replace(/\\'/g, "'").replace(/,(\s*[}\]])/g, '$1')); } catch { return null; }
+        // common LLM defects that strict JSON rejects: INVALID backslash escapes (\', \x, …) and trailing
+        // commas. Strip any backslash NOT starting a valid JSON escape ("\\ / b f n r t u); keep real ones.
+        try { return JSON.parse(slice.replace(/\\(?!["\\/bfnrtu])/g, '').replace(/,(\s*[}\]])/g, '$1')); } catch { return null; }
       }
     }
   }

@@ -95,6 +95,8 @@ ok('json: escaped quote in string', (extractFirstJson('{"q":"a \\" brace } insid
 ok('json: strips ``` fences', (extractFirstJson('```json\n{"x":5}\n```') || {}).x === 5);
 ok('json: leading prose then object', (extractFirstJson('Here you go: {"y":7} done') || {}).y === 7);
 ok('json: repairs invalid \\\' escape (LLM defect)', (extractFirstJson('{"t":"What\\\'s the issue?","n":3}') || {}).n === 3);
+ok('json: repairs other invalid escapes (\\x)', (extractFirstJson('{"t":"a\\xb c\\zd","n":9}') || {}).n === 9);
+ok('json: keeps VALID escapes (\\n \\" \\\\)', (extractFirstJson('{"t":"line1\\nline2 \\"q\\" path\\\\x","n":5}') || {}).t === 'line1\nline2 "q" path\\x');
 ok('json: repairs trailing comma', (extractFirstJson('{"a":1,"b":[1,2,],}') || {}).a === 1);
 ok('json: truncated/unbalanced → null', extractFirstJson('{"a":1,"b":{"c":2') === null);
 ok('json: empty/no-brace → null', extractFirstJson('no json here') === null && extractFirstJson('') === null);
