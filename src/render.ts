@@ -11,7 +11,7 @@ const hex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16
 function mix(a: string, b: string, t: number) { const x = rgb(a), y = rgb(b); return '#' + [0, 1, 2].map(i => hex(x[i] * (1 - t) + y[i] * t)).join(''); }
 const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg) ? '#ffffff' : '#0b1220';   // readable text for a bg
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; forms?: Record<string, any[]> }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; forms?: Record<string, any[]>; primaryTable?: string }): string {
   const t = (spec && spec.brand && spec.brand.tokens) || {};
   const bg = isHex(t.bg) ? t.bg.trim() : '#ffffff';
   const primary = isHex(t.primary) ? t.primary.trim() : '#4f46e5';
@@ -30,21 +30,36 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}}`;
 
   const brand = (spec && spec.brand && spec.brand.name) || 'Studio';
-  // Resolve a REAL destination for every CTA button (no dead href="#"): prefer an action page
-  // (contact/sign-up/book/order/shop…), else the last page, else the on-page form anchor.
+  // Resolve each CTA to the RIGHT page by its INTENT (never one global page, never "last page"):
+  // an explicit model-provided link → else a keyword match on the button text → else a sensible
+  // fallback (contact/about/home). Every button goes somewhere real AND relevant.
   const pgs = ctx.pages || [];
-  const actionRe = /contact|sign-?up|get-?started|book|order|join|quote|demo|enquir|appointment|reserve|shop|buy|started|apply/i;
-  const actionPage = pgs.find((p: any) => actionRe.test(`${p.slug} ${p.title}`));
-  const ctaHref = actionPage ? `${actionPage.slug}.html`
-    : (pgs.length > 1 ? `${pgs[pgs.length - 1].slug}.html` : '#contact-form');
-  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { cta: ctaHref, forms: ctx.forms })).join('\n');
+  const findPage = (re: RegExp) => pgs.find((p: any) => re.test(p.slug) || re.test(String(p.title || '').toLowerCase()));
+  const fallbackCta = `${(findPage(/contact|touch|reach|enquir/) || findPage(/about|story/) || pgs[0] || { slug: 'index' }).slug}.html`;
+  const CTA_GROUPS: [RegExp, RegExp][] = [
+    [/contact|touch|reach|email|enquir|quote|message/, /contact|reach|touch|quote|enquir/],
+    [/shop|buy|browse|store|product|catalog|menu|order|cart/, /shop|store|product|catalog|menu|order/],
+    [/book|reserv|appointment|schedul|table/, /book|reserv|appointment|schedul/],
+    [/sign|join|start|get ?started|register|subscrib|apply|member|account|join us/, /sign|join|start|register|apply|member|account|get-?started/],
+    [/about|story|who we|team|mission/, /about|story|team|mission/],
+    [/pric|plan|package/, /pric|plan|package/],
+    [/service|what we|feature/, /service|feature|what-we/],
+  ];
+  const resolveCta = (raw: any, text: any): string => {
+    if (raw) { const r = String(raw).replace(/\.html$/, ''); if (pgs.some((p: any) => p.slug === r)) return r + '.html'; }
+    const t = String(text || '').toLowerCase();
+    for (const [tr, sr] of CTA_GROUPS) if (tr.test(t)) { const p = findPage(sr); if (p) return p.slug + '.html'; }
+    return fallbackCta;
+  };
+  const link = (raw: any, text: any) => resolveCta(raw, text);
+  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable })).join('\n');
   return `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <style>${vars}
 ${DS_CSS}</style></head>
 <body class="t-${theme}">
-${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta, ctaHref)}
+${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta, resolveCta(spec && spec.brand && spec.brand.ctaLink, spec && spec.brand && spec.brand.cta))}
 <main>
 ${sections}
 </main>

@@ -11,7 +11,7 @@ const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01'; // clean output; M
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]> };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -58,8 +58,12 @@ function buildUser(ctx: Ctx): string {
     s += `Use those exact relative hrefs (home is index.html). Build ONLY this one page.\n`;
     const th = themeFor(ctx.theme, ctx.brief);
     s += `\nDesign language: ${th}. Match the copy TONE to it — ${themeTone(th)}. (The system renders all visual design; you write copy + choose sections + 2 colours.)\n`;
-    if (ctx.tables && ctx.tables.length)
-      s += `\nThis app's REAL database tables: ${ctx.tables.join(', ')}. For any {"type":"collection"} use one of these EXACT table names so it shows live data.\n`;
+    if (ctx.tables && ctx.tables.length) {
+      s += `\nThis app's REAL database tables: ${ctx.tables.join(', ')}.`;
+      if (ctx.primaryTable) s += ` The MAIN catalog/list table is "${ctx.primaryTable}" — a product/listing/menu {"type":"collection"} or {"type":"form"} MUST use table:"${ctx.primaryTable}". Do NOT put a collection on a lookup table (categories) or contact info.`;
+      s += ` Use EXACT table names so live data shows.\n`;
+    }
+    s += `\nEvery cta SHOULD set "link":"<page slug>" to point at the RIGHT page (e.g. a "Contact us" cta → "link":"${(ctx.pages?.find(p => /contact/.test(p.slug)) || ctx.pages?.[ctx.pages.length - 1] || { slug: 'index' }).slug}"). Valid slugs: ${(ctx.pages || []).map(p => p.slug).join(', ')}.\n`;
   }
   return s;
 }

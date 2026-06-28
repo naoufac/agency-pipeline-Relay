@@ -69,13 +69,21 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
-  // the app's REAL provisioned tables (so a collection/form targets a table that exists) + the typed
-  // form-columns per table (so the renderer generates an "add a record" form that matches the schema)
-  let tables: string[] = []; const forms: Record<string, any[]> = {};
+  // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
+  // (the main public list — products/listings/menu — so a collection reliably shows real data)
+  let tables: string[] = []; const forms: Record<string, any[]> = {}; let primaryTable = '';
   if (task.department === 'build') {
-    try { tables = await appdb.listTables(pool, task.project_id); for (const t of tables) forms[t] = await appdb.formColumns(pool, task.project_id, t); } catch {}
+    try {
+      const desc = await appdb.describeSchema(pool, task.project_id);
+      tables = desc.tables.map((t: any) => t.table);
+      for (const t of tables) forms[t] = await appdb.formColumns(pool, task.project_id, t);
+      const lookup = /contact|setting|config|admin|^users?$|account|auth|session|^tags?$|meta|_info$|^info$/i;
+      const named = /product|listing|item|menu|post|article|service|event|propert|vehicle|\bcar\b|recipe|course|\bjob|maker|plant|book|dish|room|catalog|portfolio|gallery|review|member|deal|offer|spot|class|trip|tour/i;
+      const cand = desc.tables.filter((t: any) => !lookup.test(t.table) && t.rows > 0).sort((a: any, b: any) => b.rows - a.rows);
+      primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
+    } catch {}
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, tables, forms, primaryTable };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -97,7 +105,14 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         if (!spec || !Array.isArray(spec.sections) || spec.sections.length < 2)
           throw new Error('build did not return a valid spec (need brand + >=2 sections)');
         const slug = task.artifact.replace(/\.html$/, '');
-        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms });
+        // GUARANTEE the catalog shows: on the main/shop page, if no collection targets the primary table, add one
+        const primaryTable = (ctx as any).primaryTable;
+        if (primaryTable && /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/.test(slug)) {
+          const secs = Array.isArray(spec.sections) ? spec.sections : (spec.sections = []);
+          if (!secs.some((x: any) => x?.type === 'collection' && x?.table === primaryTable))
+            secs.splice(Math.min(1, secs.length), 0, { type: 'collection', title: 'Browse', intro: '', table: primaryTable });
+        }
+        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable });
         snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
       } else {
