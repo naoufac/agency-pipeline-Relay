@@ -107,11 +107,11 @@ function validate(plan: any, brief: string): Plan | null {
 const PLAN_TIMEOUT_MS = Number(process.env.PLAN_TIMEOUT_MS || 60000);
 
 async function llmPlan(brief: string): Promise<Plan | null> {
-  // web:true — ground the plan in the REAL domain (live competitors/positioning/conventions), not just training data.
+  // web:false — planner emits a tasks DAG from the brief, doesn't need live web facts. The web plugin adds latency (was the 3.6h p95 root cause pre-R4) and the truncation risk (R2 fix capped reasoning, but web plugin still costs ~5-15s per call). research/strategy keep web:true (the WEB_DEPTS set in agents.ts controls the default; planner explicitly opts in/out here).
   let raw = '';
   try {
     raw = await Promise.race([
-      llm(PLANNER_SYS, 'BRIEF: ' + brief, 4000, { web: true }),
+      llm(PLANNER_SYS, 'BRIEF: ' + brief, 4000, { web: false }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`planner timeout after ${PLAN_TIMEOUT_MS}ms`)), PLAN_TIMEOUT_MS)),
     ]);
   } catch { return null; }
