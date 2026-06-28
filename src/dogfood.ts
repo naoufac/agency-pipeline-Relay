@@ -90,9 +90,15 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
           if (vp.name === 'desktop' && /^[^#?:/][^#?:]*\.html(#.*)?$/.test(a.href)) targets.add(a.href.split('#')[0]);
         }
         if (vp.name === 'desktop') {
-          // wait for the async collection fetch to render (avoid a timing false-positive) before judging "empty"
+          // wait for the async collection fetch to render, then judge against the API (ground truth):
+          // API has rows but DOM shows 0 => the page isn't loading its data (real render bug). API empty => just no data yet.
           await cdp.waitFor('(function(){var e=document.querySelector(".collection[data-table]");return !e || e.querySelector(".card")})()');
-          for (const c of ((await cdp.evaluate(COLLS)) || [])) { nColls++; if (!c.cards) issues.push({ page: pg.slug, viewport: vp.name, kind: 'empty-collection', detail: `collection "${c.table}" rendered 0 rows (live data not showing)`, severity: 'medium' }); }
+          for (const c of ((await cdp.evaluate(COLLS)) || [])) {
+            nColls++;
+            let apiRows = -1;
+            if (c.table && /^[a-z_][a-z0-9_]*$/.test(c.table)) { try { const d: any = await (await fetch(`${baseUrl}/api/site/${projectId}/data/${c.table}`)).json(); apiRows = (d.rows || []).length; } catch {} }
+            if (!c.cards && apiRows > 0) issues.push({ page: pg.slug, viewport: vp.name, kind: 'collection-not-rendering', detail: `collection "${c.table}" has ${apiRows} rows in the DB but rendered 0 — the page isn't loading its data`, severity: 'high' });
+          }
         }
       }
     }
@@ -118,8 +124,9 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       const r = await cdp.evaluate(SUBMIT);
       let after = await count();
       for (let k = 0; k < 8 && after <= before; k++) { await sleep(500); after = await count(); }   // poll for the async write
-      if (!r?.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirm', detail: `form submitted but no success confirmation (saw: "${r?.msg || ''}")`, severity: 'high' });
+      // ground truth = did the row land. A saved row is a working form (a slow/absent message is only cosmetic).
       if (after <= before) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-not-persisted', detail: table ? `"add" form did not create a row in "${table}"` : 'form submission did not reach the database', severity: 'high' });
+      else if (!r?.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirmation', detail: 'row saved, but the visitor saw no confirmation message', severity: 'low' });
       // tidy up the QA row so the operator's real data stays clean
       if (table) await pool.query(`delete from "${sch}"."${table}" where id > $1`, [before]).catch(() => {});
       else await pool.query("delete from site_submissions where project_id=$1 and (data->>'message'='Automated QA check — please ignore.' or data->>'name' like 'QA Test%')", [projectId]).catch(() => {});

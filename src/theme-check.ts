@@ -99,6 +99,12 @@ async function main() {
     const g = staticGate(html); if (g) problems.push(g);
     if (html.length < 400) problems.push('too small');
 
+    // 2b. the page's inline <script> must be VALID JS — a broken emitted script silently kills every
+    // client behaviour (collections never load, forms never submit). Parse it; fail hard if invalid.
+    for (const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+      try { new Function(m[1]); } catch (e: any) { problems.push('emitted <script> is invalid JS: ' + (e?.message ?? e)); }
+    }
+
     // 3. WCAG AA on the rendered palette (derived deterministically from bg+primary)
     const bg = html.match(/--bg:(#[0-9a-fA-F]{3,8})/)?.[1];
     const text = html.match(/--text:(#[0-9a-fA-F]{3,8})/)?.[1];
