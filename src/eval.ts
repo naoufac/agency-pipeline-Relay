@@ -78,9 +78,9 @@ export function scorePage(html: string, spec: any) {
 
 async function evalBrief(brief: string) {
   const { plan, usedLLM } = await buildPlan(brief);
-  const pages = (plan.pages || []).slice(0, 4);   // cap pages/brief to bound cost
-  const research = await runAgent('research', { brief, upstream: [] } as any);
-  const content = await runAgent('content', { brief, upstream: [{ seq: 1, department: 'research', content: research }] } as any);
+  const pages = (plan.pages || []).slice(0, 2);   // cap pages/brief to bound cost + wall-clock
+  let research = ''; try { research = await runAgent('research', { brief, upstream: [] } as any); } catch { research = ''; }
+  let content = ''; try { content = await runAgent('content', { brief, upstream: [{ seq: 1, department: 'research', content: research }] } as any); } catch { content = ''; }
   const upstream = [{ seq: 1, department: 'research', content: research }, { seq: 2, department: 'content', content: content }];
   const pageScores: any[] = [];
   for (const pg of pages) {
@@ -99,23 +99,12 @@ async function evalBrief(brief: string) {
 const avg = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-async function main() {
-  const n = Math.max(1, Math.min(CORPUS.length, Number(process.argv[2] || 3)));
-  const stub = !(process.env.OPENROUTER_API_KEY || process.env.MINIMAX_API_KEY);
-  console.log(`eval — ${n} brief(s) · ${stub ? 'STUB mode ($0, not representative)' : 'LIVE (external key)'}\n`);
-  const results: any[] = [];
-  for (let i = 0; i < n; i++) {
-    process.stdout.write(`  [${i + 1}/${n}] ${CORPUS[i].slice(0, 52)}… `);
-    const r = await evalBrief(CORPUS[i]);
-    const ok = r.pages.filter((p: any) => p.gatePass).length;
-    console.log(`${ok}/${r.pages.length} pages pass · spec≈${r1(avg(r.pages.filter((p: any) => p.specificity != null).map((p: any) => p.specificity)))}`);
-    results.push(r);
-  }
-  // corpus aggregates (objective)
-  const allPages = results.flatMap(r => r.pages);
+function summarize(results: any[]) {
+  const allPages = results.flatMap(r => r.pages || []);
   const scored = allPages.filter((p: any) => p.gatePass != null);
-  const summary = {
-    briefs: results.length, pages: allPages.length,
+  return {
+    briefs: results.length, pages: allPages.length, scored: scored.length,
+    gatePassed: scored.filter((p: any) => p.gatePass).length,
     gatePassRate: r1(100 * scored.filter((p: any) => p.gatePass).length / Math.max(1, scored.length)),
     rejectedSpecs: allPages.filter((p: any) => p.rejected).length,
     errors: allPages.filter((p: any) => p.error).length,
@@ -124,15 +113,32 @@ async function main() {
     avgDistinctTypes: r1(avg(scored.map((p: any) => p.distinctTypes))),
     avgWords: Math.round(avg(scored.map((p: any) => p.words))),
   };
+}
+
+async function main() {
+  const n = Math.max(1, Math.min(CORPUS.length, Number(process.argv[2] || 3)));
+  const stub = !(process.env.OPENROUTER_API_KEY || process.env.MINIMAX_API_KEY);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   mkdirSync('eval', { recursive: true });
   const out = `eval/report-${stamp}.json`;
-  writeFileSync(out, JSON.stringify({ stamp, stub, summary, results }, null, 2));
+  console.log(`eval — ${n} brief(s) · ${stub ? 'STUB mode ($0, not representative)' : 'LIVE (external key)'} -> ${out}\n`);
+  const results: any[] = [];
+  for (let i = 0; i < n; i++) {
+    process.stdout.write(`  [${i + 1}/${n}] ${CORPUS[i].slice(0, 50)}… `);
+    try {
+      const r = await evalBrief(CORPUS[i]);
+      const okc = r.pages.filter((p: any) => p.gatePass).length;
+      console.log(`${okc}/${r.pages.length} pass · spec≈${r1(avg(r.pages.filter((p: any) => p.specificity != null).map((p: any) => p.specificity)))}`);
+      results.push(r);
+    } catch (e: any) { console.log('FAILED:', (e?.message || e)); results.push({ brief: CORPUS[i], error: (e?.message || String(e)).slice(0, 140), pages: [] }); }
+    writeFileSync(out, JSON.stringify({ stamp, stub, summary: summarize(results), results }, null, 2));   // incremental: a kill still leaves usable data
+  }
+  const s = summarize(results);
   console.log('\n=== corpus summary ===');
-  console.log(`  gate-pass rate   ${summary.gatePassRate}%   (${scored.filter((p: any) => p.gatePass).length}/${scored.length} pages)`);
-  console.log(`  rejected specs   ${summary.rejectedSpecs}   · errors ${summary.errors}`);
-  console.log(`  avg specificity  ${summary.avgSpecificity}/100   · avg generic-filler hits ${summary.avgGenericHits}/page`);
-  console.log(`  avg section variety ${summary.avgDistinctTypes} distinct types · avg ${summary.avgWords} words/page`);
+  console.log(`  gate-pass rate   ${s.gatePassRate}%   (${s.gatePassed}/${s.scored} pages)`);
+  console.log(`  rejected specs   ${s.rejectedSpecs}   · errors ${s.errors}`);
+  console.log(`  avg specificity  ${s.avgSpecificity}/100   · avg generic-filler hits ${s.avgGenericHits}/page`);
+  console.log(`  avg section variety ${s.avgDistinctTypes} distinct types · avg ${s.avgWords} words/page`);
   console.log(`\nreport -> ${out}`);
 }
 

@@ -18,6 +18,7 @@ const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
 const LIVE = !!(OR_KEY || KEY);   // any live provider configured?
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 90000);  // hard per-request cap — a hung/slow call can't stall a build forever
 // departments whose output is improved by REAL-WORLD facts -> enable web search (grounding). Everything
 // else inherits those facts through upstream context, so search cost is ~2 calls/project.
 const WEB_DEPTS = new Set(['research', 'strategy']);
@@ -99,6 +100,7 @@ async function callLLM(system: string, user: string, maxTokens: number, web: boo
         'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data: any = await res.json();
@@ -116,6 +118,7 @@ async function callLLM(system: string, user: string, maxTokens: number, web: boo
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data: any = await res.json();
