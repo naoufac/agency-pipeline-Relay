@@ -18,6 +18,31 @@ function sqlArtifact(content: string): string { const s = stripFences(content); 
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// AUTONOMOUS RECOVERY (0-human): a build must never sit dead waiting for a person. Two layers:
+//  1) a TRANSIENT infra error (LLM timeout / 429 / 5xx / network) does NOT consume the defect budget — it
+//     backs off and retries, so a flaky provider can't brick a build.
+//  2) a project that still has 'failed' tasks after its in-round retries is RESURRECTED for a fresh full
+//     round, BOUNDED; once the budget is spent it emits 'project_stuck' (for alerting) instead of dying silent.
+const MAX_PROJECT_RETRIES = Number(process.env.RELAY_MAX_PROJECT_RETRIES || 2);
+const MAX_TRANSIENT_RETRIES = Number(process.env.RELAY_MAX_TRANSIENT_RETRIES || 6);
+function isTransient(msg: any): boolean {
+  const s = String(msg ?? '').toLowerCase();
+  return /timeout|abort|429|too many requests|rate.?limit|\b50[0-9]\b|bad gateway|gateway|temporarily|econn|etimedout|enotfound|socket hang|network|fetch failed|empty response|truncated/.test(s);
+}
+const evCount = async (pool: pg.Pool, col: 'task_id' | 'project_id', id: string, type: string): Promise<number> =>
+  (await pool.query(`select count(*)::int n from run_events where ${col}=$1 and type=$2`, [id, type])).rows[0]?.n ?? 0;
+// resurrect: reset every 'failed' task to 'ready' for a fresh full round (attempts reset). The unblock trigger
+// + reconcile re-open their downstreams as they complete. Returns true if anything was revived.
+async function resurrect(pool: pg.Pool, projectId: string): Promise<boolean> {
+  const r = await pool.query(
+    "update tasks set status='ready', attempts=0, claimed_by=null, lease_expires_at=null, updated_at=now() where project_id=$1 and status='failed' returning id",
+    [projectId]);
+  if (!r.rowCount) return false;
+  await pool.query("update projects set status='running' where id=$1", [projectId]);
+  await ev(pool, projectId, null, 'project_retry', `resurrected ${r.rowCount} failed task(s) for a fresh round`);
+  return true;
+}
+
 async function reclaim(pool: pg.Pool): Promise<number> {
   // resurrect crashed tasks in BOTH running and verifying (the slow render check lives in verifying)
   const r = await pool.query(
@@ -200,8 +225,17 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       await pool.query(`update tasks set status=$2, claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1`, [task.id, next]);
     }
   } catch (e: any) {
-    // agent/API error (e.g. MiniMax down): never crash the loop; retry, then fail.
+    // agent/API error (e.g. provider down): never crash the loop.
     await ev(pool, task.project_id, task.id, 'agent_error', `#${task.seq}: ${(e?.message ?? String(e)).slice(0, 280)}`);
+    const errs = await evCount(pool, 'task_id', task.id, 'agent_error');   // includes the one just logged
+    // TRANSIENT infra blip → back off + retry WITHOUT burning the defect budget (a flaky provider must not
+    // brick a build). Park as 'running' with a future lease; reclaim() revives it to 'ready' after the backoff
+    // (no busy-wait, no held slot). attempts is refunded so transient never counts toward 'failed'.
+    if (isTransient(e?.message) && errs < MAX_TRANSIENT_RETRIES) {
+      const backoff = Math.min(5 * Math.pow(2, errs), 180);   // seconds, capped at 3 min
+      await pool.query("update tasks set status='running', claimed_by=null, lease_expires_at=now() + make_interval(secs => $2), attempts=greatest(attempts-1,0), updated_at=now() where id=$1", [task.id, backoff]);
+      return;
+    }
     const next = task.attempts >= task.max_attempts ? 'failed' : 'ready';
     await pool.query(`update tasks set status=$2, claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1`, [task.id, next]);
   }
@@ -225,7 +259,14 @@ export async function runLoop(
     const claimed = await claim(pool, runnerId, cap);
     if (claimed.length === 0) {
       const c = await counts(pool, projectId);
-      if (c.running === 0 && c.ready === 0) break;  // complete, or deadlocked (blocked>0)
+      if (c.running === 0 && c.ready === 0 && c.verifying === 0) {
+        // quiescent. If 'failed' tasks remain and resurrect budget is left, retry the WHOLE round (0-human
+        // recovery) — a transient blip or an unlucky exhausted retry gets a fresh chance instead of bricking.
+        if (c.failed > 0 && (await evCount(pool, 'project_id', projectId, 'project_retry')) < MAX_PROJECT_RETRIES && (await resurrect(pool, projectId))) {
+          await sleep(300); continue;
+        }
+        break;  // truly complete, or genuinely stuck (budget exhausted)
+      }
       await sleep(25);
       continue;
     }
@@ -235,7 +276,10 @@ export async function runLoop(
   }
 
   const c = await counts(pool, projectId);
-  const done = (c.blocked + c.ready + c.running) === 0 && c.failed === 0;
+  const done = (c.blocked + c.ready + c.running + c.verifying) === 0 && c.failed === 0;
+  // genuinely stuck after exhausting recovery → emit an alertable event instead of dying silently.
+  if (!done && c.failed > 0)
+    await ev(pool, projectId, null, 'project_stuck', `${c.failed} task(s) failed after ${await evCount(pool, 'project_id', projectId, 'project_retry')} resurrect round(s) — needs attention`);
   await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
   // auto-review only in the SERVER context (opts.review). CLI/demo/scratch runs don't launch a browser
   // (it would keep a short-lived process alive and isn't wanted for offline tests).

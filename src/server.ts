@@ -300,3 +300,22 @@ pool.query("create table if not exists dogfood_reviews (id bigserial primary key
 const reclaimPublishing = () => pool.query("update page_snapshots set state='failed', log='publish interrupted — please retry', updated_at=now() where state='publishing' and updated_at < now() - interval '5 minutes'").catch(() => {});
 reclaimPublishing();
 setInterval(reclaimPublishing, 120000).unref?.();
+
+// AUTONOMOUS BUILD RECOVERY (0-human): re-run any 'blocked' project that still has failed tasks AND resurrect
+// budget left, so a build that got stuck while the server kept running heals itself — no restart, no human.
+// runLoop performs the actual resurrect; this only re-invokes it. Budget-bounded, so a perma-stuck project
+// (already emitted 'project_stuck') is left alone for a human, not retried forever.
+const MAX_RETRIES = Number(process.env.RELAY_MAX_PROJECT_RETRIES || 2);
+const recoverBlocked = async () => {
+  if (process.env.RELAY_BUILD === '0') return;
+  try {
+    const r = await pool.query(
+      `select p.id from projects p
+        where p.status='blocked'
+          and exists (select 1 from tasks t where t.project_id=p.id and t.status='failed')
+          and (select count(*) from run_events e where e.project_id=p.id and e.type='project_retry') < $1`, [MAX_RETRIES]);
+    for (const row of r.rows) runLoop(pool, row.id, { cap: 4, review: true }).catch(() => {});
+    if (r.rows.length) console.log('recover: re-running', r.rows.length, 'blocked project(s)');
+  } catch (e: any) { console.error('recoverBlocked', e?.message); }
+};
+setInterval(recoverBlocked, 300000).unref?.();  // every 5 min
