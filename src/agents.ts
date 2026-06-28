@@ -25,7 +25,7 @@ const WEB_DEPTS = new Set(['research', 'strategy']);
 
 import { themeFor, themeTone } from './themes.ts';
 
-export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any } };
+export type Ctx = { brief: string; upstream: { seq: number; department: string; content: string }[]; feedback?: string; pages?: { slug: string; title: string }[]; self?: { title: string; slug: string }; theme?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; brand?: { name: string; cta: string | null; tokens: any }; site?: any };
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
@@ -41,7 +41,7 @@ const ROLE: Record<string, string> = {
   copywriting: 'You are the Copywriting department. Output ONLY valid JSON mapping section ids to final on-brand copy: {"hero":{"headline":"...","subhead":"...","cta":"..."},"about":{"body":"..."}, ...} with real copy for this brief. Invent realistic, specific names/details; NEVER use bracketed placeholders like [Studio Name] or lorem ipsum. JSON only.',
   strategy:    'You are the Strategy department. Give a concrete, brief-specific plan: positioning, the sections the site needs and why, and the single key message. Plain text, specific.',
   auth:        'You are the Auth department. Specify the accounts/authentication model.',
-  build:       'You are the Build department composing ONE page of a multi-page site (named in "YOU ARE BUILDING THIS PAGE"). You do NOT write HTML or CSS — a deterministic renderer turns your spec into a perfect, responsive, accessible page (nav, fonts, spacing, contrast are guaranteed by the system). Output ONLY a JSON object, no prose/markdown/fences:\n' +
+  build:       '⚠️ OUTPUT FORMAT: ONE parseable JSON object. NO HTML tags, NO CSS, NO markdown fences, NO prose before/after. Your output starts with { and ends with }. Self-check before submitting.\n\nYou are the Build department composing ONE page of a multi-page site (named in "YOU ARE BUILDING THIS PAGE"). The renderer turns your JSON spec into a perfect, responsive, accessible page (nav, fonts, spacing, contrast are guaranteed). Do NOT write HTML or CSS — write ONLY the JSON spec below:\n' +
                '{"brand":{"name":"<brand name>","cta":"<short nav button, e.g. Get started>","tokens":{"primary":"#hex","bg":"#hex","accent":"#hex","font_display":"Grotesk|Fraunces|Inter","font_body":"Inter|Grotesk"}},"sections":[ ... 3 to 6 sections ... ]}\n' +
                'Section types (use a mix that fits THIS page; every page MUST open with a hero):\n' +
                '- {"type":"hero","image":"2-4 word stock-photo search","eyebrow":"short kicker","headline":"...","lead":"1-2 sentence subhead","cta":"button label"}\n' +
@@ -57,18 +57,51 @@ const ROLE: Record<string, string> = {
                '- {"type":"feed","title":"...","intro":"one line","form":"listing","empty":"Nothing here yet."}  (a LIVE list of the site\'s own PUBLIC submissions to the form with the SAME "form" name — for a directory / listings / reviews / community wall. Pair it with a {"type":"form","form":"listing"} so visitors add an entry and SEE it appear. Use for app/store/directory briefs. NEVER point a feed at a private "contact" form.)\n' +
                '- {"type":"collection","title":"...","intro":"one line","table":"items","empty":"Nothing here yet."}  (a LIVE list rendered from the project\'s REAL database table named "table" — products, menu, listings, fleet. Use for app/store pages; the database department must CREATE and SEED that exact table. Reads the live DB.)\n' +
                '- {"type":"form","table":"listings","title":"Add yours","cta":"Add"}  (an "add a record" form that writes a REAL row to the database table named "table" — the FIELDS are generated automatically from that table\'s columns, you do NOT list them. Pair it with a {"type":"collection","table":"<same table>"} so a visitor adds an entry and SEES it appear. Use for directory / listings / classifieds / reviews apps.)\n' +
-               'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way). The system owns fonts, spacing, shape and layout (chosen from the brief) — you only supply copy, section order and 2 brand colours. JSON ONLY.',
+               'Rules: use the EXACT brand + copy from upstream; write real, specific copy (NEVER [placeholders] or lorem ipsum); image fields are 2-4 word stock-photo SEARCH TERMS (not URLs); pick bg + primary with strong contrast for each other (the renderer guarantees readable text either way). The system owns fonts, spacing, shape and layout (chosen from the brief) — you only supply copy, section order and 2 brand colours.\n\n⚠️ FINAL CHECK before submitting: does your output contain any of \"<\", \">\", \"```\", or text before \"{\" or after \"}\"? If YES — REWRITE the entire response as pure JSON. JSON ONLY.',
+  compose:     'You are the Composition department. You compose the ENTIRE multi-page website as ONE JSON object — the site\'s single source (its CMS). A deterministic renderer turns it into perfect, responsive, accessible pages and OWNS all visual design, the shared navigation, fonts, spacing, shape and the LOCKED brand palette. You only choose, for EACH page, its sections + real copy. Output ONLY JSON (no prose/markdown/fences):\n' +
+               '{"pages":[{"slug":"index","title":"Home","sections":[ ...3-6 sections... ]},{"slug":"about","title":"About","sections":[...]}]}\n' +
+               'Compose EVERY page listed under "PAGES TO COMPOSE" using its EXACT slug + title; give each 3-6 sections; every page MUST open with a hero. Use the LOCKED brand name everywhere a name appears (hero/about/footer) — NEVER a different name or variation. Write real, specific copy for THIS brief (NEVER [placeholders] or lorem ipsum). image fields are 2-4 word stock-photo SEARCH TERMS (not URLs). A cta MAY set "link":"<page slug>".\n' +
+               'Section types (mix what fits each page):\n' +
+               '- {"type":"hero","image":"2-4 word photo","eyebrow":"kicker","headline":"...","lead":"1-2 sentence subhead","cta":"label"}\n' +
+               '- {"type":"features","title":"...","intro":"one line","items":[{"title":"...","body":"..."}]}  (3-4)\n' +
+               '- {"type":"split","image":"2-4 word photo","eyebrow":"...","title":"...","body":"a paragraph","cta":"label","reverse":false}\n' +
+               '- {"type":"gallery","title":"...","images":["2-4 word photo","..."]}  (4-6)\n' +
+               '- {"type":"cta","headline":"...","body":"one line","cta":"label"}\n' +
+               '- {"type":"stats","title":"...","items":[{"value":"480+","label":"projects shipped"}]}  (3-4)\n' +
+               '- {"type":"pricing","title":"...","intro":"one line","plans":[{"name":"Pro","price":"$29","period":"mo","featured":true,"body":"one line","features":["...","..."],"cta":"Get Pro"}]}  (2-3; mark one featured)\n' +
+               '- {"type":"testimonials","title":"...","items":[{"quote":"...","name":"...","role":"..."}]}  (2-6)\n' +
+               '- {"type":"faq","title":"...","items":[{"q":"...","a":"..."}]}  (3-8)\n' +
+               '- {"type":"form","title":"...","intro":"one line","cta":"Send","form":"contact"}  (a REAL stored form; put one on a contact / sign-up / get-in-touch page)\n' +
+               '- {"type":"collection","title":"...","table":"items"} and {"type":"feed","form":"listing"}  (LIVE lists of real DB rows / public submissions — for app/store/directory pages; use the EXACT table names provided, pair a feed with a matching form)\n' +
+               'JSON ONLY — exactly one object containing every page. Self-check: every { has a matching }, no second block, no prose/fences.',
   integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
   qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
 };
 
-function buildUser(ctx: Ctx): string {
+function buildUser(ctx: Ctx, department?: string): string {
   let s = '';
   if (ctx.feedback) s += `IMPORTANT — your previous attempt FAILED an automated check: ${ctx.feedback}\nProduce a corrected version that passes this check.\n\n`;
   s += `BRIEF: ${ctx.brief}\n`;
   if (ctx.upstream.length) {
     s += `\nUPSTREAM RESULTS (the departments you depend on):\n`;
     for (const u of ctx.upstream) s += `\n[#${u.seq} ${u.department}]\n${u.content}\n`;
+  }
+  // COMPOSE: build the WHOLE site (all pages) in one shot — the single CMS the renderer projects pages from.
+  if (department === 'compose' && ctx.pages && ctx.pages.length) {
+    s += `\nPAGES TO COMPOSE (compose ALL of them, in this order; each opens with a hero):\n`;
+    s += ctx.pages.map(p => `  ${p.slug} — "${p.title}"`).join('\n') + '\n';
+    const th = themeFor(ctx.theme, ctx.brief);
+    s += `\nDesign language: ${th}. Match the copy TONE to it — ${themeTone(th)}. (The system renders all visual design, the shared nav and the locked palette; you write copy + choose sections per page.)\n`;
+    if (ctx.tables && ctx.tables.length) {
+      s += `\nThis app's REAL database tables: ${ctx.tables.join(', ')}.`;
+      if (ctx.primaryTable) s += ` The MAIN catalog/list table is "${ctx.primaryTable}" — a product/listing/menu {"type":"collection"} or {"type":"form"} MUST use table:"${ctx.primaryTable}".`;
+      s += ` Use EXACT table names so live data shows.\n`;
+    }
+    if (ctx.brand && ctx.brand.name) {
+      s += `\nBRAND NAME — LOCKED for the WHOLE site: "${ctx.brand.name}". Use EXACTLY this name everywhere a name appears (hero/about/footer) — NEVER a variation. (The renderer owns the palette + nav button; you only write copy + sections.)\n`;
+    }
+    s += `\nEvery cta MAY set "link":"<page slug>". Valid slugs: ${(ctx.pages || []).map(p => p.slug).join(', ')}.\n`;
+    return s;
   }
   if (ctx.self && ctx.pages && ctx.pages.length) {
     s += `\nYOU ARE BUILDING THIS PAGE: "${ctx.self.title}" — output the full HTML for ${ctx.self.slug}.html.\n`;
@@ -98,9 +131,10 @@ export type LLMResult = { text: string; meta: { provider: 'openrouter' | 'minima
 // Returns the text AND per-call meta. On failure it returns ok:false (no throw) with the captured error —
 // the string wrappers (llmText/llm/runAgent) still yield '' on failure exactly as the old throw-path did
 // (planner: empty→null; runner: re-throws after logging meta so the agent_error retry path is unchanged).
-export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean } = {}): Promise<LLMResult> {
+export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;
+  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : LLM_TIMEOUT_MS;  // compose (whole site) needs more
   // provider/model are FIXED by the SAME openrouter-first logic as before — instrumentation only observes it.
   const provider: 'openrouter' | 'minimax-direct' = OR_KEY ? 'openrouter' : 'minimax-direct';
   const model = OR_KEY ? OR_MODEL : MODEL;
@@ -119,7 +153,7 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
           'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
       const data: any = await res.json();
@@ -137,7 +171,7 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
       method: 'POST',
       headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
-      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data: any = await res.json();
@@ -172,9 +206,13 @@ export async function runAgentTracked(department: string, ctx: Ctx): Promise<LLM
   if (LIVE) {
     const system = ROLE[department] || `You are the ${department} department of an automated agency. Do your part for the brief.`;
     const web = WEB_DEPTS.has(department);
-    // reasoning models need headroom; build emits a large spec; web calls synthesize search results.
-    const maxTokens = department === 'build' ? 8000 : (web ? 4000 : 3000);
-    return await callLLM(system, buildUser(ctx), maxTokens, { web });
+    // reasoning models need headroom; compose emits the WHOLE site (all pages) so it needs the most; build
+    // emits one page's spec; web calls synthesize search results.
+    const maxTokens = department === 'compose' ? 16000 : department === 'build' ? 8000 : (web ? 4000 : 3000);
+    // compose generates the WHOLE site in one call (it replaces N per-page calls) — give it real headroom so
+    // it doesn't flake on the 90s default the way a single small call never would.
+    const timeoutMs = department === 'compose' ? Number(process.env.COMPOSE_TIMEOUT_MS || 180000) : undefined;
+    return await callLLM(system, buildUser(ctx, department), maxTokens, { web, timeoutMs });
   }
   // offline deterministic fallback — synthesize a uniform meta so the runner's instrumentation still records it.
   return { text: stub(department, ctx.brief), meta: { provider: OR_KEY ? 'openrouter' : 'minimax-direct', model: 'stub', latencyMs: 0, web: WEB_DEPTS.has(department), ok: true } };
@@ -227,6 +265,23 @@ function stub(department: string, brief: string): string {
           { title: 'Real support', body: 'A person, not a bot, the moment something needs sorting.' }] },
         { type: 'split', eyebrow: 'For merchants', title: 'Grow without building your own fleet', body: 'List your menu, accept orders, and let our couriers handle the last mile. You keep your customers; we keep them moving.', cta: 'Partner with us' },
         { type: 'form', title: 'Get early access', intro: 'Tell us your neighbourhood and we will let you know the day we launch near you.', cta: 'Request access' },
+      ],
+    });
+    case 'compose':     return JSON.stringify({
+      pages: [
+        { slug: 'index', title: 'Home', sections: [
+          { type: 'hero', eyebrow: 'City-wide delivery', headline: 'Anything you need, at your door in under an hour', lead: 'Swift Lane connects you to the shops and kitchens nearby and brings your order over while it is still warm.', cta: 'Order now', image: 'city courier bike' },
+          { type: 'features', title: 'Why Swift Lane', intro: 'Built for speed and trust.', items: [
+            { title: 'Live tracking', body: 'Watch your courier move on the map from pickup to your door.' },
+            { title: 'Pay your way', body: 'Card, wallet, or cash on delivery — whatever suits you.' },
+            { title: 'Real support', body: 'A person, not a bot, the moment something needs sorting.' }] },
+          { type: 'cta', headline: 'Hungry yet?', body: 'Get your first order in minutes.', cta: 'Order now' }] },
+        { slug: 'about', title: 'About', sections: [
+          { type: 'hero', headline: 'We move your city, one order at a time', lead: 'Swift Lane started with three couriers and a simple promise: fast, honest delivery.', image: 'team portrait warehouse' },
+          { type: 'split', eyebrow: 'Our story', title: 'Built by people who deliver', body: 'We obsess over the last mile so local shops can compete with anyone.', cta: 'Partner with us' }] },
+        { slug: 'contact', title: 'Contact', sections: [
+          { type: 'hero', headline: 'Get in touch', lead: 'Questions, partnerships, or support — we reply fast.', image: 'support desk' },
+          { type: 'form', title: 'Send us a message', intro: 'We answer within a day.', cta: 'Send', form: 'contact' }] },
       ],
     });
     case 'integration': return `Integration: payments + maps wired; deploy config ready.`;
