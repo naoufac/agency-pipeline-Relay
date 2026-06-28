@@ -57,7 +57,21 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const params = proj.rows[0].params || {};
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
-  const brand = params.brand;   // canonical project brand (logo + nav button + palette), shared by every page
+  let brand = params.brand;   // canonical project brand (logo + nav button + palette), shared by every page
+  // SINGLE SOURCE: derive the one brand identity from the branding department so every page's COPY and
+  // logo use the SAME name + colours (branding runs upstream of all page builds, so it's the same for all).
+  if (task.department === 'build') {
+    const bj = ups.rows.find((u: any) => u.department === 'branding');
+    if (bj) {
+      try {
+        const o = extractFirstJson(bj.content); const p = (o && o.palette) || {};
+        const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
+        const name = (o && typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : (brand && brand.name);
+        const tokens = (isHex(p.bg) && isHex(p.primary)) ? { bg: p.bg.trim(), primary: p.primary.trim(), ...(isHex(p.accent) ? { accent: p.accent.trim() } : {}) } : (brand && brand.tokens);
+        if (name || tokens) brand = { name, cta: (brand && brand.cta) || null, tokens: tokens || {} };
+      } catch {}
+    }
+  }
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
   // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
   // (the main public list — products/listings/menu — so a collection reliably shows real data)
@@ -97,18 +111,23 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         const { spec, repairs, errors } = normalizeSpec(raw, { slug, tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         if (errors.length) throw new Error('build spec rejected: ' + errors.join('; '));
         if (repairs.length) console.error(`[spec] ${task.project_id}/${slug}: ${repairs.join(' · ')}`);
-        // BRAND LOCK: every page of a project shares ONE logo, nav button + palette. The first page to
-        // build sets the canonical brand (atomic, race-safe across parallel builds); every page renders
-        // with it — never its own invented brand. This is what keeps the header/logo CONSTANT site-wide.
-        let canon = (ctx as any).brand;
-        if (!canon) {
-          const bi = brandIdentity(spec);
-          await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(bi)]);
-          const rr = await pool.query("select params->'brand' as brand from projects where id=$1", [task.project_id]);
-          canon = (rr.rows[0] && rr.rows[0].brand) || bi;
-        }
+        // BRAND LOCK: every page shares ONE logo, nav button + palette. Name comes from branding (same for
+        // all pages); colours from branding or this page. The FIRST build atomically writes the record;
+        // every page then reads the SAME one and renders with it — never its own invented brand.
+        const bi = brandIdentity(spec);
+        const cb = (ctx as any).brand || {};
+        const locked = {
+          name: (cb.name && String(cb.name).trim()) || bi.name,
+          cta: cb.cta || bi.cta,
+          tokens: (cb.tokens && Object.keys(cb.tokens).length) ? cb.tokens : bi.tokens,
+        };
+        await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(locked)]);
+        const rr = await pool.query("select params->'brand' as brand from projects where id=$1", [task.project_id]);
+        const canon = (rr.rows[0] && rr.rows[0].brand) || locked;
         applyBrand(spec, canon);
-        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: task.title, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+        // clean page <title>: the page's nav title (e.g. "Our Story"), NOT the internal task name ("Build the … page")
+        const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
+        const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
         snapshot = cms.instrument(await processMedia(rendered, dir));      // real photos -> stamp edit ids for the CMS
         writeFileSync(fileURLToPath(new URL(task.artifact, dir)), cms.shipHtml(snapshot));  // shipHtml = strip edit ids; page is already complete
       } else {

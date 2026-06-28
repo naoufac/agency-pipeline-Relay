@@ -64,7 +64,7 @@ p{margin:0 0 1rem}
 /* footer */
 .footer{border-top:var(--border-w,1px) solid var(--line);padding:44px 0;color:var(--muted)}
 .footer-inner{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
-.footer nav a{color:var(--muted);text-decoration:none;margin-left:18px}.footer nav a:hover{color:var(--text)}
+.footer-links a{color:var(--muted);text-decoration:none;margin-left:18px}.footer-links a:hover{color:var(--text)}
 /* form (full-stack: posts to a real API -> Postgres) */
 .formwrap{max-width:560px}
 .rform{display:flex;flex-direction:column;gap:14px;margin-top:1.6rem}
@@ -103,7 +103,7 @@ export function navBar(brand: string, pages: any[], current: string, ctaText?: s
 }
 export function footer(brand: string, pages: any[]) {
   return `<footer class="footer"><div class="container"><div class="footer-inner">
-  <span>© ${esc(brand)}</span><nav>${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}</nav>
+  <span>© ${esc(brand)}</span><div class="footer-links">${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}</div>
 </div></div></footer>`;
 }
 

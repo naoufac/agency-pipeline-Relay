@@ -29,6 +29,8 @@ export function repairPlan(issues: Issue[], pageSlugs: string[]): { slug: string
 
 // ---- in-page probes (run inside the real browser via page.evaluate) ----
 const LAYOUT = `(()=>{var n=document.querySelector('.nav-inner'),c=document.querySelector('main .container')||document.querySelector('.container');var nl=n?n.getBoundingClientRect().left:null,cl=c?c.getBoundingClientRect().left:null;return{overflow:document.documentElement.scrollWidth>window.innerWidth+2,navLeft:nl,contLeft:cl,misaligned:(nl!=null&&cl!=null)?Math.abs(nl-cl)>2:false}})()`;
+// "one website = one navigation = one logo" — read it from the LIVE DOM the visitor actually sees.
+const STRUCT = `(function(){var b=document.querySelector('.nav-brand');return{navs:document.querySelectorAll('nav').length,logos:document.querySelectorAll('.nav-brand').length,logo:b?(b.textContent||'').trim():''}})()`;
 const LINKS = `Array.from(document.querySelectorAll('a')).map(function(a){return{text:(a.textContent||'').trim().slice(0,60),href:a.getAttribute('href')||'',btn:a.classList.contains('btn')}})`;
 const COLLS = `Array.from(document.querySelectorAll('.collection[data-table]')).map(el=>({table:el.getAttribute('data-table'),cards:el.querySelectorAll('.card').length}))`;
 const FORMINFO = `(function(){var f=document.querySelector('form.rform');return f?{table:f.getAttribute('data-table')||''}:null})()`;
@@ -39,6 +41,7 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
   const pages = (proj.rows[0]?.params?.pages) || [{ slug: 'index', title: 'Home' }];
   const issues: Issue[] = []; let nButtons = 0, nForms = 0, nColls = 0, nLinks = 0;
   const targets = new Set<string>();
+  const siteLogos = new Set<string>();   // every page's logo text — a coherent site shows exactly ONE
   const url = (slug: string) => `${baseUrl}/sites/${projectId}/${slug}.html`;
   const goto = async (page: any, u: string) => { try { await page.goto(u, { waitUntil: 'networkidle', timeout: 30000 }); } catch { try { await page.goto(u, { waitUntil: 'load', timeout: 15000 }); } catch {} } };
 
@@ -50,6 +53,13 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         const lay: any = await page.evaluate(LAYOUT).catch(() => null);
         if (lay?.overflow) issues.push({ page: pg.slug, viewport: vp.name, kind: 'overflow', detail: 'page scrolls horizontally (layout overflow)', severity: 'high' });
         if (lay?.misaligned) issues.push({ page: pg.slug, viewport: vp.name, kind: 'header', detail: `header misaligned: nav left ${Math.round(lay.navLeft)} vs content ${Math.round(lay.contLeft)}`, severity: 'medium' });
+        // structural: exactly one navigation + one logo on the live page (catches duplicate nav/logo)
+        const st: any = await page.evaluate(STRUCT).catch(() => null);
+        if (st) {
+          if (st.navs !== 1) issues.push({ page: pg.slug, viewport: vp.name, kind: 'duplicate-nav', detail: `page renders ${st.navs} navigations — a website must have exactly ONE`, severity: 'high' });
+          if (st.logos !== 1) issues.push({ page: pg.slug, viewport: vp.name, kind: 'duplicate-logo', detail: `page renders ${st.logos} logos — a website must have exactly ONE`, severity: 'high' });
+          if (vp.name === 'desktop' && st.logo) siteLogos.add(st.logo);
+        }
         const links: any[] = ((await page.evaluate(LINKS).catch(() => [])) as any[]) || [];
         for (const a of links) {
           const lt = String(a.text || '').toLowerCase().trim();
@@ -72,6 +82,9 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         }
       }
     }
+    // one site = one logo: flag any per-page logo drift (the deterministic site_consistent gate also
+    // enforces this, but the reviewer must SEE and report it — the verdict is what's shown on the board)
+    if (siteLogos.size > 1) issues.push({ page: '(site)', viewport: 'all', kind: 'logo-drift', detail: `the logo differs across pages: ${[...siteLogos].map(l => JSON.stringify(l)).join(' · ')} — one website must show one logo`, severity: 'high' });
     // load-test every internal link target across the whole site (broken nav / wrong links anywhere)
     for (const t of targets) {
       try { const r = await fetch(`${baseUrl}/sites/${projectId}/${t}`); const body = await r.text(); if (!r.ok || body.length < 400) issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" does not load (status ${r.status}, ${body.length}b)`, severity: 'high' }); }
@@ -113,7 +126,7 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl?: st
     const high = issues.filter(i => i.severity === 'high').length;
     const summary = issues.length
       ? `${issues.length} issue(s), ${high} high — ` + issues.slice(0, 8).map(i => `${i.page}/${i.viewport}:${i.kind}`).join('; ')
-      : `clean — ${checked.buttons} buttons across ${checked.pages} pages all labelled + every link target loads (${checked.linkTargets} checked), ${checked.forms} form(s) submit+persist, ${checked.collections} collection(s) live, headers aligned`;
+      : `clean — one nav + one logo per page (no duplicates, no drift), ${checked.buttons} buttons across ${checked.pages} pages all labelled + every link target loads (${checked.linkTargets} checked), ${checked.forms} form(s) submit+persist, ${checked.collections} collection(s) live, headers aligned`;
     await pool.query(`create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())`).catch(() => {});
     await pool.query('insert into dogfood_reviews(project_id, passed, summary, issues, checked) values ($1,$2,$3,$4,$5)', [projectId, high === 0, summary, JSON.stringify(issues), JSON.stringify(checked)]);
     await ev(pool, projectId, null, 'dogfood', summary);

@@ -32,7 +32,7 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
   const memo: any = {}; const lp = (s: number): number => memo[s] ?? (memo[s] = 1 + (succ[s].length ? Math.max(...succ[s].map(lp)) : 0));
   const critical = total ? Math.max(...tasks.map(t => lp(t.seq))) : 0;
   // honest: only genuinely deterministic checks the agent can't fake count toward rigor
-  const realCheck = tasks.filter(t => ['sql_applies', 'app_db', 'site_renders', 'wcag'].includes(t.verify) || (t.verify || '').startsWith('json')).length;
+  const realCheck = tasks.filter(t => ['sql_applies', 'app_db', 'site_renders', 'site_consistent', 'wcag'].includes(t.verify) || (t.verify || '').startsWith('json')).length;
   const chars = outs.reduce((s, o) => s + (o.len || 0), 0);
   const errors = ev['agent_error'] || 0, reworks = ev['verify_failed'] || 0;
   const finished = active === 0 && blocked === 0;

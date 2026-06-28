@@ -30,7 +30,7 @@ export type Ctx = { brief: string; upstream: { seq: number; department: string; 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
   research:    'You are the Research department of an automated creative agency. From the brief, output concise market & positioning research. Plain text.',
-  branding:    'You are the Branding department. Output ONLY a JSON object of design tokens: {"palette":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex"},"type":{"display":"Font","body":"Font"},"radius":"12px"}. CRITICAL: text vs bg MUST meet WCAG AA contrast (>=4.5:1) — dark text on a light bg or vice-versa. JSON only, no prose.',
+  branding:    'You are the Branding department. Invent ONE real, specific brand/business name for this brief, then a palette. Output ONLY a JSON object: {"name":"<the brand name>","palette":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex"},"type":{"display":"Font","body":"Font"},"radius":"12px"}. The "name" is the site\'s SINGLE identity — it becomes the logo and must be the only business name used across every page. CRITICAL: text vs bg MUST meet WCAG AA contrast (>=4.5:1) — dark text on a light bg or vice-versa. JSON only, no prose.',
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',
   database:    'You are the Database department. DESIGN the app\'s data model and output ONLY a JSON object (no prose, no SQL, no fences): {"entities":[{"name":"products","public":true,"display":"name","fields":[{"name":"title","type":"text","required":true},{"name":"price","type":"money","required":true},{"name":"category","type":"ref:categories"},{"name":"in_stock","type":"bool","default":true},{"name":"description","type":"longtext"}],"seed":[{"title":"...","price":12.5,"category":1,"in_stock":true,"description":"..."}]}]}. ' +
                'Field types: text, longtext, int, money, bool, date, datetime, email, url, slug, image, json. Relations: "type":"ref:<entity>". Rules: model the REAL entities for this brief (3-6 tables, proper relations); mark the main public-facing entity "public":true with "display" set to its title field and SEED it with 4-8 realistic rows; required/unique where it matters. The system COMPILES this into a correct, indexed Postgres schema (serial PKs, FK constraints + indexes, created_at) — you only describe the model. JSON only.',
@@ -82,6 +82,9 @@ function buildUser(ctx: Ctx): string {
       s += ` Use EXACT table names so live data shows.\n`;
     }
     s += `\nEvery cta SHOULD set "link":"<page slug>" to point at the RIGHT page (e.g. a "Contact us" cta → "link":"${(ctx.pages?.find(p => /contact/.test(p.slug)) || ctx.pages?.[ctx.pages.length - 1] || { slug: 'index' }).slug}"). Valid slugs: ${(ctx.pages || []).map(p => p.slug).join(', ')}.\n`;
+    if (ctx.brand && ctx.brand.name) {
+      s += `\nBRAND IDENTITY — LOCKED for the WHOLE site (every page shares ONE). The brand/business name is "${ctx.brand.name}". Use EXACTLY this name as brand.name AND everywhere a name appears in the copy (hero, about, footer) — NEVER invent a different name, variation, or a tagline used as the name.${ctx.brand.tokens && ctx.brand.tokens.bg ? ` Palette is fixed: bg ${ctx.brand.tokens.bg}, primary ${ctx.brand.tokens.primary} — set brand.tokens to these.` : ''}\n`;
+    }
   }
   return s;
 }

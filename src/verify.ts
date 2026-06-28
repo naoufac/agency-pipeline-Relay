@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { existsSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as appdb from './appdb.ts';
 
@@ -46,6 +46,27 @@ export function copySlop(html: string): string | null {
   ];
   for (const [re, why] of SLOP) { const m = visible.match(re); if (m) return `${why}: "${m[0].trim().slice(0, 40)}"`; }
   return null;
+}
+
+// STRUCTURAL INVARIANT — "one website = one navigation = one logo".
+// The renderer composes EXACTLY one <nav class="nav"> + EXACTLY one <a class="nav-brand"> by
+// construction. This makes that invariant LOAD-BEARING: a page that somehow carries a second <nav>
+// (e.g. a footer that emits its own <nav>, a stray injected header) or a second/zero logo can NEVER
+// be marked done — it fails the gate and re-opens with feedback. Section copy is HTML-escaped, so a
+// literal "<nav" in copy becomes "&lt;nav" and never trips this. Pure + exported → reused by the
+// site-consistency gate, the interaction reviewer (dogfood) and the stress harness (ONE source of truth).
+export function navDefect(html: string): string | null {
+  const navs = (html.match(/<nav[\s>]/gi) || []).length;
+  if (navs !== 1) return `expected exactly 1 top <nav>, found ${navs}`;
+  const logos = (html.match(/class="nav-brand"/g) || []).length;
+  if (logos !== 1) return `expected exactly 1 logo (.nav-brand), found ${logos}`;
+  return null;
+}
+// The brand text inside the single logo, and the page's locked palette — used to prove that EVERY page
+// of a site shares ONE logo + ONE palette (no per-page drift). Returns '' when absent.
+export function pageLogo(html: string): string { return ((html.match(/class="nav-brand"[^>]*>([^<]*)</) || [])[1] || '').trim(); }
+export function pagePalette(html: string): string {
+  return `${(html.match(/--primary:\s*(#[0-9a-fA-F]{3,8})/) || [])[1] || '?'}/${(html.match(/--bg:\s*(#[0-9a-fA-F]{3,8})/) || [])[1] || '?'}`;
 }
 
 export async function verify(pool: pg.Pool, task: any, content: string): Promise<{ ok: boolean; log: string }> {
@@ -121,11 +142,35 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     if (dead) return { ok: false, log: `${dead} dead CTA button(s) (href="#"/empty) — a button must go somewhere` };
     const unwired = (raw.match(/<form\b[^>]*>/gi) || []).filter(f => !/onsubmit="return relaysubmit/i.test(f) && !/\baction=/i.test(f)).length;
     if (unwired) return { ok: false, log: `${unwired} form(s) not wired to submit` };
+    // ONE website = ONE nav = ONE logo. A duplicated nav/logo is the most visible "the system is broken"
+    // defect there is; it is now a hard, always-on gate so a page can never ship with it.
+    const nd = navDefect(raw);
+    if (nd) return { ok: false, log: `structural defect — ${nd}. A page must have exactly one top nav and one logo; a duplicate means a stray nav/header leaked in.` };
     // NO per-build chromium screenshot: the page is deterministically composed from vetted components,
     // so structure/CSS/contrast are correct by construction and proven by the static checks above (a blank
     // render would require a bug in our own vetted CSS, which theme:check catches). The board thumbnail is
     // produced once, off this hot path, by the QA pass (qa.ts → preview.png via the shared browser).
     return { ok: true, log: `${file} ok (${size}b · structure · no external assets · live CTAs · wired forms)` };
+  }
+
+  if (rule === 'site_consistent') {
+    // SITE-LEVEL acceptance (the QA task): read EVERY produced page and prove the whole site is one
+    // coherent identity — each page has exactly 1 nav + 1 logo, and ALL pages share the SAME logo text
+    // and the SAME palette. This is the deterministic guarantee behind "1 website, 1 navigation, 1 logo".
+    const dir = new URL(task.project_id + '/', SITES);
+    let files: string[] = [];
+    try { files = readdirSync(fileURLToPath(dir)).filter(f => f.endsWith('.html')).sort(); } catch {}
+    if (!files.length) return { ok: false, log: 'no pages produced' };
+    const logos = new Set<string>(); const palettes = new Set<string>();
+    for (const f of files) {
+      const html = readFileSync(fileURLToPath(new URL(f, dir)), 'utf8');
+      const nd = navDefect(html);
+      if (nd) return { ok: false, log: `${f}: ${nd}` };
+      logos.add(pageLogo(html)); palettes.add(pagePalette(html));
+    }
+    if (logos.size !== 1) return { ok: false, log: `logo drifts across pages — ${[...logos].map(l => JSON.stringify(l)).join(' · ')}. Every page must show ONE logo.` };
+    if (palettes.size !== 1) return { ok: false, log: `palette drifts across pages — ${[...palettes].join(' · ')}. Every page must share ONE palette.` };
+    return { ok: true, log: `${files.length} pages consistent — 1 nav/1 logo each · logo ${JSON.stringify([...logos][0])} · palette ${[...palettes][0]}` };
   }
 
   return { ok: false, log: 'unknown verify rule: ' + rule };

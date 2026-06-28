@@ -13,6 +13,7 @@
     "kpi": "tsx src/kpi-cli.ts",
     "theme:check": "tsx src/theme-check.ts",
     "spec:check": "tsx src/spec-test.ts",
+    "stress": "tsx _stress.ts",
     "eval": "tsx src/eval.ts",
     "dogfood": "tsx src/dogfood-cli.ts",
     "mail:test": "tsx src/mail-cli.ts"

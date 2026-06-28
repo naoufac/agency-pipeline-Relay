@@ -94,8 +94,9 @@ function validate(plan: any, brief: string): Plan | null {
   const thinkSeqs = tasks.map(t => t.seq);
   let seq = tasks.length;
   const pageBuilds: Task[] = pages.map(pg => ({ seq: ++seq, title: `Build the ${pg.title} page`, department: 'build', verify: 'site_renders', depends_on: thinkSeqs, artifact: `${pg.slug}.html` }));
-  const indexBuild = pageBuilds[0];
-  const qa: Task = { seq: ++seq, title: 'QA — acceptance (renders live)', department: 'qa', verify: 'site_renders', depends_on: [indexBuild.seq], artifact: null };
+  // QA acceptance runs AFTER every page is on disk and asserts the whole site is one coherent identity
+  // (each page exactly 1 nav + 1 logo; all pages share ONE logo + ONE palette) via the site_consistent gate.
+  const qa: Task = { seq: ++seq, title: 'QA — acceptance (1 nav · 1 logo · 1 palette, every page)', department: 'qa', verify: 'site_consistent', depends_on: pageBuilds.map(b => b.seq), artifact: null };
   return { tasks: [...tasks, ...pageBuilds, qa], pages, theme, archetype };
 }
 
