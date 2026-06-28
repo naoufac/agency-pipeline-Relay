@@ -41,9 +41,12 @@ class CDP {
     const id = ++this.id; const msg: any = { id, method, params }; if (sessionId) msg.sessionId = sessionId;
     return new Promise((res, rej) => { this.pending.set(id, { res, rej }); this.ws.send(JSON.stringify(msg)); setTimeout(() => { if (this.pending.has(id)) { this.pending.delete(id); rej(new Error('CDP timeout: ' + method)); } }, 30000); });
   }
-  viewport(width: number, height: number, mobile = false) { return this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile }, this.sessionId); }
-  async goto(url: string, settle = 1400) { await this.send('Page.navigate', { url }, this.sessionId); await sleep(settle); }
-  async evaluate(expression: string): Promise<any> { const r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, this.sessionId); return r?.result?.value; }
+  viewport(width: number, height: number, mobile = false) { return this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile }, this.sessionId).catch(() => {}); }
+  // resilient: a mid-check navigation (e.g. a form submit) must not abort the whole review
+  async goto(url: string, settle = 1400) { try { await this.send('Page.navigate', { url }, this.sessionId); } catch {} await sleep(settle); }
+  async evaluate(expression: string): Promise<any> { try { const r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, this.sessionId); return r?.result?.value; } catch { return null; } }
+  // poll an in-page condition until truthy (or timeout) — for ASYNC content (collections/forms fetch after load)
+  async waitFor(jsCond: string, timeout = 4500): Promise<boolean> { const end = Date.now() + timeout; while (Date.now() < end) { if (await this.evaluate(jsCond)) return true; await sleep(300); } return false; }
   close() { try { this.ws?.close(); } catch {} try { process.kill(-(this.proc.pid as number)); } catch {} try { this.proc.kill('SIGKILL'); } catch {} }
 }
 
@@ -86,6 +89,8 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
           if (vp.name === 'desktop' && /^[^#?:/][^#?:]*\.html(#.*)?$/.test(a.href)) targets.add(a.href.split('#')[0]);
         }
         if (vp.name === 'desktop') {
+          // wait for the async collection fetch to render (avoid a timing false-positive) before judging "empty"
+          await cdp.waitFor('(function(){var e=document.querySelector(".collection[data-table]");return !e || e.querySelector(".card")})()');
           for (const c of ((await cdp.evaluate(COLLS)) || [])) { nColls++; if (!c.cards) issues.push({ page: pg.slug, viewport: vp.name, kind: 'empty-collection', detail: `collection "${c.table}" rendered 0 rows (live data not showing)`, severity: 'medium' }); }
         }
       }
@@ -110,8 +115,8 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         : Number((await pool.query('select count(*)::int n from site_submissions where project_id=$1', [projectId])).rows[0].n);
       const before = await count();
       const r = await cdp.evaluate(SUBMIT);
-      await sleep(1100);
-      const after = await count();
+      let after = await count();
+      for (let k = 0; k < 8 && after <= before; k++) { await sleep(500); after = await count(); }   // poll for the async write
       if (!r?.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirm', detail: `form submitted but no success confirmation (saw: "${r?.msg || ''}")`, severity: 'high' });
       if (after <= before) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-not-persisted', detail: table ? `"add" form did not create a row in "${table}"` : 'form submission did not reach the database', severity: 'high' });
       // tidy up the QA row so the operator's real data stays clean

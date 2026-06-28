@@ -64,6 +64,7 @@ function cardInner(p){
     <div class="thumb${p.site ? '' : ' noimg'}">${p.site ? `<img src="/sites/${p.id}/preview.png" alt="" loading="lazy" onerror="this.parentNode.classList.add('noimg');this.remove()"/>` : ''}</div>
     <div class="pcard-body">
       <div class="brief">${esc(p.brief)}</div>
+      ${p.review_passed === false ? `<div class="pill" style="background:rgba(240,80,110,.14);color:#F0506E;margin-top:10px"><i class="dot s-failed"></i>review found ${p.review_issues || ''} issue${p.review_issues === 1 ? '' : 's'}</div>` : (p.review_passed === true ? `<div class="muted" style="font-size:12px;margin-top:10px">✓ reviewed — buttons, links &amp; forms work</div>` : '')}
       <div class="row" style="justify-content:space-between;margin-top:14px">
         <span class="pill"><i class="dot s-${st}"></i>${label}${st === 'running' ? ` · ${p.done}/${p.total}` : ''}</span>
         ${p.site
@@ -90,7 +91,7 @@ function home(){
     let building = 0;
     for (const p of list){
       const st = projStatus(p), isB = st === 'running'; if (isB) building++;
-      const sig = `${st}|${p.done}|${p.total}|${p.site ? 1 : 0}`;
+      const sig = `${st}|${p.done}|${p.total}|${p.site ? 1 : 0}|${p.review_passed}|${p.review_issues}`;
       let rec = cards.get(p.id);
       if (!rec){
         const el = document.createElement('div'); el.className = 'card pcard'; el.innerHTML = cardInner(p);

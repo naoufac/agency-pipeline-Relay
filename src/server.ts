@@ -70,7 +70,9 @@ async function projectsJSON() {
       count(t.*) filter (where t.status in ('running','verifying'))::int as active,
       count(t.*) filter (where t.status='done' and t.attempts<=1)::int as firstpass,
       count(t.*) filter (where t.verify <> 'nonempty')::int as realchecks,
-      coalesce(round(extract(epoch from (max(t.updated_at) - p.created_at)))::int,0) as wall
+      coalesce(round(extract(epoch from (max(t.updated_at) - p.created_at)))::int,0) as wall,
+      (select d.passed from dogfood_reviews d where d.project_id=p.id order by d.id desc limit 1) as review_passed,
+      (select coalesce(jsonb_array_length(d.issues),0) from dogfood_reviews d where d.project_id=p.id order by d.id desc limit 1) as review_issues
     from projects p left join tasks t on t.project_id=p.id
     group by p.id order by p.created_at desc limit 50`);
   for (const row of r.rows)
@@ -292,6 +294,8 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 
 // CMS restart-safety: a publish interrupted by a crash/restart is stuck at 'publishing' (snapshots have
 // no lease). Release it so the page stays editable. Runs on boot + every 2 min.
+// ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
+pool.query("create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())").catch(() => {});
 const reclaimPublishing = () => pool.query("update page_snapshots set state='failed', log='publish interrupted — please retry', updated_at=now() where state='publishing' and updated_at < now() - interval '5 minutes'").catch(() => {});
 reclaimPublishing();
 setInterval(reclaimPublishing, 120000).unref?.();
