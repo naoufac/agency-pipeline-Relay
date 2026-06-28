@@ -410,20 +410,20 @@ function toast(msg){
 function roadmap(){
   const P = [
     { n:'00', t:'Engine', s:'done', d:'A dependency-graph board in Postgres, a stateless restart-safe runner, an unblock trigger, and zero-trust verification — the foundation everything stands on.' },
-    { n:'01', t:'Real product', s:'done', d:'A deliverable-first app: type a brief → a live project workspace (Site · Build · Files · Metrics) with the website served at /sites/:id.' },
-    { n:'02', t:'Honest quality', s:'done', d:'A gate that refuses broken/external assets, KPIs that never lie (a stuck run reads “blocked”, not green), and retry-with-feedback so failures self-correct.' },
+    { n:'01', t:'Live product surface', s:'done', d:'A working web app: type a brief → a project workspace (Site · Build · Files · Metrics), site served at /sites/:id, board live at board.naples.agency. Real and running — not the finished vision.' },
+    { n:'02', t:'Honest quality gate', s:'done', d:'A verifier that refuses broken/external assets and dead links; KPIs that read “blocked” when a run is stuck instead of green; retry-with-feedback. The gate is real — not a guarantee of taste.' },
     { n:'03', t:'Generic + multi-page', s:'done', d:'An LLM planner that writes a bespoke task graph per brief, producing real multi-page sites with a shared navigation.' },
     { n:'04', t:'Real media', s:'done', d:'The build names the photos each section needs; Relay pulls real licensed Pexels images, downloads them into the site and serves them locally — gate-safe, never a broken link.' },
     { n:'05', t:'Production email', s:'done', d:'Production email from noreply@naples.agency — authenticated SMTP, SPF/DKIM/DMARC aligned (inbox-grade), wired in as a reusable mailer. Verified: live delivery to a real inbox.' },
-    { n:'06', t:'Built to last', s:'done', d:'Relay, the tunnel and Postgres supervised by systemd (Restart=always) + daily DB backups + uptime alerts — survives crash/reboot, proven by kill-tests.' },
+    { n:'06', t:'Built to last', s:'done', d:'Relay and its own dedicated Cloudflare tunnel run under systemd (Restart=always, enabled); Postgres runs in Docker (restart=unless-stopped). DB backups every 6h (pg_dump, 14 kept) + an uptime check every 5 min with Telegram alerts — all real cron jobs. Survives crash/reboot.' },
     { n:'07', t:'Visual self-QA', s:'done', d:'Relay screenshots every page (phone + desktop) and a vision model reads them for real problems, scoring each and surfacing it in a QA tab. Runs automatically on every build.' },
     { n:'08', t:'Deterministic engine', s:'done', d:'The build no longer guesses HTML — vetted components + a renderer compose every page from a structured spec, so navigation, CSS, fonts, spacing and contrast cannot be wrong. Replaces the old LLM-Tailwind “excellence” approach.' },
-    { n:'09', t:'Rooted identity', s:'done', d:'Every brief is classified into one of five design languages (editorial, modern, warm, bold, minimal); the renderer expands it into typography, rhythm and shape — so the same copy yields genuinely different studios, never one template wearing new colours.' },
-    { n:'10', t:'Full-stack + database', s:'done', d:'The core mission, live: an app or store brief gets a REAL, isolated Postgres schema — designed as a typed data model, compiled into flawless DDL (keys, relations, indexes, seeds), and read back on the page. Not static HTML.' },
+    { n:'09', t:'Rooted identity', s:'done', d:'The brief is classified into one of five design languages (editorial, modern, warm, bold, minimal); the renderer expands it into typography, rhythm and shape. The chosen language is applied consistently to every page of a site — verified identical across pages on the live build, not re-rolled per page.' },
+    { n:'10', t:'Full-stack + database', s:'progress', d:'Mechanism live but not yet the default path: an app/store brief can get an isolated Postgres schema compiled from a typed data model (keys, relations, indexes), read back on the page. Exercised on 1 of 4 projects so far — real, still maturing toward every applicable brief.' },
     { n:'11', t:'Interaction QA', s:'done', d:'A real browser then uses every finished site — clicks every button, types into and submits the form, checks the data came through, measures the layout on phone + desktop. Verification by interaction, not just a screenshot. The verdict shows on each project.' },
-    { n:'12', t:'Editable CMS', s:'done', d:'In-place text editing → re-publish through the verified path works end to end. Pages are frozen as editable snapshots; an edit is a pure string overlay (no LLM, design can\'t drift); republish runs the identical site_renders gate and atomically swaps live on pass. Next: edit the structured spec directly (blocks = component instances).' },
+    { n:'12', t:'CMS-native generation (the core)', s:'progress', d:'GOAL, in active build: every generated site is built on a REAL headless CMS — one of Drupal, Payload, Craft, Sanity, Directus — chosen per project (all 5 integrated, exactly one per project), with content living in and served from the CMS. This REPLACES the previous “Editable CMS”, which was only an inline text editor (a regex string-overlay on frozen HTML), not a CMS. Not shipped — see GOAL.md.' },
     { n:'13', t:'Robust browser layer', s:'done', d:'Killed spawn-per-call chromium + hand-rolled CDP-over-ws (the source of recurring "chromium didn\'t come up" breakage) → ONE persistent Playwright browser (src/browser.ts, Playwright\'s own Chromium, context-per-call, concurrency-gated) behind every browser path. Removed the redundant screenshot from the verify hot path (site_renders is now static; pages are correct by construction) — bigger throughput/cost/fragility win. Runner split into an opt-in worker process (src/worker.ts, RELAY_BUILD=0 flag) for horizontal build scale.' },
-    { n:'14', t:'Web-grounded intelligence', s:'done', d:'The planner and the research + strategy departments now ground their work in LIVE web search — real competitors, real positioning, current conventions — on a MiniMax reasoning model via OpenRouter, all inside a single verified call. Every downstream department inherits those cited facts, so the site is built on what\'s true today, not just the model\'s memory.' },
+    { n:'14', t:'Web-grounded intelligence', s:'progress', d:'Wired: the planner + research/strategy departments call a MiniMax reasoning model via OpenRouter with the server-side web-search plugin (keys are set). But there is no persisted record of a successful web-grounded run yet — so it is wired, not proven. Held at in-progress until a real run is logged.' },
     { n:'15', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
     { n:'16', t:'Deeper database', s:'next', d:'Typed forms generated from the data model, relation-aware lists, an auth department, and safe migrations when a rebuild changes the model.' },
   ];
@@ -432,7 +432,7 @@ function roadmap(){
   app.innerHTML = `<div class="container section">
     <span class="eyebrow">● the plan</span>
     <h1 style="margin-top:14px">Roadmap</h1>
-    <p class="lead" style="margin-top:14px">Where Relay has been and where it's going — a brief in, a real multi-page verified website out, getting better every phase. <b style="color:var(--text)">${done}/${P.length} shipped.</b></p>
+    <p class="lead" style="margin-top:14px">Where Relay has been and where it's going. Status is marked honestly against real evidence — a prior version over-marked items as shipped; that's corrected here. <b style="color:var(--text)">${done} shipped · ${P.filter(p=>p.s==='progress').length} in progress · ${P.filter(p=>p.s==='next').length} planned.</b></p>
     <div class="rm-legend"><span><i class="rm-dot done"></i>Shipped</span><span><i class="rm-dot prog"></i>In progress</span><span><i class="rm-dot next"></i>Planned</span></div>
     <ol class="timeline">
       ${P.map(p=>`<li class="tl-item ${p.s}"><div class="tl-node">${p.n}</div>
@@ -551,7 +551,7 @@ function docsPage(){
   // one engine, many layers — the brief decides which apply. No discrimination.
   const layers = [
     { t:'Website', b:'live', d:'A multi-page site with one consistent navigation and brand across every page.' },
-    { t:'Editable CMS', b:'live', d:'Change any copy and republish through the same verified gate — re-checked, no LLM, so the design can’t drift.' },
+    { t:'CMS-native', b:'in build', s:'progress', d:'Every site is moving onto a real headless CMS — Drupal, Payload, Craft, Sanity or Directus, one chosen per project. Replaces the old inline text editor. Not yet live.' },
     { t:'Full-stack + database', b:'live', d:'An app/store brief gets its OWN isolated Postgres schema — a typed data model compiled into flawless DDL, seeded, read back on the page, and introspected in the Data tab.' },
     { t:'Rooted identity', b:'live', d:'Five design languages; the brief picks one and the renderer expands it into typography, rhythm and shape — never one template recoloured.' },
     { t:'Visual QA', b:'live', d:'Every finished site is screenshotted on mobile and desktop and scored by a vision model.' },
@@ -592,7 +592,7 @@ function docsPage(){
 
     <h2 class="rv-h">Layers, one engine <span class="rv-count done">no discrimination</span></h2>
     <p class="muted" style="margin:6px 0 14px;max-width:72ch">Website, CMS, database, QA — different use cases riding the same production line. The brief decides which apply. A bakery’s presentation and a delivery app come off the same line.</p>
-    <div class="layer-grid">${layers.map(x=>`<div class="card layer ok"><span class="lay-badge ok">${x.b}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
+    <div class="layer-grid">${layers.map(x=>`<div class="card layer ${x.s||'ok'}"><span class="lay-badge ${x.s||'ok'}">${x.b}</span><h3 style="font-size:15px;margin-top:8px">${x.t}</h3><p class="muted" style="margin-top:6px;font-size:13px">${esc(x.d)}</p></div>`).join('')}</div>
 
     <div class="rv-decision"><h3>Zero-trust, always</h3><p class="muted">A step is “done” only when a deterministic check passes — the site actually renders, the contrast actually meets AA, the JSON actually parses, the SQL actually runs. If a check can’t fail, it isn’t a check.</p></div>
 

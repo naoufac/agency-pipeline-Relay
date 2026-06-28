@@ -6,6 +6,11 @@ Where we've been, where we are, where we're going. See [`MISSION.md`](MISSION.md
 
 ---
 
+## The one goal (current — see `GOAL.md`)
+**Every generated site is built on a real headless CMS — one of Drupal, Payload, Craft, Sanity, Directus — chosen per project (all 5 integrated, exactly one per project), with content living in and served from the CMS.** This replaces the old "Editable CMS" (an inline text editor, not a CMS). Status corrections to the history below are tracked in `docs/HONESTY-AUDIT.md` — a prior version over-marked items as shipped.
+
+---
+
 ## History (what shipped, in order)
 
 | Phase | What | Status | Marker |
@@ -16,7 +21,7 @@ Where we've been, where we are, where we're going. See [`MISSION.md`](MISSION.md
 | 3 · Generic + multi-page | LLM planner (per-brief task DAG, not a template), **multi-page sites + shared nav** (one render-verified build per page), WCAG always-bound | ✅ | `v0.2-multipage` |
 | 4 · Real media | **Pexels** photos searched per section, **downloaded + served locally** (gate-safe, never a broken external link) | ✅ | `media` |
 | 5 · Deterministic render engine | The model emits a JSON **spec**; a deterministic renderer (`src/render.ts` + `src/components.ts`) builds the page from **vetted components** — nav, fonts, spacing and **WCAG contrast correct by construction**. Replaced the earlier vendored-Tailwind "excellence" experiment (`a4d36a6`), now **removed entirely**. | ✅ | `engine` |
-| 6 · Editable CMS | Each rendered page is frozen as an editable snapshot in Postgres; an edit is a **pure string overlay** (no LLM → design can't drift); **republish** runs the IDENTICAL `site_renders` gate and atomically swaps the live file only on pass | ✅ | `cms` |
+| 6 · Editable CMS — **RETIRED** | Was an inline **text editor**: a regex string-overlay on frozen rendered HTML, re-verified and atomically swapped. **Not a CMS.** Being replaced by CMS-native generation (see "The one goal" above). | ⛔ retired | `cms` |
 | 7 · Full-stack + database | A produced-site **form** → `POST /api/site/:id/submit` → Postgres `site_submissions` → readable in the **Data** tab | ✅ | `v1` |
 | 8 · Visual QA | Each page screenshotted **mobile + desktop**, scored by a vision model (issues + score) → `qa_reviews`; auto-runs on completion | ✅ | `qa` |
 | 9 · Rooted identity (themes) | The brief is classified into one of **5 design languages** (editorial/modern/warm/bold/minimal); the renderer expands it into font pairing + type scale + rhythm + shape — WCAG-safe by construction (`src/themes.ts`). Same copy → genuinely different studios. | ✅ | `theme` |
@@ -24,7 +29,7 @@ Where we've been, where we are, where we're going. See [`MISSION.md`](MISSION.md
 | 11 · Live per-project database | An app/store brief gets a **real, isolated Postgres schema** (`app_<hex>`, never `public`). The DB department designs a typed **data model**; a deterministic compiler (`src/schema.ts`) emits flawless DDL (serial PKs, FK constraints + indexes, `numeric` money, `timestamptz`); `app_db` provisions + verifies it; a `collection` section reads it back live. | ✅ | `appdb` |
 | 12 · Interaction QA (dogfood) | A real headless browser **uses** every finished site: measures header alignment + overflow, checks every CTA goes somewhere, **types into + submits** the form (asserts it persisted), confirms collections show live rows → `dogfood_reviews`, shown per project. Auto-runs on completion. | ✅ | `dogfood` |
 | 13 · Robust browser layer (stack review) | Killed spawn-per-call chromium + hand-rolled CDP-over-`ws` (the recurring "chromium didn't come up" breakage) → **ONE persistent Playwright browser** (`src/browser.ts`, Playwright's own Chromium, context-per-call, concurrency-gated) behind every browser path (dogfood/qa/theme:check). Removed the **redundant screenshot from the verify hot path** (`site_renders` is now static; pages are correct by construction) — bigger throughput/cost/fragility win. Runner split into an opt-in **worker process** (`src/worker.ts`, `RELAY_BUILD=0` flag) for horizontal build scale. | ✅ | `4cc1d3e` |
-| 14 · Web-grounded intelligence | The planner + the **research/strategy** departments now ground their work in **live web search** (OpenRouter's server-side `web` plugin, running inside a single call) on a **MiniMax reasoning** model via OpenRouter; downstream departments inherit the cited facts through the DAG. Real competitors/positioning/conventions instead of training-memory; reasoning returns in a separate field so structured output stays clean; the one-call-per-agent rule is preserved. | ✅ | `web-grounding` |
+| 14 · Web-grounded intelligence | **Wired:** planner + research/strategy call a MiniMax reasoning model via OpenRouter with the server-side `web` plugin (keys set). **But no persisted record of a successful web-grounded run exists** (no `llm_calls` table) — wired, not proven. Downgraded from ✅ until a real run is logged. | 🟡 wired/unproven | `web-grounding` |
 
 ### Verification today (what "done" means — never the agent's word)
 `site_renders` (**static**: valid structural HTML, no external/placeholder assets, **no dead CTA / unwired form** — no browser; pages are correct by construction) · `app_db` (the project's isolated schema actually provisions + has tables) · `wcag` (text/bg ≥ 4.5:1) · `json` (structured output parses) · `sql_applies` (DDL runs) · `min:N` (length floor, honest — not counted as rigor). Plus the post-completion **dogfood** interaction pass (real Playwright browser). Rigor is reported honestly.
@@ -58,7 +63,7 @@ Robustness against malformed LLM specs is currently scattered as defensive patch
 The archetype classifier is the first cut. An SSG (e.g. Eleventy) only where Markdown-owned layout (blog/docs) is genuinely better; the component renderer stays the default.
 
 ### Deferred (only when a brief truly needs it)
-Astro · a real headless CMS (Directus/Payload/Strapi) · payments/store · app-shell.
+Astro · payments/store · app-shell. (A real headless CMS is **no longer deferred** — it is now the **core** direction: see "The one goal" at the top and `GOAL.md`.)
 
 ---
 
