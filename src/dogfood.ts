@@ -50,15 +50,18 @@ class CDP {
 // ---- in-page probes (run inside the real browser) ----
 const LAYOUT = `(()=>{var n=document.querySelector('.nav-inner'),c=document.querySelector('main .container')||document.querySelector('.container');var nl=n?n.getBoundingClientRect().left:null,cl=c?c.getBoundingClientRect().left:null;return{overflow:document.documentElement.scrollWidth>window.innerWidth+2,navLeft:nl,contLeft:cl,misaligned:(nl!=null&&cl!=null)?Math.abs(nl-cl)>2:false}})()`;
 const BTNS = `Array.from(document.querySelectorAll('a.btn')).map(a=>({text:(a.textContent||'').trim().slice(0,40),href:a.getAttribute('href')}))`;
+// EVERY anchor on the page (nav + buttons + inline), with its label, href, and whether it's a button
+const LINKS = `Array.from(document.querySelectorAll('a')).map(function(a){return{text:(a.textContent||'').trim().slice(0,60),href:a.getAttribute('href')||'',btn:a.classList.contains('btn')}})`;
 const COLLS = `Array.from(document.querySelectorAll('.collection[data-table]')).map(el=>({table:el.getAttribute('data-table'),cards:el.querySelectorAll('.card').length}))`;
 const FORMINFO = `(function(){var f=document.querySelector('form.rform');return f?{table:f.getAttribute('data-table')||''}:null})()`;
 // type into every field (by input TYPE so number/date/checkbox are valid) + submit for real, then read the confirmation
 const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea').forEach(function(el,i){var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value='2026-01-01';}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
 
-export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:8787'): Promise<{ issues: Issue[]; checked: { pages: number; buttons: number; forms: number; collections: number } }> {
+export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:8787'): Promise<{ issues: Issue[]; checked: { pages: number; buttons: number; links: number; linkTargets: number; forms: number; collections: number } }> {
   const proj = await pool.query('select params from projects where id=$1', [projectId]);
   const pages = (proj.rows[0]?.params?.pages) || [{ slug: 'index', title: 'Home' }];
-  const issues: Issue[] = []; let nButtons = 0, nForms = 0, nColls = 0;
+  const issues: Issue[] = []; let nButtons = 0, nForms = 0, nColls = 0, nLinks = 0;
+  const targets = new Set<string>();
   const cdp = new CDP();
   await cdp.launch();
   try {
@@ -70,12 +73,27 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         const lay = await cdp.evaluate(LAYOUT);
         if (lay?.overflow) issues.push({ page: pg.slug, viewport: vp.name, kind: 'overflow', detail: 'page scrolls horizontally (layout overflow)', severity: 'high' });
         if (lay?.misaligned) issues.push({ page: pg.slug, viewport: vp.name, kind: 'header', detail: `header misaligned: nav left ${Math.round(lay.navLeft)} vs content ${Math.round(lay.contLeft)}`, severity: 'medium' });
-        const btns = (await cdp.evaluate(BTNS)) || [];
-        for (const b of btns) { nButtons++; if (!b.href || b.href === '#' || b.href === '') issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `CTA "${b.text}" goes nowhere (href="${b.href ?? ''}")`, severity: 'high' }); }
+        // EVERY link, EVERY page: label sanity + dead hrefs; collect internal targets to load-test below
+        const links = (await cdp.evaluate(LINKS)) || [];
+        for (const a of links) {
+          const lt = String(a.text || '').toLowerCase().trim();
+          if (a.btn) {
+            nButtons++;
+            if (!a.text || lt === '[object object]' || lt === 'undefined' || lt === 'null') issues.push({ page: pg.slug, viewport: vp.name, kind: 'garbage-button', detail: `button has no real label (text="${a.text}", href="${a.href}")`, severity: 'high' });
+            if (!a.href || a.href === '#' || a.href === '') issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `CTA "${a.text}" goes nowhere (href="${a.href}")`, severity: 'high' });
+          }
+          nLinks++;
+          if (vp.name === 'desktop' && /^[^#?:/][^#?:]*\.html(#.*)?$/.test(a.href)) targets.add(a.href.split('#')[0]);
+        }
         if (vp.name === 'desktop') {
           for (const c of ((await cdp.evaluate(COLLS)) || [])) { nColls++; if (!c.cards) issues.push({ page: pg.slug, viewport: vp.name, kind: 'empty-collection', detail: `collection "${c.table}" rendered 0 rows (live data not showing)`, severity: 'medium' }); }
         }
       }
+    }
+    // load-test every internal link target across the whole site (catches broken nav / wrong links anywhere)
+    for (const t of targets) {
+      try { const r = await fetch(`${baseUrl}/sites/${projectId}/${t}`); const body = await r.text(); if (!r.ok || body.length < 400) issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" does not load (status ${r.status}, ${body.length}b)`, severity: 'high' }); }
+      catch { issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" failed to load`, severity: 'high' }); }
     }
     // forms: type into + submit the first form, then prove it landed where it should — a real entity
     // table (an "add a record" form) OR the submissions bucket (a contact form). Then remove the QA row.
@@ -102,7 +120,7 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       break;
     }
   } finally { cdp.close(); }
-  return { issues, checked: { pages: pages.length, buttons: nButtons, forms: nForms, collections: nColls } };
+  return { issues, checked: { pages: pages.length, buttons: nButtons, links: nLinks, linkTargets: targets.size, forms: nForms, collections: nColls } };
 }
 
 // Auto-run on project completion (fire-and-forget). Only when an HTTP server is actually serving the
@@ -114,7 +132,7 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl = 'h
     const high = issues.filter(i => i.severity === 'high').length;
     const summary = issues.length
       ? `${issues.length} issue(s), ${high} high — ` + issues.slice(0, 8).map(i => `${i.page}/${i.viewport}:${i.kind}`).join('; ')
-      : `clean — ${checked.buttons} buttons go somewhere, ${checked.forms} form(s) submit+persist, ${checked.collections} collection(s) live, header aligned`;
+      : `clean — ${checked.buttons} buttons across ${checked.pages} pages all labelled + every link target loads (${checked.linkTargets} checked), ${checked.forms} form(s) submit+persist, ${checked.collections} collection(s) live, headers aligned`;
     // create-if-not-exists so it also works on the already-running prod DB (applySchema isn't re-run there)
     await pool.query(`create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())`).catch(() => {});
     await pool.query('insert into dogfood_reviews(project_id, passed, summary, issues, checked) values ($1,$2,$3,$4,$5)',

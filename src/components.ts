@@ -98,11 +98,21 @@ export function footer(brand: string, pages: any[]) {
 // section components — each takes a content object, returns perfect HTML
 type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string };
 const href = (o: SecOpts | undefined, raw: any, text: any) => esc(o?.link ? o.link(raw, text) : '#');
+// A CTA value may be a STRING or an OBJECT ({text/label, link/href}). Normalize to {text, link} or null
+// so a button is NEVER `esc(object)` ("[object Object]") and never renders with an empty label.
+export function ctaParts(raw: any, sectionLink?: any): { text: string; link: any } | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') { const t = raw.trim(); return t ? { text: t, link: sectionLink } : null; }
+  if (typeof raw === 'object') { const t = String(raw.text ?? raw.label ?? raw.title ?? raw.cta ?? raw.name ?? '').trim(); return t ? { text: t, link: raw.link ?? raw.href ?? raw.url ?? raw.page ?? sectionLink } : null; }
+  const t = String(raw).trim(); return t ? { text: t, link: sectionLink } : null;
+}
+// Render a button only when there's real label text; resolve its destination via the renderer's link fn.
+const btn = (o: SecOpts | undefined, raw: any, sectionLink?: any) => { const c = ctaParts(raw, sectionLink); return c ? `<a class="btn" href="${href(o, c.link, c.text)}">${esc(c.text)}</a>` : ''; };
 export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   hero: (s, o) => `<header class="hero ${s.image ? 'on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
     <div class="container"><div class="hero-inner">
       ${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h1>${esc(s.headline)}</h1>
-      ${s.lead ? `<p class="lead">${esc(s.lead)}</p>` : ''}${s.cta ? `<a class="btn" href="${href(o, s.link, s.cta)}">${esc(s.cta)}</a>` : ''}
+      ${s.lead ? `<p class="lead">${esc(s.lead)}</p>` : ''}${btn(o, s.cta, s.link)}
     </div></div></header>`,
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
@@ -110,12 +120,12 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   </div></section>`,
   split: (s, o) => `<section class="section"><div class="container"><div class="split ${s.reverse ? 'rev' : ''}">
     <div class="split-media">${q(s.image || 'abstract brand texture')}</div>
-    <div>${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2><p class="muted">${esc(s.body)}</p>${s.cta ? `<a class="btn" href="${href(o, s.link, s.cta)}">${esc(s.cta)}</a>` : ''}</div>
+    <div>${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2><p class="muted">${esc(s.body)}</p>${btn(o, s.cta, s.link)}</div>
   </div></div></section>`,
   gallery: (s) => `<section class="section"><div class="container">${s.title ? `<h2 style="margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
     <div class="gallery">${(s.images || []).slice(0, 6).map((x: string) => q(x)).join('')}</div></div></section>`,
   cta: (s, o) => `<section class="section"><div class="container"><div class="cta">
-    <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${s.cta ? `<a class="btn" href="${href(o, s.link, s.cta)}">${esc(s.cta)}</a>` : ''}
+    <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${btn(o, s.cta, s.link)}
   </div></div></section>`,
   // LIVE DB read: a list rendered from the project's REAL database table (data-table). Empty-state at
   // build/gate time (file://); filled from /api/site/:id/data/:table when served over HTTP.

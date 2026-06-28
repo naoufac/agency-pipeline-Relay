@@ -1,6 +1,6 @@
 // Deterministic page renderer: a structured spec -> perfect HTML, assembled from vetted components.
 // No LLM touches structure/CSS/nav/contrast here. spec = { brand:{name,cta,tokens}, sections:[{type,...}] }.
-import { DS_CSS, navBar, footer, SECTIONS, esc } from './components.ts';
+import { DS_CSS, navBar, footer, SECTIONS, esc, ctaParts } from './components.ts';
 import { themeFor, themeFonts, themeVars } from './themes.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
@@ -59,7 +59,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
 <style>${vars}
 ${DS_CSS}</style></head>
 <body class="t-${theme}">
-${navBar(brand, ctx.pages, ctx.slug, spec && spec.brand && spec.brand.cta, resolveCta(spec && spec.brand && spec.brand.ctaLink, spec && spec.brand && spec.brand.cta))}
+${(() => { const nc = ctaParts(spec && spec.brand && spec.brand.cta, spec && spec.brand && spec.brand.ctaLink); return navBar(brand, ctx.pages, ctx.slug, nc?.text, nc ? resolveCta(nc.link, nc.text) : '#'); })()}
 <main>
 ${sections}
 </main>
