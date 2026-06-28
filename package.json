@@ -14,6 +14,7 @@
     "theme:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/theme-check.ts",
     "spec:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/spec-test.ts",
     "cms:check": "tsx src/cms/select-test.ts",
+    "prove:directus": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/prove-directus.ts",
     "stress": "set -a; . ./.env 2>/dev/null; set +a; tsx _stress.ts",
     "eval": "set -a; . ./.env 2>/dev/null; set +a; tsx src/eval.ts",
     "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
