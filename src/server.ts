@@ -10,6 +10,7 @@ import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { renderLiveFromCms } from './cms/live.ts';
 import { generateWordpressSite } from './cms/wordpress.ts';
+import { classifyUseCase, ENGINE_FOR } from './cms/usecase.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 
@@ -226,13 +227,15 @@ const server = http.createServer(async (req, res) => {
       let raw = ''; for await (const c of req) raw += c;
       let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
       if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
-      const params = { engine: 'wordpress', planner: 'cms', cms_status: 'building' };
+      const usecase = classifyUseCase(brief);
+      const ecom = usecase === 'ecom';
+      const params = { engine: ENGINE_FOR[usecase], use_case: usecase, planner: 'cms', cms_status: 'building' };
       const pr = await pool.query('insert into projects(brief, params, status) values ($1,$2,$3) returning id', [brief, params, 'running']);
       const id = pr.rows[0].id;
-      // build the real branded site async — never blocks the request
-      generateWordpressSite(brief).then((s) =>
+      // forced use-case routing (code decides) → build the real branded site async (never blocks)
+      generateWordpressSite(brief, ecom).then((s) =>
         pool.query("update projects set status='done', params = params || $2::jsonb where id=$1",
-          [id, JSON.stringify({ cms_status: 'done', wp_url: s.url, wp_admin: s.adminUrl, slug: s.slug, site_name: s.siteName })])
+          [id, JSON.stringify({ cms_status: 'done', wp_url: s.url, wp_admin: s.adminUrl, slug: s.slug, site_name: s.siteName, shop_url: s.shopUrl || null })])
       ).catch((e: any) =>
         pool.query("update projects set status='blocked', params = params || $2::jsonb where id=$1",
           [id, JSON.stringify({ cms_status: 'failed', error: String(e?.message ?? e).slice(0, 300) })]).catch(() => {})

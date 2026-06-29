@@ -30,10 +30,19 @@ function extractJson(s: string): any {
   if (a < 0 || b < 0) throw new Error('no JSON in LLM output');
   return JSON.parse(s.slice(a, b + 1));
 }
+// the model occasionally returns an empty/garbled completion — retry a few times before giving up.
+async function llmJson(system: string, user: string, tokens: number, tries = 3): Promise<any> {
+  let last = '';
+  for (let i = 0; i < tries; i++) {
+    last = await llmText(system, user, tokens);
+    try { return extractJson(last); } catch { /* retry */ }
+  }
+  throw new Error('LLM returned no usable JSON after ' + tries + ' tries: ' + last.slice(0, 120));
+}
 
-export interface WpSite { slug: string; siteName: string; url: string; adminUrl: string; pages: string[]; }
+export interface WpSite { slug: string; siteName: string; url: string; adminUrl: string; pages: string[]; engine: string; shopUrl?: string; }
 
-export async function generateWordpressSite(brief: string): Promise<WpSite> {
+export async function generateWordpressSite(brief: string, ecom = false): Promise<WpSite> {
   // 1) LLM writes the brand + copy (only). It never decides the stack.
   const system = 'You write a complete small website as raw JSON only — no commentary, no markdown, no <think>.';
   const user =
@@ -43,10 +52,11 @@ Return ONLY this JSON:
  "brand":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex","heading_font":"<a real Google font>","body_font":"<a real Google font>"},
  "pages":[{"title":"Home","slug":"home","content":"<rich HTML: <h2> <p> <ul> <li> <strong> — a strong hero line + 2-3 value sections of specific real copy>"},
           {"title":"About","slug":"about","content":"..."},
-          {"title":"Services","slug":"services","content":"..."},
-          {"title":"Contact","slug":"contact","content":"..."}]}
-Pick brand colours + Google fonts that genuinely fit the brief. Specific, confident copy.`;
-  const spec = extractJson(await llmText(system, user, 9000));
+          {"title":"${ecom ? 'Shipping &amp; Returns' : 'Services'}","slug":"${ecom ? 'shipping' : 'services'}","content":"..."},
+          {"title":"Contact","slug":"contact","content":"..."}],
+ "products":[${ecom ? '{"name":"<product>","price":"29.00","description":"<1-2 sentences>"}' : ''}]}
+Pick brand colours + Google fonts that genuinely fit the brief. Specific, confident copy.${ecom ? ' Fill "products" with 5 real products that fit the brief (realistic prices).' : ' Leave "products" as an empty array.'}`;
+  const spec = await llmJson(system, user, 9000);
   const slug = (String(spec.slug || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30)) || ('site' + Math.random().toString(16).slice(2, 6));
 
   // 2) Provision an ISOLATED subsite (own theme/branding/content/admin).
@@ -63,7 +73,17 @@ Pick brand colours + Google fonts that genuinely fit the brief. Specific, confid
   const out = await wp(['eval-file', '/var/www/html/relay-wp-build.php'], url);
   const res = extractJson(out);
 
-  return { slug, siteName: spec.site_name || slug, url, adminUrl: url + 'wp-admin/', pages: res.pages || [] };
+  // 5) ECOM: a real WooCommerce store (shop/cart/checkout + the brief's products), per-subsite.
+  let shopUrl: string | undefined;
+  if (ecom) {
+    try { await wp(['plugin', 'install', 'woocommerce', '--activate'], url); } catch {}
+    try { await wp(['wc', 'tool', 'run', 'install_pages', '--user=1'], url); } catch {}
+    await put('/var/www/html/relay-wp-shop.json', JSON.stringify({ products: spec.products || [] }));
+    await put('/var/www/html/relay-wp-shop.php', WOO_PHP);
+    try { const so = await wp(['eval-file', '/var/www/html/relay-wp-shop.php'], url); shopUrl = extractJson(so).shop; } catch {}
+  }
+
+  return { slug, siteName: spec.site_name || slug, url, adminUrl: url + 'wp-admin/', pages: res.pages || [], engine: ecom ? 'woocommerce' : 'wordpress', shopUrl };
 }
 
 // SAFE EDIT: add a page on request. LLM writes the new page's COPY only; code inserts a page + adds it
@@ -72,7 +92,7 @@ export async function addWordpressPage(slug: string, request: string): Promise<{
   const url = `${HOST}/${slug}/`;
   const system = 'You write ONE website page as raw JSON only — no commentary, no markdown.';
   const user = `For the site, write the page the user asked for: "${request}". Return ONLY: {"title":"<page title>","slug":"<url-safe>","content":"<rich HTML using <h2> <p> <ul> <li> <strong> — real specific copy>"}`;
-  const p = extractJson(await llmText(system, user, 4000));
+  const p = await llmJson(system, user, 4000);
   await put('/var/www/html/relay-wp-addpage.json', JSON.stringify(p));
   await put('/var/www/html/relay-wp-addpage.php', ADDPAGE_PHP);
   const out = await wp(['eval-file', '/var/www/html/relay-wp-addpage.php'], url);
@@ -117,4 +137,26 @@ $id = wp_insert_post(['post_type'=>'page','post_title'=>$p['title'],'post_name'=
 $loc = get_theme_mod('nav_menu_locations', []); $menu_id = isset($loc['primary']) ? $loc['primary'] : 0;
 if ($menu_id) wp_update_nav_menu_item($menu_id, 0, ['menu-item-title'=>$p['title'],'menu-item-object'=>'page','menu-item-object-id'=>$id,'menu-item-type'=>'post_type','menu-item-status'=>'publish']);
 echo json_encode(['url'=>get_permalink($id)]);
+`;
+
+const WOO_PHP = `<?php
+$d = json_decode(file_get_contents('/var/www/html/relay-wp-shop.json'), true);
+$made = 0;
+foreach (($d['products'] ?? []) as $pr) {
+  if (empty($pr['name'])) continue;
+  $p = new WC_Product_Simple();
+  $p->set_name($pr['name']);
+  $price = preg_replace('/[^0-9.]/', '', (string)($pr['price'] ?? '19.00')); if ($price === '') $price = '19.00';
+  $p->set_regular_price($price);
+  $p->set_description($pr['description'] ?? '');
+  $p->set_short_description($pr['description'] ?? '');
+  $p->set_status('publish'); $p->set_catalog_visibility('visible');
+  $p->save(); $made++;
+}
+$shop_id = wc_get_page_id('shop');
+$loc = get_theme_mod('nav_menu_locations', []); $menu_id = isset($loc['primary']) ? $loc['primary'] : 0;
+if ($menu_id && $shop_id > 0) {
+  wp_update_nav_menu_item($menu_id, 0, ['menu-item-title'=>'Shop','menu-item-object'=>'page','menu-item-object-id'=>$shop_id,'menu-item-type'=>'post_type','menu-item-status'=>'publish']);
+}
+echo json_encode(['shop'=>($shop_id>0?get_permalink($shop_id):''), 'products'=>$made]);
 `;
