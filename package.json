@@ -18,6 +18,7 @@
     "cms:status": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/status.ts",
     "cms:build": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/finalize-cli.ts",
     "cms:drupal-gen": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/drupal-gen-cli.ts",
+    "cms:wp-gen": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/wp-gen-cli.ts",
     "stress": "set -a; . ./.env 2>/dev/null; set +a; tsx _stress.ts",
     "eval": "set -a; . ./.env 2>/dev/null; set +a; tsx src/eval.ts",
     "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
