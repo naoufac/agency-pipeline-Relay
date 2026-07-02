@@ -31,6 +31,21 @@ ok('checkout posts to the ORDER endpoint (server-priced)', co.includes("/order'"
 // blocked because site_renders only knew relaySubmit)
 ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="return relay(submit|checkout)/i.test(co));
 
+// ---- PDP render layer: one real row -> a full product detail page ----
+const pdp = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } }, sections: [
+  { type: 'product', row: { id: 3, title: 'Terracotta Mug', price: 24, description: 'Hand-thrown, dishwasher-safe.', material: 'stoneware', _image: '/sites/x/assets/row-abc.jpg' }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart' }] },
+  { pages, slug: 'product-3', title: 'Terracotta Mug' });
+ok('pdp renders the product name as the page heading', pdp.includes('<h1>Terracotta Mug</h1>'));
+ok('pdp shows the server-formatted price', pdp.includes('$24.00'));
+ok('pdp shows the FULL description (not the 120-char card slice)', pdp.includes('Hand-thrown, dishwasher-safe.'));
+ok('pdp renders the product photo', pdp.includes('src="/sites/x/assets/row-abc.jpg"'));
+ok('pdp add-to-cart carries id+title+price into the client cart', pdp.includes('relayCartAdd') && pdp.includes('&quot;id&quot;:3'));
+ok('pdp links back to the shop + the cart', pdp.includes('href="shop.html"') && pdp.includes('href="cart.html"'));
+ok('pdp extra fields render as labelled meta', pdp.includes('Material') && pdp.includes('stoneware'));
+const pdpNoImg = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [{ type: 'product', row: { id: 4, title: 'Vase', price: 64 } }] }, { pages, slug: 'product-4', title: 'Vase' });
+ok('pdp without a photo shows the branded panel, never a void', pdpNoImg.includes('pdp-noimg'));
+ok('shop grid links each card to its product page (products table only)', shop.includes("'product-'+o.id+'.html'") && shop.includes("tbl==='products'"));
+
 // store guarantee: a composed model that FORGOT the store sections gets them injected
 {
   const model = { pages: [
@@ -103,10 +118,31 @@ try {
   ok('readRows attaches _image when the cached file exists', prod2._image === '/sites/' + id + '/' + rel, String(prod2._image));
   await pool.query(`delete from "${schema}"."products" where title='CachedShot Mug'`).catch(()=>{});
 }
+  // ---- PDP live layer: single-row read + the full detail page from the REAL schema ----
+{
+  const one = await appdb.readRow(pool, id, 'products', 1);
+  ok('readRow returns the product by id (decorated like a card)', !!one && one.title === 'Mug' && Number(one.price) === 24, JSON.stringify(one));
+  ok('readRow answers null for an unknown id', (await appdb.readRow(pool, id, 'products', 424242)) === null);
+  ok('readRow refuses a bad id honestly', (await appdb.readRow(pool, id, 'products', -1)) === null && (await appdb.readRow(pool, id, 'products', 1.5 as any)) === null);
+  const { renderLivePdp } = await import('./cms/live.ts');
+  await pool.query(`insert into projects(id, brief, status, params) values ($1,'pdp gate scratch','done',$2)`, [id, JSON.stringify({
+    archetype: 'store', theme: 'warm',
+    brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } },
+    site: { pages: [
+      { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Kiln' }] },
+      { slug: 'shop', title: 'Shop', sections: [{ type: 'products', table: 'products' }] },
+      { slug: 'cart', title: 'Cart', sections: [{ type: 'cart' }] }] } })]);
+  const lp = await renderLivePdp(pool, id, 1);
+  ok('renderLivePdp serves a full page from the live row', !!lp && lp.includes('<h1>Mug</h1>') && lp.includes('$24.00') && lp.includes('relayCartAdd'), lp ? 'missing content' : 'null');
+  ok('renderLivePdp keeps the site chrome (nav + one logo)', !!lp && (lp.match(/class="nav-brand"/g) || []).length === 1 && lp.includes('>Shop<'));
+  ok('renderLivePdp back-links to the page carrying the shop grid', !!lp && lp.includes('href="shop.html"'));
+  ok('renderLivePdp answers null for a product that does not exist', (await renderLivePdp(pool, id, 424242)) === null);
+}
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e);
 } finally {
   await pool.query(`drop schema if exists "${schema}" cascade`).catch(() => {});
+  await pool.query('delete from projects where id=$1', [id]).catch(() => {});   // the PDP scratch project row
 }
 console.log(`\necom:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

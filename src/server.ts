@@ -8,7 +8,7 @@ import { plan, replan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
-import { renderLiveFromCms } from './cms/live.ts';
+import { renderLiveFromCms, renderLivePdp } from './cms/live.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 import { mailReady, notifyLead, sendMail } from './mail.ts';
@@ -175,6 +175,17 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           const html = await renderLiveFromCms(pool, live[1], live[2]);
           if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(html); return; }
         } catch (e: any) { console.error('live-cms', live[1], live[2], e?.message ?? e); }   // fall through to static
+        // PDP (PQ2): /sites/<id>/product-<n>.html has no CMS page row and no static file — it renders
+        // LIVE from the product row itself, in its OWN error scope (a DB hiccup logs as live-pdp and
+        // answers an honest 404 'product not found', never a misleading fall-through).
+        const pdp = live[2].match(/^product-(\d{1,12})$/i);
+        if (pdp) {
+          try {
+            const phtml = await renderLivePdp(pool, live[1], Number(pdp[1]));
+            if (phtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(phtml); return; }
+          } catch (e: any) { console.error('live-pdp', live[1], pdp[1], e?.message ?? e); }
+          return send(res, 404, 'text/plain', 'product not found');
+        }
       }
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {

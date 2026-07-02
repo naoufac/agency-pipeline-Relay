@@ -251,16 +251,11 @@ async function displayColumn(pool: pg.Pool, schema: string, table: string): Prom
   return txt ? txt.name : 'id';
 }
 
-// Read rows from a REAL project table (validated against the schema's own catalog; never arbitrary SQL).
+// Row decoration shared by the LIST read (cards) and the SINGLE read (product detail page) — ONE
+// source of truth, so a detail page always shows exactly what its card shows, plus the rest.
 // RELATION-AWARE: each FK column (x_id -> table y) is resolved to y's display value and exposed as `x`,
-// so a collection shows "Category: Ceramics", not "category_id: 3". Secrets are stripped.
-export async function readRows(pool: pg.Pool, projectId: string, table: string, limit = 50): Promise<any[]> {
-  const schema = schemaName(projectId);
-  if (!IDENT.test(table)) return [];
-  const tables = await listTables(pool, projectId);
-  if (!tables.includes(table)) return [];
-  const lim = Math.max(1, Math.min(200, Number(limit) || 50));
-  const rows = (await pool.query(`select * from "${schema}"."${table}" order by id desc limit ${lim}`)).rows;
+// so it shows "Category: Ceramics", not "category_id: 3". Secrets are stripped.
+async function decorateRows(pool: pg.Pool, projectId: string, schema: string, table: string, tables: string[], rows: any[]): Promise<any[]> {
   try {
     const fks = (await pool.query(
       `select kcu.column_name as col, ccu.table_name as ref
@@ -286,6 +281,29 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
     const img = localRowImage(projectId, table, o); if (img) o._image = img;
     return o;
   });
+}
+
+// Read rows from a REAL project table (validated against the schema's own catalog; never arbitrary SQL).
+export async function readRows(pool: pg.Pool, projectId: string, table: string, limit = 50): Promise<any[]> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table)) return [];
+  const tables = await listTables(pool, projectId);
+  if (!tables.includes(table)) return [];
+  const lim = Math.max(1, Math.min(200, Number(limit) || 50));
+  const rows = (await pool.query(`select * from "${schema}"."${table}" order by id desc limit ${lim}`)).rows;
+  return decorateRows(pool, projectId, schema, table, tables, rows);
+}
+
+// PDP — ONE record by id, decorated exactly like the list read (relations resolved, secrets stripped,
+// cached photo attached). null when the table or row doesn't exist — the caller answers 404 honestly.
+export async function readRow(pool: pg.Pool, projectId: string, table: string, id: number): Promise<any | null> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !Number.isInteger(id) || id < 1 || id > 2147483647) return null;   // int4-bounded — a huge URL id is a 404, never a thrown query
+  const tables = await listTables(pool, projectId);
+  if (!tables.includes(table)) return null;
+  const rows = (await pool.query(`select * from "${schema}"."${table}" where id=$1`, [id])).rows;
+  if (!rows.length) return null;
+  return (await decorateRows(pool, projectId, schema, table, tables, rows))[0];
 }
 
 // Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.

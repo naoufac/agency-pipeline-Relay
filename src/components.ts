@@ -140,6 +140,18 @@ p{margin:0 0 1rem}
 .cart-total{display:flex;justify-content:space-between;font-weight:700;font-size:1.15rem;padding-top:14px}
 .cart-empty{color:var(--muted);padding:8px 0}
 .cart-actions{margin-top:18px}
+/* STORE · product detail page (PDP) — server-rendered per request from the live product row */
+.pdp-crumb{margin:0 0 1.6rem}.pdp-crumb a{color:var(--muted);text-decoration:none;font-weight:600}.pdp-crumb a:hover{color:var(--text)}
+.pdp-noimg{width:100%;aspect-ratio:4/3;border-radius:var(--radius);background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 68%,#0b1220),#0b1220);display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--font-display);font-size:3.4rem;font-weight:700}
+.pdp-info h1{font-size:clamp(1.9rem,4vw,2.7rem)}
+.pdp-info .p-price{font-size:1.55rem;margin:.2rem 0 1.1rem}
+.pdp-meta{list-style:none;padding:0;margin:1.2rem 0;display:grid;gap:.45rem;color:var(--muted)}
+.pdp-meta b{color:var(--text);font-weight:600}
+.pdp-info .p-add{width:auto;min-width:220px}
+.pdp-cartlink{margin-top:1rem}.pdp-cartlink a{color:var(--muted)}
+/* shop cards: image + title link to the product's own page */
+.products .card h3 a{color:inherit;text-decoration:none}.products .card h3 a:hover{text-decoration:underline}
+.products .card a.p-imglink{display:block}
 `;
 
 export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard') {
@@ -225,6 +237,46 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <p class="rform-msg" hidden></p>
     </form>
   </div></section>`,
+  // STORE · product — the DETAIL page for ONE real product row (PDP). SYSTEM-ONLY: deliberately NOT
+  // in spec.ts KNOWN, so a composed model can never emit it — cms/live.ts synthesizes it per request
+  // from the live DB row (price/description/photo edits show on the very next load). Every value is
+  // escaped server-side; Add-to-cart joins the same client cart (the order is still priced server-side).
+  product: (s) => {
+    const row = (s && s.row && typeof s.row === 'object') ? s.row : {};
+    const keys = Object.keys(row).filter(k => !['id', 'created_at', '_image'].includes(k) && row[k] != null && row[k] !== '' && !/pass|secret|token|hash|salt|api_?key|private|credential/i.test(k));   // defense-in-depth: mirrors appdb's SENSITIVE strip
+    const titleKey = ['title', 'name', 'label'].find(k => typeof row[k] === 'string' && row[k].trim());
+    const title = String(titleKey ? row[titleKey] : ('#' + (row.id ?? '')));
+    const descKey = ['description', 'body', 'details', 'summary', 'about'].find(k => typeof row[k] === 'string' && row[k].trim());
+    const IMG = /image|photo|picture|thumb|cover/i;
+    const imgKey = keys.find(k => IMG.test(k) && typeof row[k] === 'string' && (/^https?:/.test(row[k]) || row[k].charAt(0) === '/'));
+    const safeUrl = (v: any) => typeof v === 'string' && (/^https?:/.test(v) || v.charAt(0) === '/');   // never javascript:/data: — same rule as every card image
+    const img = (safeUrl(row._image) ? row._image : '') || (imgKey ? String(row[imgKey]) : '');
+    const priceKey = keys.find(k => /^(price|amount|cost)$/.test(k) && isFinite(parseFloat(row[k])));
+    const price = priceKey ? Math.round(parseFloat(row[priceKey]) * 100) / 100 : NaN;
+    const meta = keys.filter(k => k !== titleKey && k !== descKey && k !== imgKey && k !== priceKey).slice(0, 6).map(k => {
+      const v = row[k];
+      if (typeof v === 'boolean') return v ? `<li>✓ ${esc(humanize(k))}</li>` : '';
+      const money = /price|amount|cost|fee|rate/i.test(k) && isFinite(parseFloat(v));
+      return `<li><b>${esc(humanize(k))}:</b> ${esc(money ? '$' + parseFloat(v).toFixed(2) : String(v).slice(0, 200))}</li>`;
+    }).join('');
+    const back = (s.back && s.back.slug) ? s.back : null;
+    // no photo -> an intentional dark branded panel with the product initial — never a grey void
+    const media = img ? `<img src="${esc(img)}" alt="${esc(title)}">` : `<div class="pdp-noimg">${esc((title.trim().charAt(0) || '·').toUpperCase())}</div>`;
+    return `<section class="section pdp"><div class="container">
+    ${back ? `<p class="pdp-crumb"><a href="${esc(back.slug)}.html">← ${esc(back.title || 'Back')}</a></p>` : ''}
+    <div class="split">
+      <div class="split-media">${media}</div>
+      <div class="pdp-info">
+        <h1>${esc(title)}</h1>
+        ${isFinite(price) ? `<div class="p-price">$${price.toFixed(2)}</div>` : ''}
+        ${descKey ? `<p class="lead muted">${esc(String(row[descKey]))}</p>` : ''}
+        ${meta ? `<ul class="pdp-meta">${meta}</ul>` : ''}
+        ${isFinite(price) && row.id != null ? `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">Add to cart</button>` : ''}
+        ${s.cartSlug ? `<p class="pdp-cartlink"><a href="${esc(String(s.cartSlug))}.html">View cart →</a></p>` : ''}
+      </div>
+    </div>
+  </div></section>`;
+  },
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>

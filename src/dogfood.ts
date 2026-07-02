@@ -14,7 +14,7 @@ export type Issue = { page: string; viewport: string; kind: string; detail: stri
 
 // Self-correction: which findings a REBUILD-with-feedback can plausibly fix (content the LLM controls)
 // vs. system/CSS issues a rebuild can't (header/overflow → surfaced to a developer instead).
-const CONTENT_FIXABLE = new Set(['dead-button', 'garbage-button', 'broken-link', 'empty-collection', 'collection-not-rendering', 'form-not-persisted', 'form-schema-mismatch']);
+const CONTENT_FIXABLE = new Set(['dead-button', 'garbage-button', 'broken-link', 'empty-collection', 'collection-not-rendering', 'form-not-persisted', 'form-schema-mismatch', 'no-product-detail']);
 export function repairPlan(issues: Issue[], pageSlugs: string[]): { slug: string; notes: string[] }[] {
   const byPage = new Map<string, string[]>();
   for (const i of issues) {
@@ -135,7 +135,34 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
           const imgCards = await page.evaluate(`(function(){var c=document.querySelectorAll('.products .card');var n=0;c.forEach(function(x){if(x.querySelector('img'))n++});return {cards:c.length,withImg:n}})()`).catch(() => null) as any;
           if (imgCards && imgCards.cards > 0 && imgCards.withImg === 0)
             issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'no-product-imagery', detail: `all ${imgCards.cards} product cards rendered without a photo — the image enrichment did not run or failed`, severity: 'high' });
-          await page.evaluate(`(function(){var b=document.querySelectorAll('.p-add');b[0].click();if(b.length>1)b[1].click();else b[0].click()})()`);
+          // PDP (agency-panel pick): every product card must link to its own detail page, and the
+          // reviewer OPENS one and buys FROM it — the detail page is part of the purchase path, not
+          // decoration. A store whose grid is on the real products table without PDP links, or whose
+          // detail page lacks the product name / Add-to-cart, cannot pass.
+          const pdpHref = String(await page.evaluate(`(function(){var a=document.querySelector('.products .card a[href^="product-"]');return a?a.getAttribute('href'):''})()`).catch(() => '') || '');
+          const gridTable = String(await page.evaluate(`(function(){var g=document.querySelector('.products[data-products]');return g?g.getAttribute('data-products'):''})()`).catch(() => '') || '');
+          if (!/^product-\d+\.html$/.test(pdpHref)) {
+            if (gridTable === 'products') issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'no-product-detail', detail: 'product cards do not link to product detail pages — a shopper cannot view a product before buying', severity: 'high' });
+          } else {
+            // EVERY product's detail page must load (the generic link audit snapshots before the grid
+            // populates, so PDP links are load-tested here, where the grid is proven rendered).
+            const allPdp = ((await page.evaluate(`Array.from(document.querySelectorAll('.products .card a[href^="product-"]')).map(function(a){return a.getAttribute('href')})`).catch(() => [])) as any[]) || [];
+            for (const t of [...new Set(allPdp.filter((h) => /^product-\d+\.html$/.test(String(h))))].slice(0, 24)) {
+              try { const r = await fetch(`${baseUrl}/sites/${projectId}/${t}`); const body = await r.text(); if (!r.ok || body.length < 400) issues.push({ page: String(t), viewport: 'all', kind: 'broken-link', detail: `product detail page "${t}" does not load (status ${r.status}, ${body.length}b)`, severity: 'high' }); }
+              catch { issues.push({ page: String(t), viewport: 'all', kind: 'broken-link', detail: `product detail page "${t}" failed to load`, severity: 'high' }); }
+            }
+            await goto(page, `${baseUrl}/sites/${projectId}/${pdpHref}`);
+            const pd: any = await page.evaluate(`(function(){var t=document.querySelector('.pdp h1'),b=document.querySelector('.pdp .p-add');return{title:t?(t.textContent||'').trim():'',add:!!b}})()`).catch(() => null);
+            if (!pd || !pd.title || !pd.add)
+              issues.push({ page: pdpHref.replace(/\.html$/, ''), viewport: 'desktop', kind: 'store-broken', detail: `the product detail page (${pdpHref}) is missing its ${!pd || !pd.title ? 'product name' : 'Add-to-cart button'}`, severity: 'high' });
+            else await page.evaluate(`document.querySelector('.pdp .p-add').click()`).catch(() => {});   // buy FROM the detail page
+            await page.waitForTimeout(300);
+            await goto(page, url(shopPage.slug));
+            await page.waitForFunction(`document.querySelectorAll('.p-add').length > 0`, { timeout: 8000 }).catch(() => {});
+          }
+          // defensive: never throw on an empty grid (a repopulation timeout must degrade to an honest
+          // finding via the no-order path, not crash the probe into a false 'buy-flow probe failed')
+          await page.evaluate(`(function(){var b=document.querySelectorAll('.p-add');if(!b.length)return;b[0].click();if(b.length>1)b[1].click();else b[0].click()})()`).catch(() => {});
           await page.waitForTimeout(400);
           const before2 = await oCount();
           await goto(page, url(coPage.slug));
