@@ -85,6 +85,13 @@ export const directus: CmsTarget = {
       else { const r = await dx('POST', `/items/${COLLECTION}`, payload); id = r.data.id; }
       ids[COLLECTION].push(String(id));
     }
+    // M3: sweep STALE CMS rows from a previous generation — slugs no longer in the model would keep
+    // serving an outdated page (old nav, old brand) through the live path.
+    try {
+      const all = await dx('GET', `/items/${COLLECTION}?filter[project_id][_eq]=${encodeURIComponent(ctx.projectId)}&fields=id,slug&limit=200`);
+      const live = new Set(model.pages.map(p => p.slug));
+      for (const row of (all?.data || [])) if (!live.has(String(row.slug))) await dx('DELETE', `/items/${COLLECTION}/${row.id}`);
+    } catch { /* sweep is best-effort; the gate still validates current pages */ }
     return { ids };
   },
 

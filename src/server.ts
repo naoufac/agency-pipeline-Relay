@@ -1,7 +1,7 @@
 // Relay — the live web app. One cohesive frontend (web/) served here, plus the JSON API.
 // The website IS the product: submit a brief, watch the agency build it live.
 import http from 'node:http';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
 import { plan, replan } from './planner.ts';
@@ -231,6 +231,9 @@ const server = http.createServer(async (req, res) => {
       const active = (await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [id])).rows[0].n;
       if (active) return send(res, 409, 'application/json', '{"error":"this project is still building"}');
       await replan(pool, id, brief || pr.brief);
+      // sweep the previous generation's pages — stale slugs would mix two navigations and (rightly)
+      // fail the site_consistent gate. Assets stay (renders re-download what the new pages need).
+      try { const dir = fileURLToPath(new URL(id + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
       if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('rebuild', id, e?.message));
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
