@@ -12,6 +12,7 @@ import { renderPage, formPageSlug } from './render.ts';
 import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
+import { PRIVATE_READ } from './schema.ts';
 
 const stripFences = (s: string) => s.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').trim();
 // a real .sql deliverable: drop any prose preamble, keep from the first CREATE TABLE (mirrors sql_applies)
@@ -96,12 +97,12 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const site = params.site;   // the composed CMS (set by the compose task); a render projects its page from it
   // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
   // (the main public list — products/listings/menu — so a collection reliably shows real data)
-  let tables: string[] = []; const forms: Record<string, any[]> = {}; let primaryTable = '';
+  let tables: string[] = []; const forms: Record<string, any[]> = {}; let primaryTable = ''; let actionTable = '';
   const snap = params.schema_forms;
   if (task.department === 'render' && snap && Array.isArray(snap.tables)) {
     // M2: renders read the schema SNAPSHOT taken at compose (params.schema_forms) — never re-introspect.
     // Parallel renders once starved the pool; the silent catch downgraded typed forms to contact fallbacks.
-    tables = snap.tables; Object.assign(forms, snap.forms || {}); primaryTable = snap.primaryTable || '';
+    tables = snap.tables; Object.assign(forms, snap.forms || {}); primaryTable = snap.primaryTable || ''; actionTable = snap.actionTable || '';
   } else if (['build', 'compose', 'render'].includes(task.department)) {
     try {
       const desc = await appdb.describeSchema(pool, task.project_id);
@@ -111,12 +112,18 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       const named = /product|listing|item|menu|post|article|service|event|propert|vehicle|\bcar\b|recipe|course|\bjob|maker|plant|book|dish|room|catalog|portfolio|gallery|review|member|deal|offer|spot|class|trip|tour/i;
       const cand = desc.tables.filter((t: any) => !lookup.test(t.table) && t.rows > 0).sort((a: any, b: any) => b.rows - a.rows);
       primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
+      // FS1 — the ACTION table: the private visitor-record table the core form must WRITE (a booking
+      // app's core action creates an appointment, never a catalog row). Deterministic: private tables
+      // with fillable columns, action-named first; system/identity tables never qualify.
+      const ACTION_NAME = /book|appoint|reserv|rsvp|request|enquir|inquir|message|signup|sign_up|application|registration|waitlist|submission|lead|order(?!_items)/i;
+      const priv = desc.tables.filter((t: any) => PRIVATE_READ.test(t.table) && !/^(order_items|users?|accounts?|sessions?|tokens?|customers?|clients?|payments?)$/i.test(t.table) && (forms[t.table] || []).length >= 2);
+      actionTable = (priv.find((t: any) => ACTION_NAME.test(t.table)) || priv[0] || { table: '' }).table;
     } catch (e: any) {
       // NEVER silent: a failed introspection means typed forms would degrade — record it on the board.
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, brand, site } as any;
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site } as any;
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -172,7 +179,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       // or REJECT the unfixable into retry-with-feedback. No page renders until this passes the site_model gate.
       if (task.department === 'compose') {
         const raw = extractFirstJson(content);
-        const { site, repairs, errors } = normalizeSite(raw, ctx.pages || [], { tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, archetype: (ctx as any).archetype });
+        const { site, repairs, errors } = normalizeSite(raw, ctx.pages || [], { tables: (ctx as any).tables, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, actionTable: (ctx as any).actionTable, archetype: (ctx as any).archetype });
         if (errors.length) throw new Error('site compose rejected: ' + errors.join('; '));
         if (repairs.length) console.error(`[compose] ${task.project_id}: ${repairs.join(' · ')}`);
         await pool.query("update projects set params = jsonb_set(params, '{site}', $2::jsonb, true) where id=$1", [task.project_id, JSON.stringify(site)]);
@@ -181,7 +188,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         // every typed form to the contact fallback). One compose = one schema snapshot = every
         // projection sees the same forms. The schema can't change after compose (database dept is upstream).
         await pool.query("update projects set params = jsonb_set(params, '{schema_forms}', $2::jsonb, true) where id=$1",
-          [task.project_id, JSON.stringify({ tables: (ctx as any).tables || [], forms: (ctx as any).forms || {}, primaryTable: (ctx as any).primaryTable || '' })]);
+          [task.project_id, JSON.stringify({ tables: (ctx as any).tables || [], forms: (ctx as any).forms || {}, primaryTable: (ctx as any).primaryTable || '', actionTable: (ctx as any).actionTable || '' })]);
         content = JSON.stringify(site);
       }
 

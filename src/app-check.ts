@@ -54,6 +54,20 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
   const model = { pages: [{ slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Fresh fades, zero waiting' }, { type: 'features', items: [{ title: 'A', body: 'b' }] }] }] };
   const rs = normalizeSite(model, [{ slug: 'index', title: 'Home' }], { archetype: 'app', tables: ['bookings', 'services'], forms: { bookings: [{ name: 'name', type: 'text', nullable: false }] }, primaryTable: 'bookings' });
   ok('core action form still injected for apps', rs.site.pages[0].sections.some((s: any) => s.type === 'form' && s.table === 'bookings'), JSON.stringify(rs.repairs));
+  // FS1 · the ACTION-TABLE class (a booking app whose form adds catalog rows is a facade with extra steps):
+  const both = { bookings: [{ name: 'customer_name', type: 'text', nullable: false }], services: [{ name: 'name', type: 'text', nullable: false }] };
+  const rs2 = normalizeSite(model, [{ slug: 'index', title: 'Home' }], { archetype: 'app', tables: ['bookings', 'services'], forms: both, primaryTable: 'services', actionTable: 'bookings' });
+  ok('injection targets the ACTION table over the catalog primary', rs2.site.pages[0].sections.some((s: any) => s.type === 'form' && s.table === 'bookings'), JSON.stringify(rs2.site.pages[0].sections.map((s: any) => s.type + ':' + (s.table || ''))));
+  const m3 = { pages: [{ slug: 'book', title: 'Book', sections: [{ type: 'hero', headline: 'Grab a slot today' }, { type: 'form', title: 'Book your appointment', form: 'booking' }] }] };
+  const rs3 = normalizeSite(m3, [{ slug: 'book', title: 'Book' }], { archetype: 'app', tables: ['bookings', 'services'], forms: both, primaryTable: 'services', actionTable: 'bookings' });
+  ok('an unbound action-intent form binds to the action table', rs3.site.pages[0].sections.some((s: any) => s.type === 'form' && s.table === 'bookings'), JSON.stringify(rs3.repairs));
+  const m4 = { pages: [{ slug: 'contact', title: 'Contact', sections: [{ type: 'hero', headline: 'Say hello anytime' }, { type: 'form', title: 'Send us a message', form: 'contact' }] }] };
+  const rs4 = normalizeSite(m4, [{ slug: 'contact', title: 'Contact' }], { archetype: 'app', tables: ['bookings'], forms: { bookings: both.bookings }, primaryTable: '', actionTable: 'bookings' });
+  const contactForm = rs4.site.pages[0].sections.find((s: any) => s.type === 'form' && s.form === 'contact');
+  ok('a contact-intent form is never hijacked into a booking form', !!contactForm && !contactForm.table, JSON.stringify(rs4.site.pages[0].sections.map((s: any) => s.type + ':' + (s.table || ''))));
+  // FS1 · the public may write ONLY form-target tables (catalog vandalism closed)
+  const { publicWriteTables } = await import('./spec.ts');
+  ok('publicWriteTables = exactly the form targets', JSON.stringify(publicWriteTables({ pages: [{ sections: [{ type: 'form', table: 'bookings' }, { type: 'collection', table: 'services' }] }] })) === '["bookings"]');
 }
 
 // ---- CTA -> the form itself (the "everything collapses to home" class) ----
@@ -110,13 +124,14 @@ try {
   ok('a crafted public POST cannot set status', mal && mal.status !== 'confirmed', String(mal?.status));
 
   // ---- FS1: the receipt loop, end to end on the real scratch schema ----
-  const mk = (slugs: string[]) => ({
+  const mk = (slugs: string[], formTable = 'bookings') => ({
     archetype: 'app', shape: 'multi', theme: 'warm',
     brand: { name: 'Chop', tokens: { bg: '#ffffff', primary: '#7a1f1f' } },
+    schema_forms: { actionTable: 'bookings' },
     pages: slugs.map(s => ({ slug: s, title: s === 'index' ? 'Home' : s[0].toUpperCase() + s.slice(1) })),
     site: { pages: slugs.map(s => ({ slug: s, title: s, sections: [
       { type: 'hero', headline: 'Fresh fades, zero waiting' },
-      s === 'book' ? { type: 'form', table: 'bookings', form: 'bookings' } : { type: 'features', items: [{ title: 'A', body: 'b' }] }] })) } });
+      s === 'book' ? { type: 'form', table: formTable, form: formTable } : { type: 'features', items: [{ title: 'A', body: 'b' }] }] })) } });
   await pool.query(`insert into projects(id, brief, status, params) values ($1,'app gate scratch','done',$2)`, [id, JSON.stringify(mk(['index', 'book']))]);
 {
   const ins = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Rex Receipt', email: 'rex@example.com' });
@@ -150,6 +165,9 @@ try {
   await pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify(mk(['index', 'book', 'dashboard']))]);
   const bad = await verify(pool, { verify: 'site_model', project_id: id }, '');
   ok('site_model REJECTS a facade page on an app', bad.ok === false && /cannot power/.test(bad.log), bad.log);
+  await pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify(mk(['index', 'book'], 'services'))]);
+  const wrongT = await verify(pool, { verify: 'site_model', project_id: id }, '');
+  ok('site_model REJECTS an app whose only form writes the catalog, not the action table', wrongT.ok === false && /bookings/.test(wrongT.log), wrongT.log);
   await pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify(mk(['index', 'book']))]);
   const good = await verify(pool, { verify: 'site_model', project_id: id }, '');
   ok('site_model accepts the honest app', good.ok === true, good.log);

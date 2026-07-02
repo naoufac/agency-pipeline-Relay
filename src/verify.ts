@@ -174,7 +174,7 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     // every planned page and each page is a valid, renderable spec (hero-first, >= 2 real sections) BEFORE
     // any deterministic render runs. A bad model rejects here into retry-with-feedback — pages never render
     // from a broken CMS.
-    const r = await pool.query("select params->'site' as site, params->'pages' as pages, params->>'shape' as shape, params->>'archetype' as archetype from projects where id=$1", [task.project_id]);
+    const r = await pool.query("select params->'site' as site, params->'pages' as pages, params->>'shape' as shape, params->>'archetype' as archetype, params->'schema_forms'->>'actionTable' as action_table from projects where id=$1", [task.project_id]);
     const site = r.rows[0]?.site; const planned = Array.isArray(r.rows[0]?.pages) ? r.rows[0].pages : [];
     const ps = (site && Array.isArray(site.pages)) ? site.pages : [];
     if (!ps.length) return { ok: false, log: 'no composed site model (params.site empty)' };
@@ -196,6 +196,11 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     if (['app', 'store'].includes(String(r.rows[0]?.archetype))) {
       const hasForm = ps.some((p: any) => (p.sections || []).some((s: any) => s.type === 'form' && typeof s.table === 'string' && s.table));
       if (!hasForm) return { ok: false, log: 'an app/store site must include at least one {"type":"form","table":...} section — the core action (booking/ordering/signing up) has to be a REAL working form' };
+      // FS1: when the schema HAS an action table (appointments/orders/requests), the core action must
+      // WRITE it — a "booking" form that adds catalog rows or lands in the contact bucket is a facade.
+      const at = String(r.rows[0]?.action_table || '');
+      if (at && !ps.some((p: any) => (p.sections || []).some((s: any) => s.type === 'form' && String(s.table) === at)))
+        return { ok: false, log: `the schema's core action table is "${at}" but no form writes to it — the app's main action must create real ${at} rows, not catalog entries or contact messages` };
     }
     // STORE gate (PQ2): a store must actually SELL — products grid somewhere, a CART page and a
     // CHECKOUT page must EXIST (the planner's page cap once evicted checkout: the cart's Proceed

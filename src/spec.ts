@@ -10,7 +10,18 @@
 
 import { PRIVATE_READ } from './schema.ts';   // FS0: visitor-record tables are never publicly rendered
 
-export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string };
+export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; actionTable?: string };
+
+// FS1 — which tables may the PUBLIC write? Exactly the ones the composed site model targets with a
+// form section, nothing else (a produced app's catalog is the owner's — a visitor must never be able
+// to insert services/products through the raw data API). Pure; the server route enforces it.
+export function publicWriteTables(site: any): string[] {
+  const out = new Set<string>();
+  for (const p of ((site && site.pages) || []))
+    for (const s of (p.sections || []))
+      if (s && s.type === 'form' && typeof s.table === 'string' && s.table.trim()) out.add(s.table.trim());
+  return [...out];
+}
 export type SpecResult = { spec: any; repairs: string[]; errors: string[] };
 
 // Extract the FIRST complete JSON object from an agent's text. STRING-AWARE: braces inside string
@@ -231,6 +242,16 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
       if (!nonEmpty(s.table) && nonEmpty(s.form) && ctx.tables && ctx.tables.includes(str(s.form))) {
         s.table = str(s.form); repairs.push(`form "${str(s.form)}" bound to its real table`);
       }
+      // FS1: an UNBOUND form with ACTION intent (its copy or page says book/reserve/order/apply…)
+      // binds to the schema's real action table — a booking form that writes to the contact bucket is
+      // a broken product. Contact-intent forms stay contact (never hijacked into bookings).
+      if (!nonEmpty(s.table) && nonEmpty(ctx.actionTable) && ctx.forms && ctx.forms[str(ctx.actionTable)]) {
+        const intent = /book|reserv|appoint|order|apply|regist|join|rsvp|request|enrol|sign\s?up|schedul/i;
+        if (intent.test(str(s.form)) || intent.test(str(s.title)) || intent.test(str(s.cta)) || intent.test(str(ctx.slug))) {
+          s.table = str(ctx.actionTable);
+          repairs.push(`action-intent form bound to the real action table "${s.table}"`);
+        }
+      }
       // a form always works: contact bucket by default, or a typed table IF it really exists.
       if (nonEmpty(s.table) && ctx.forms && !ctx.forms[str(s.table)]) { repairs.push(`form table "${str(s.table)}" not real -> contact bucket`); delete s.table; }
       break;
@@ -346,7 +367,7 @@ export function siteCopySlop(pages: { sections: any[] }[]): string | null {
 // the per-page spec contract (hero-first, >=2 real sections, catalog injection). Pages render deterministically
 // from this. Returns the normalized pages, or REJECTS the unfixable into retry-with-feedback.
 export type SiteResult = { site: { pages: { slug: string; title: string; sections: any[] }[] }; repairs: string[]; errors: string[] };
-export function normalizeSite(raw: any, pages: { slug: string; title: string }[], base: { tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; archetype?: string } = {}): SiteResult {
+export function normalizeSite(raw: any, pages: { slug: string; title: string }[], base: { tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; actionTable?: string; archetype?: string } = {}): SiteResult {
   const repairs: string[] = []; const errors: string[] = [];
   const out: { slug: string; title: string; sections: any[] }[] = [];
   const rawPages: any[] = (raw && Array.isArray(raw.pages)) ? raw.pages : [];
@@ -357,7 +378,7 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     const composed = bySlug.get(pg.slug.toLowerCase())
       || rawPages.find((p: any) => str(p.title).toLowerCase() === pg.title.toLowerCase());
     if (!composed) { errors.push(`page "${pg.slug}" missing from the composed site model`); continue; }
-    const { spec, repairs: r, errors: e } = normalizeSpec({ sections: composed.sections }, { slug: pg.slug, tables: base.tables, forms: base.forms, primaryTable: base.primaryTable });
+    const { spec, repairs: r, errors: e } = normalizeSpec({ sections: composed.sections }, { slug: pg.slug, tables: base.tables, forms: base.forms, primaryTable: base.primaryTable, actionTable: base.actionTable });
     for (const x of r) repairs.push(`${pg.slug}: ${x}`);
     if (e.length) { errors.push(`page "${pg.slug}": ${e.join('; ')}`); continue; }
     out.push({ slug: pg.slug, title: pg.title, sections: spec.sections });
@@ -366,16 +387,22 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
   // GUARANTEE THE CORE ACTION (M2): an app/store site whose schema has a primary table MUST carry a
   // typed form somewhere — a booking/ordering app without its form is decoration. If the model forgot
   // one, inject it deterministically on the best-fitting page (never trust, always force).
-  const pt = str(base.primaryTable);
+  // FS1: the core action targets the ACTION table (the private visitor-record table — appointments/
+  // orders/requests) when the schema has one; the catalog primary table is only the fallback. A
+  // booking app whose "core action" adds catalog rows is a facade with extra steps.
+  const at = str(base.actionTable);
+  const pt = (at && base.forms && Array.isArray(base.forms[at]) && base.forms[at].length) ? at : str(base.primaryTable);
   if (pt && base.forms && Array.isArray(base.forms[pt]) && base.forms[pt].length && out.length) {
-    const hasTypedForm = out.some(p => p.sections.some((s: any) => s.type === 'form' && nonEmpty(s.table)));
+    const hasTypedForm = at
+      ? out.some(p => p.sections.some((s: any) => s.type === 'form' && str(s.table) === at))
+      : out.some(p => p.sections.some((s: any) => s.type === 'form' && nonEmpty(s.table)));
     if (!hasTypedForm) {
       const ACTION_PAGE = /book|reserv|order|sign|apply|join|start|quote|contact/;
       // never stack a second form onto a page that already has one (dogfood tests one form per page)
       const noForm = (p: any) => !p.sections.some((s: any) => s.type === 'form');
       const target = out.find(p => ACTION_PAGE.test(p.slug) && noForm(p)) || out.find(noForm) || out[0];
       target.sections.push({ type: 'form', title: humanTitle(pt), intro: '', table: pt, form: pt });
-      repairs.push(`injected the missing typed form on "${target.slug}" (table "${pt}") — an app's core action must be a real form`);
+      repairs.push(`injected the missing typed form on "${target.slug}" (table "${pt}") — an app's core action must be a real form${at ? ' on the ACTION table' : ''}`);
     }
   }
   // GUARANTEE THE STORE (PQ2): a store model must actually SELL — a products grid somewhere, a cart

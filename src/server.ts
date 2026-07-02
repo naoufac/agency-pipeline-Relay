@@ -8,6 +8,7 @@ import { plan, replan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
+import { publicWriteTables } from './spec.ts';
 import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind } from './cms/live.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
@@ -262,6 +263,10 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
       const data = (b.data && typeof b.data === 'object') ? b.data : {};
       try {
+        // FS1: the public may write ONLY the tables the composed site actually targets with a form —
+        // never the catalog (anyone could "add services" to a barbershop through the raw API).
+        const sitep = (await pool.query('select params from projects where id=$1', [dataM[1]])).rows[0]?.params?.site;
+        if (!publicWriteTables(sitep).includes(dataM[2])) return send(res, 404, 'application/json', '{"ok":false,"error":"this site has no such form"}');
         const r = await appdb.insertRow(pool, dataM[1], dataM[2], data);
         if (r.ok) {
           const proj = (await pool.query('select brief from projects where id=$1', [dataM[1]])).rows[0];
