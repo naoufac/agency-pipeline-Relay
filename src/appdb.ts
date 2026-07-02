@@ -313,12 +313,16 @@ export async function readRow(pool: pg.Pool, projectId: string, table: string, i
   return (await decorateRows(pool, projectId, schema, table, tables, rows))[0];
 }
 
+// FS0 — SYSTEM-OWNED columns: lifecycle state belongs to the system/owner, never to the visitor
+// (a public booking form must not offer "Status", and a crafted POST must not set it either).
+const SYSTEM_COLS = /^(status|state|approved|confirmed|verified)$/i;
+
 // Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.
-export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>): Promise<boolean> {
+export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>, audience: ReadAudience = 'public'): Promise<boolean> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table)) return false;
   if (!(await listTables(pool, projectId)).includes(table)) return false;
-  const use = (await typedColumns(pool, schema, table)).filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name));
+  const use = (await typedColumns(pool, schema, table)).filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name) && (audience === 'owner' || !SYSTEM_COLS.test(c.name)));
   if (!use.length) return false;
   const vals = use.map((_, i) => '$' + (i + 1));
   await pool.query(`insert into "${schema}"."${table}" (${use.map(c => `"${c.name}"`).join(',')}) values (${vals.join(',')})`,
@@ -386,7 +390,7 @@ export async function deleteRow(pool: pg.Pool, projectId: string, table: string,
 // relations (M2): a column with an actual FK constraint is returned with {ref, display} so the
 // renderer emits a <select> of the referenced table's real records — the form matches the schema
 // by construction, never hand-emitted. Non-FK `*_id` columns stay hidden (opaque numbers).
-export async function formColumns(pool: pg.Pool, projectId: string, table: string): Promise<{ name: string; type: string; nullable: boolean; ref?: string; display?: string }[]> {
+export async function formColumns(pool: pg.Pool, projectId: string, table: string, audience: ReadAudience = 'public'): Promise<{ name: string; type: string; nullable: boolean; ref?: string; display?: string }[]> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table) || !(await listTables(pool, projectId)).includes(table)) return [];
   const fkMap = new Map<string, string>();
@@ -402,6 +406,7 @@ export async function formColumns(pool: pg.Pool, projectId: string, table: strin
   const out: { name: string; type: string; nullable: boolean; ref?: string; display?: string }[] = [];
   for (const c of await typedColumns(pool, schema, table)) {
     if (['id', 'created_at'].includes(c.name) || SENSITIVE.test(c.name)) continue;
+    if (audience !== 'owner' && SYSTEM_COLS.test(c.name)) continue;   // FS0: a visitor never fills "Status"
     const ref = fkMap.get(c.name);
     if (ref) out.push({ ...c, ref, display: await displayColumn(pool, schema, ref) });
     else if (!/_id$/.test(c.name)) out.push(c);

@@ -90,6 +90,16 @@ try {
   ok('public catalog tables still list', (await appdb.readRows(pool, id, 'services')).length === 2);
   ok('store orders are covered by the same guard', (await appdb.readRows(pool, id, 'orders')).length === 0 && PRIVATE_READ.test('orders'));
 
+  // ---- SYSTEM-OWNED columns: lifecycle state is never the visitor's to set ----
+  await pool.query(`alter table "${schema}"."bookings" add column status text default 'new'`);
+  const pubCols = (await appdb.formColumns(pool, id, 'bookings')).map(c => c.name);
+  ok('public form never offers "status"', !pubCols.includes('status'), pubCols.join(','));
+  const ownCols = (await appdb.formColumns(pool, id, 'bookings', 'owner')).map(c => c.name);
+  ok('the owner form keeps "status"', ownCols.includes('status'), ownCols.join(','));
+  await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Mallory', status: 'confirmed' });
+  const mal = (await pool.query(`select status from "${schema}"."bookings" where customer_name='Mallory'`)).rows[0];
+  ok('a crafted public POST cannot set status', mal && mal.status !== 'confirmed', String(mal?.status));
+
   // ---- site_model gate: a facade page on a data archetype is REJECTED ----
   const mk = (slugs: string[]) => ({
     archetype: 'app', shape: 'multi', theme: 'warm',

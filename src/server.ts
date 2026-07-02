@@ -300,7 +300,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       // list one collection's rows + its editable columns (for the admin table + edit form)
       if (table && rid === null && req.method === 'GET') {
-        try { return send(res, 200, 'application/json', JSON.stringify({ columns: await appdb.formColumns(pool, sid, table), rows: await appdb.readRows(pool, sid, table, 200, 'owner') })); }
+        try { return send(res, 200, 'application/json', JSON.stringify({ columns: await appdb.formColumns(pool, sid, table, 'owner'), rows: await appdb.readRows(pool, sid, table, 200, 'owner') })); }
         catch { return send(res, 200, 'application/json', '{"columns":[],"rows":[]}'); }
       }
       // edit one record
@@ -319,7 +319,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (table && rid === null && req.method === 'POST') {
         let raw = ''; for await (const c of req) raw += c;
         let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
-        const ok = await appdb.insertRow(pool, sid, table, (b && b.data) || {});
+        const ok = await appdb.insertRow(pool, sid, table, (b && b.data) || {}, 'owner');
         return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
       }
       return send(res, 405, 'application/json', '{"error":"method not allowed"}');
