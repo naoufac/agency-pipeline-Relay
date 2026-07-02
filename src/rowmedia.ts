@@ -13,6 +13,7 @@ import { mediaReady, pexelsPhoto } from './media.ts';
 const SITES = new URL('../sites/', import.meta.url);
 const IMG_COL = /image|photo|cover|thumb|picture|avatar|banner|logo/i;
 const MAX_ROWS = 24;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // FNV-1a — stable, dependency-free. Same query → same cached file forever (reproducible).
 function hash(s: string): string { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); }
@@ -61,10 +62,17 @@ export async function enrichRowImages(pool: pg.Pool, projectId: string, tables: 
       const rel = assetRel(q);
       const abs = fileURLToPath(new URL(projectId + '/' + rel, SITES));
       if (!existsSync(abs)) {
-        const buf = await pexelsPhoto(q, false).catch(() => null);
+        // RELIABLE: space requests + retry with backoff so a burst rate-limit (429) doesn't leave most
+        // cards image-less. Each row gets up to 3 tries; a genuine no-result just skips that row.
+        let buf: Buffer | null = null;
+        for (let attempt = 0; attempt < 3 && !buf; attempt++) {
+          if (attempt) await sleep(400 * attempt);
+          buf = await pexelsPhoto(q, false).catch(() => null);
+        }
         if (!buf || buf.length < 1000) continue;
         writeFileSync(abs, buf);
         fetched++;
+        await sleep(250);   // be gentle with the Pexels rate window between rows
       }
       // bake the local path into an empty image column so it's served identically on every request
       if (imgCol) { try { await pool.query(`update "${schema}"."${table}" set "${imgCol}"=$1 where id=$2`, ['/sites/' + projectId + '/' + rel, row.id]); } catch {} }
