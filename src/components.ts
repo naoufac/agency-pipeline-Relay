@@ -66,8 +66,11 @@ p{margin:0 0 1rem}
 .cta h2{color:var(--on-primary)}.cta p{opacity:.92;max-width:48ch;margin:0 auto 1.6rem}.cta .btn{background:var(--bg);color:var(--text)}
 /* footer */
 .footer{border-top:var(--border-w,1px) solid var(--line);padding:44px 0;color:var(--muted)}
-.footer-inner{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
-.footer-links a{color:var(--muted);text-decoration:none;margin-left:18px}.footer-links a:hover{color:var(--text)}
+.footer-inner{display:flex;justify-content:space-between;gap:16px 24px;flex-wrap:wrap;align-items:center}
+/* footer links WRAP (never force horizontal overflow, no matter how many pages) */
+.footer-links{display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:flex-end;min-width:0}
+.footer-links a{color:var(--muted);text-decoration:none}.footer-links a:hover{color:var(--text)}
+@media(max-width:560px){.footer-inner{flex-direction:column;align-items:flex-start}.footer-links{justify-content:flex-start}}
 /* form (full-stack: posts to a real API -> Postgres) */
 .formwrap{max-width:560px}
 .rform{display:flex;flex-direction:column;gap:14px;margin-top:1.6rem}
