@@ -209,7 +209,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   // real table's columns and which writes a REAL row to /api/site/<id>/data/<table> (then the matching
   // collection refreshes). The model picks the table + copy; the system configures the fields.
   form: (s, o) => {
-    const tcols = (s.table && o?.forms && Array.isArray(o.forms[s.table])) ? o.forms[s.table] : null;
+    const tcols = (s.table && o?.forms && Array.isArray(o.forms[s.table]) && o.forms[s.table].length) ? o.forms[s.table] : null;
     const dataTable = tcols ? s.table : '';
     const inputType = (c: any) => /bool/.test(c.type) ? 'checkbox'
       : /int|numeric|real|double|decimal/.test(c.type) ? 'number'

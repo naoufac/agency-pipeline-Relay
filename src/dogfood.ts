@@ -90,9 +90,24 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       try { const r = await fetch(`${baseUrl}/sites/${projectId}/${t}`); const body = await r.text(); if (!r.ok || body.length < 400) issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" does not load (status ${r.status}, ${body.length}b)`, severity: 'high' }); }
       catch { issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" failed to load`, severity: 'high' }); }
     }
-    // forms: type + submit the first form, prove it landed (real table or submissions bucket), then clean up
+    // forms: scan every page, PREFER the typed form (data-table), submit it, prove it landed
+    // (real table or submissions bucket), then clean up.
     await page.setViewportSize({ width: 1280, height: 900 });
+    const formPages: { slug: string; typed: boolean }[] = [];
     for (const pg of pages) {
+      await goto(page, url(pg.slug));
+      const fi: any = await page.evaluate(FORMINFO).catch(() => null);
+      if (fi) formPages.push({ slug: pg.slug, typed: !!(typeof fi.table === 'string' && /^[a-z_][a-z0-9_]*$/.test(fi.table)) });
+    }
+    // M2 GATE (site-level): an app with a real database must have its core action as a TYPED form —
+    // a contact-bucket form on a booking/ordering app is decoration, not the product.
+    if (!formPages.some((f) => f.typed)) {
+      try {
+        const desc = await appdb.describeSchema(pool, projectId);
+        if ((desc.tables || []).length) issues.push({ page: '(site)', viewport: 'desktop', kind: 'form-schema-mismatch', detail: `this app has a real database (${desc.tables.map((t: any) => t.table).join(', ')}) but no form writes to it${formPages.length ? ' (only a generic contact form shipped)' : ' (no form shipped at all)'} — the core action must be a typed form on a real table`, severity: 'high' });
+      } catch {}
+    }
+    for (const pg of (formPages.filter((f) => f.typed)[0] ? pages.filter((p) => p.slug === formPages.filter((f) => f.typed)[0].slug) : pages)) {
       await goto(page, url(pg.slug));
       let info: any = await page.evaluate(FORMINFO).catch(() => null);
       if (!info) continue;

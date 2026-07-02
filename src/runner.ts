@@ -95,7 +95,12 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   // the app's REAL provisioned tables + typed form-columns per table + the PRIMARY catalog table
   // (the main public list — products/listings/menu — so a collection reliably shows real data)
   let tables: string[] = []; const forms: Record<string, any[]> = {}; let primaryTable = '';
-  if (['build', 'compose', 'render'].includes(task.department)) {
+  const snap = params.schema_forms;
+  if (task.department === 'render' && snap && Array.isArray(snap.tables)) {
+    // M2: renders read the schema SNAPSHOT taken at compose (params.schema_forms) — never re-introspect.
+    // Parallel renders once starved the pool; the silent catch downgraded typed forms to contact fallbacks.
+    tables = snap.tables; Object.assign(forms, snap.forms || {}); primaryTable = snap.primaryTable || '';
+  } else if (['build', 'compose', 'render'].includes(task.department)) {
     try {
       const desc = await appdb.describeSchema(pool, task.project_id);
       tables = desc.tables.map((t: any) => t.table);
@@ -104,7 +109,10 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       const named = /product|listing|item|menu|post|article|service|event|propert|vehicle|\bcar\b|recipe|course|\bjob|maker|plant|book|dish|room|catalog|portfolio|gallery|review|member|deal|offer|spot|class|trip|tour/i;
       const cand = desc.tables.filter((t: any) => !lookup.test(t.table) && t.rows > 0).sort((a: any, b: any) => b.rows - a.rows);
       primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
-    } catch {}
+    } catch (e: any) {
+      // NEVER silent: a failed introspection means typed forms would degrade — record it on the board.
+      await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
+    }
   }
   return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, shape: params.shape, tables, forms, primaryTable, brand, site };
 }
@@ -166,6 +174,12 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         if (errors.length) throw new Error('site compose rejected: ' + errors.join('; '));
         if (repairs.length) console.error(`[compose] ${task.project_id}: ${repairs.join(' · ')}`);
         await pool.query("update projects set params = jsonb_set(params, '{site}', $2::jsonb, true) where id=$1", [task.project_id, JSON.stringify(site)]);
+        // SCHEMA MAP — computed ONCE here, stored with the model (M2). Renders MUST NOT re-introspect
+        // the DB (4 parallel renders × N queries starved the pool once; the catch{} silently downgraded
+        // every typed form to the contact fallback). One compose = one schema snapshot = every
+        // projection sees the same forms. The schema can't change after compose (database dept is upstream).
+        await pool.query("update projects set params = jsonb_set(params, '{schema_forms}', $2::jsonb, true) where id=$1",
+          [task.project_id, JSON.stringify({ tables: (ctx as any).tables || [], forms: (ctx as any).forms || {}, primaryTable: (ctx as any).primaryTable || '' })]);
         content = JSON.stringify(site);
       }
 
