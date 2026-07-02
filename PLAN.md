@@ -178,7 +178,17 @@ dashboard, no dead buttons) → book → open the site in a private tab: your bo
 tables exactly like unknown tables; app:check (new suite, joins npm run check) proves the split on a
 real scratch schema; the act-probe is a loud verdict when skipped (checkout-eviction lesson).
 
-## FS1 · The visitor keeps a receipt — confirmation, secret reference, find-my-booking
+## FS1 · The visitor keeps a receipt — confirmation, secret reference, find-my-booking ✅ (2026-07-02)
+**Shipped + proven zero-touch** on the barbershop rebuild (reviewer PASSED 0 high; verified
+externally end-to-end): book → land on receipt-<table>-<code>.html — your record rendered live from
+your own row (FK-resolved: "Barber: Marcus Johnson"), status pill, the reference code with a
+save-this note; wrong code → honest 404; find.html pastes the code back to the receipt or emails
+the links (no enumeration — always "sent"); the token never appears in any public read. The proof
+also caught + fixed two deeper classes: the core action now binds to the ACTION table (a booking
+app's form wrote the services CATALOG because injection picked primaryTable — actionTable is now
+derived, snapshotted, injected, gated by site_model) and the public may write ONLY form-target
+tables (the raw data API accepted inserts into any table — catalog vandalism closed, gated).
+app:check 66→85; the reviewer's act-probe asserts the receipt loop on every app build.
 **You get:** every core action answers back: a confirmation view with the visitor's record + a
 secret reference code; a "find my booking" page (paste the code, or get a tokenized link by email —
 codes are never enumerable). Built on ONE new primitive: the policy-classed WHERE-scoped read

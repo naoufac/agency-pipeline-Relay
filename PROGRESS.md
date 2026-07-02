@@ -314,3 +314,18 @@ field killed: SYSTEM_COLS hidden from public formColumns + ignored by public ins
 POST cannot set status=confirmed); owner keeps both. Final verdict: PASSED 0 high; book page =
 real barber/service records with photos + clean booking form. NEXT: FS1 (receipt: readScoped +
 ref_token + confirmation + find-my-booking — mind the migration backfill hazard in PLAN.md).
+
+## 2026-07-03 — FS1 SHIPPED + PROVEN (the visitor keeps a receipt)
+Commits 53991fa · e2809c3 · a1b08cd deployed (prod a1b08cd, 10 suites green, app:check 85).
+ref_token: compiled onto private entities, migrated nullable+partial-unique (no '' backfill — gated),
+generated server-side in insertRow (SENSITIVE blocks client supply), returned to the form → visitor
+lands on receipt-<table>-<token>.html (renderLiveReceipt via ONE new primitive readScoped; token
+displayed from the URL, stripped from every read). find.html: paste-code → resolver; email-me →
+receiptLinksByEmail mailed via SMTP ledger, always "sent". Act-probe: receipt renders, wrong token
+404, token never public. THE PROOF CAUGHT TWO CLASSES: (1) core action wrote the services CATALOG
+(injection used primaryTable) while appointments sat unused → actionTable derived/snapshotted/
+injected/gated; contact forms never hijacked; (2) public data POST accepted ANY table → now exactly
+publicWriteTables(site). External proof: real booking via public API → receipt 200 w/ record + code
++ "Barber: Marcus Johnson" FK resolution → find resolver maps bare code → catalog insert blocked
+("this site has no such form") → token absent from public reads. NEXT: FS2 visitor accounts
+(magic link, sessions in app schema, claim-on-verify, cross-app token rejection).
