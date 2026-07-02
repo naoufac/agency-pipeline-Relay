@@ -220,6 +220,10 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
       break;
     }
     case 'form':
+      // M2: the LLM often names the table in "form" but omits "table" — bind it when it IS a real table.
+      if (!nonEmpty(s.table) && nonEmpty(s.form) && ctx.tables && ctx.tables.includes(str(s.form))) {
+        s.table = str(s.form); repairs.push(`form "${str(s.form)}" bound to its real table`);
+      }
       // a form always works: contact bucket by default, or a typed table IF it really exists.
       if (nonEmpty(s.table) && ctx.forms && !ctx.forms[str(s.table)]) { repairs.push(`form table "${str(s.table)}" not real -> contact bucket`); delete s.table; }
       break;
@@ -351,7 +355,9 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     const hasTypedForm = out.some(p => p.sections.some((s: any) => s.type === 'form' && nonEmpty(s.table)));
     if (!hasTypedForm) {
       const ACTION_PAGE = /book|reserv|order|sign|apply|join|start|quote|contact/;
-      const target = out.find(p => ACTION_PAGE.test(p.slug)) || out[0];
+      // never stack a second form onto a page that already has one (dogfood tests one form per page)
+      const noForm = (p: any) => !p.sections.some((s: any) => s.type === 'form');
+      const target = out.find(p => ACTION_PAGE.test(p.slug) && noForm(p)) || out.find(noForm) || out[0];
       target.sections.push({ type: 'form', title: humanTitle(pt), intro: '', table: pt, form: pt });
       repairs.push(`injected the missing typed form on "${target.slug}" (table "${pt}") — an app's core action must be a real form`);
     }

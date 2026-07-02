@@ -33,8 +33,8 @@ const LAYOUT = `(()=>{var n=document.querySelector('.nav-inner'),c=document.quer
 const STRUCT = `(function(){var b=document.querySelector('.nav-brand');return{navs:document.querySelectorAll('nav').length,logos:document.querySelectorAll('.nav-brand').length,logo:b?(b.textContent||'').trim():''}})()`;
 const LINKS = `Array.from(document.querySelectorAll('a')).map(function(a){return{text:(a.textContent||'').trim().slice(0,60),href:a.getAttribute('href')||'',btn:a.classList.contains('btn')}})`;
 const COLLS = `Array.from(document.querySelectorAll('.collection[data-table]')).map(el=>({table:el.getAttribute('data-table'),cards:el.querySelectorAll('.card').length}))`;
-const FORMINFO = `(function(){var f=document.querySelector('form.rform');if(!f)return null;var fields=[];f.querySelectorAll('input,textarea,select').forEach(function(el){if(!el.name)return;fields.push({name:el.name,tag:el.tagName.toLowerCase(),required:!!el.required,ref:el.getAttribute('data-ref')||null,options:el.tagName==='SELECT'?el.options.length:0})});return{table:f.getAttribute('data-table')||'',fields:fields}})()`;
-const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea,select').forEach(function(el,i){if(el.tagName==='SELECT'){if(el.options.length>1)el.selectedIndex=1;el.dispatchEvent(new Event('change',{bubbles:true}));return;}var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value='2026-01-01';}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
+const FORMINFO = `(function(){var f=document.querySelector('form.rform[data-table]')||document.querySelector('form.rform');if(!f)return null;var fields=[];f.querySelectorAll('input,textarea,select').forEach(function(el){if(!el.name)return;fields.push({name:el.name,tag:el.tagName.toLowerCase(),required:!!el.required,ref:el.getAttribute('data-ref')||null,options:el.tagName==='SELECT'?el.options.length:0})});return{table:f.getAttribute('data-table')||'',fields:fields}})()`;
+const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform[data-table]')||document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea,select').forEach(function(el,i){if(el.tagName==='SELECT'){if(el.options.length>1)el.selectedIndex=1;el.dispatchEvent(new Event('change',{bubbles:true}));return;}var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value='2026-01-01';}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
 
 export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:8787'): Promise<{ issues: Issue[]; checked: { pages: number; buttons: number; links: number; linkTargets: number; forms: number; collections: number } }> {
   const proj = await pool.query('select params from projects where id=$1', [projectId]);
@@ -186,15 +186,17 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl?: st
       const repairs = Number((await pool.query("select count(*)::int n from run_events where project_id=$1 and type='dogfood_repair'", [projectId])).rows[0].n);
       const pageSlugs = ((await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params?.pages || []).map((p: any) => p.slug);
       const plan = repairPlan(issues, pageSlugs);
-      if (plan.length && repairs < 1) {
+      // site-level content findings (page '(site)') can't map to a slug but a recompose CAN fix them
+      const siteWide = issues.filter(i => i.severity === 'high' && CONTENT_FIXABLE.has(i.kind) && String(i.page || '') === '(site)').map(i => `${i.kind}: ${i.detail}`);
+      if ((plan.length || siteWide.length) && repairs < 1) {
         const compose = (await pool.query("select id from tasks where project_id=$1 and department='compose'", [projectId])).rows[0];
         let reopened = 0;
         if (compose) {
-          const notes = plan.map(({ slug, notes }) => `${slug}: ${notes.slice(0, 4).join(' · ')}`).join(' — ');
+          const notes = [...siteWide, ...plan.map(({ slug, notes }) => `${slug}: ${notes.slice(0, 4).join(' · ')}`)].join(' — ');
           await pool.query("update tasks set status='blocked', claimed_by=null, lease_expires_at=null, updated_at=now() where project_id=$1 and department in ('render','qa')", [projectId]);
           await ev(pool, projectId, compose.id, 'verify_failed', `interaction review found problems the site model must FIX: ${notes}`.slice(0, 1800));
           await pool.query("update tasks set status='ready', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [compose.id]);
-          reopened = plan.length;
+          reopened = plan.length + siteWide.length;
         } else {
           for (const { slug, notes } of plan) {
             const t = (await pool.query("select id from tasks where project_id=$1 and department='build' and artifact=$2", [projectId, slug + '.html'])).rows[0];

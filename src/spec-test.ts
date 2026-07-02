@@ -345,5 +345,17 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('M2 invariant: no double-injection when a typed form exists', r2.site.pages[0].sections.filter((s) => s.type === 'form').length === 1);
 }
 
+
+// M2: a form whose "form" NAME is a real table gets bound to it (LLM omits "table" constantly)
+{
+  const base = { tables: ['orders', 'products'], forms: { orders: [{ name: 'customer_name', type: 'text', nullable: false }], products: [{ name: 'name', type: 'text', nullable: false }] }, primaryTable: 'products' };
+  const model = { pages: [ { slug: 'order', title: 'Order', sections: [hero('Order ahead'), { type: 'form', form: 'orders', title: 'Place Your Order' }] } ] };
+  const r = normalizeSite(model, [{ slug: 'order', title: 'Order' }], base);
+  const f = r.site.pages[0].sections.filter((s) => s.type === 'form');
+  ok('M2: form name bound to real table', f.length >= 1 && f[0].table === 'orders');
+  ok('M2: no extra injected form after binding', f.length === 1);
+  ok('M2: binding recorded', r.repairs.some((x) => /bound to its real table/.test(x)));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
