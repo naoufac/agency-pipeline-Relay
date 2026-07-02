@@ -33,7 +33,7 @@ ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="r
 
 // ---- PDP render layer: one real row -> a full product detail page ----
 const pdp = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } }, sections: [
-  { type: 'product', row: { id: 3, title: 'Terracotta Mug', price: 24, description: 'Hand-thrown, dishwasher-safe.', material: 'stoneware', _image: '/sites/x/assets/row-abc.jpg' }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart' }] },
+  { type: 'product', row: { id: 3, title: 'Terracotta Mug', price: 24, description: 'Hand-thrown, dishwasher-safe.', material: 'stoneware', weight_grams: 0, _image: '/sites/x/assets/row-abc.jpg' }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart' }] },
   { pages, slug: 'product-3', title: 'Terracotta Mug' });
 ok('pdp renders the product name as the page heading', pdp.includes('<h1>Terracotta Mug</h1>'));
 ok('pdp shows the server-formatted price', pdp.includes('$24.00'));
@@ -42,6 +42,7 @@ ok('pdp renders the product photo', pdp.includes('src="/sites/x/assets/row-abc.j
 ok('pdp add-to-cart carries id+title+price into the client cart', pdp.includes('relayCartAdd') && pdp.includes('&quot;id&quot;:3'));
 ok('pdp links back to the shop + the cart', pdp.includes('href="shop.html"') && pdp.includes('href="cart.html"'));
 ok('pdp extra fields render as labelled meta', pdp.includes('Material') && pdp.includes('stoneware'));
+ok('pdp hides zero-valued numeric meta (spec noise)', !pdp.includes('Weight Grams'));
 const pdpNoImg = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [{ type: 'product', row: { id: 4, title: 'Vase', price: 64 } }] }, { pages, slug: 'product-4', title: 'Vase' });
 ok('pdp without a photo shows the branded panel, never a void', pdpNoImg.includes('pdp-noimg'));
 ok('shop grid links each card to its product page (products table only)', shop.includes("'product-'+o.id+'.html'") && shop.includes("tbl==='products'"));

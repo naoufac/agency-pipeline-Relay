@@ -256,6 +256,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const meta = keys.filter(k => k !== titleKey && k !== descKey && k !== imgKey && k !== priceKey).slice(0, 6).map(k => {
       const v = row[k];
       if (typeof v === 'boolean') return v ? `<li>✓ ${esc(humanize(k))}</li>` : '';
+      if (isFinite(Number(v)) && Number(v) === 0) return '';   // "Weight Grams: 0" is spec noise, not information (pg numerics arrive as strings)
       const money = /price|amount|cost|fee|rate/i.test(k) && isFinite(parseFloat(v));
       return `<li><b>${esc(humanize(k))}:</b> ${esc(money ? '$' + parseFloat(v).toFixed(2) : String(v).slice(0, 200))}</li>`;
     }).join('');
