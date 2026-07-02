@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import * as appdb from './appdb.ts';
 import { copySlop } from './spec.ts';
 import { CONVERSION_SECTIONS } from './landing.ts';
+import { FACADE_PAGE } from './archetype.ts';
 
 export const SITES = new URL('../sites/', import.meta.url);
 
@@ -181,6 +182,13 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     for (const p of ps) {
       if (!Array.isArray(p.sections) || p.sections.length < 2) return { ok: false, log: `page "${p.slug}" has <2 sections` };
       if (p.sections[0]?.type !== 'hero') return { ok: false, log: `page "${p.slug}" must open with a hero` };
+    }
+    // FS0 · HONEST APP SURFACE: no data-archetype page may promise a surface the system cannot
+    // power (facade dashboards/portals/tracking). The planner drops these; this catches any that
+    // slip through an older plan or a rebuild.
+    if (['app', 'store'].includes(String(r.rows[0]?.archetype))) {
+      const fake = ps.find((p: any) => FACADE_PAGE.test(String(p.slug)));
+      if (fake) return { ok: false, log: `page "${fake.slug}" promises an app surface the system cannot power yet — remove it (owner views live in the board's Content tab; visitor receipts/sign-in arrive with FS1/FS2)` };
     }
     // APP/STORE gate (PLAN.md M2): the core user action must be a REAL typed form. normalizeSite
     // injects one when the schema has a primary table; a model that still lacks any typed form after

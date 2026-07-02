@@ -1,13 +1,13 @@
 import pg from 'pg';
 import { llm } from './agents.ts';
 import { themeFor, type ThemeName } from './themes.ts';
-import { archetypeFor, needsData, type Archetype } from './archetype.ts';
+import { archetypeFor, needsData, FACADE_PAGE, type Archetype } from './archetype.ts';
 import { shapeFor, type Shape } from './landing.ts';
 import { chooseLayout } from './layout.ts';
 
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
-type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archetype; shape: Shape };
+type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archetype; shape: Shape; notes?: string[] };
 
 // Bind a department to its REAL deterministic gate — no `min:280` theatre where a true check exists.
 // (kpi.ts counts only sql_applies/site_renders/wcag/json* as rigor; min/nonempty are honest floors.)
@@ -63,6 +63,19 @@ function validate(plan: any, brief: string): Plan | null {
   const shape = shapeFor(plan?.shape, brief);             // same: landing detected in CODE, never LLM whim
   // LANDING (PLAN.md M1): exactly ONE page — the conversion page. Forced here, gated in site_model.
   if (shape === 'landing') pages = [pages[0]];
+  // FS0 · HONEST APP SURFACE: on a data archetype, a page role the system cannot power yet
+  // (dashboard/portal/track/account…) is dropped LOUDLY before it can render as fiction — the
+  // facade-dashboard class (invented stats, feature-copy for features that don't exist, dead
+  // buttons). Owner views live in the board's Content tab; visitor receipts/sign-in arrive FS1/FS2.
+  const notes: string[] = [];
+  if (archetype !== 'site') {
+    const facade = pages.filter(p => FACADE_PAGE.test(p.slug));
+    if (facade.length) {
+      pages = pages.filter(p => !FACADE_PAGE.test(p.slug));
+      if (!pages.length) pages = [{ slug: 'index', title: 'Home' }];
+      notes.push(`dropped unpowerable page(s): ${facade.map(p => p.slug).join(', ')} — no page may ship that the system cannot wire (owner views = Content tab)`);
+    }
+  }
   // STORE (PQ2): a store must be able to SELL — guarantee cart + checkout pages exist (shop lives on
   // index or a shop page; the products grid is guaranteed at compose time). The page cap must NEVER
   // evict the sell pages (it once cut checkout from a 5-page plan: the cart's Proceed button 404'd and
@@ -123,7 +136,7 @@ function validate(plan: any, brief: string): Plan | null {
   // QA acceptance runs AFTER every page is on disk and asserts the whole site is one coherent identity
   // (each page exactly 1 nav + 1 logo; all pages share ONE logo + ONE palette + ONE nav) via site_consistent.
   const qa: Task = { seq: ++seq, title: 'QA — acceptance (1 nav · 1 logo · 1 palette, every page)', department: 'qa', verify: 'site_consistent', depends_on: pageRenders.map(b => b.seq), artifact: null };
-  return { tasks: [...tasks, compose, ...pageRenders, qa], pages, theme, archetype, shape };
+  return { tasks: [...tasks, compose, ...pageRenders, qa], pages, theme, archetype, shape, notes };
 }
 
 // Hard wall-clock cap on the planner's LLM call. It flows through the shared llm()/callLLM, which already
@@ -170,6 +183,7 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   const projectId: string = p.rows[0].id;
   await writeDag(pool, projectId, tasks);
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
+  for (const n of (result.notes || [])) await pool.query("insert into run_events(project_id, type, detail) values ($1,'plan_repair',$2)", [projectId, n]).catch(() => {});
   return projectId;
 }
 
@@ -191,6 +205,7 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
   await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);
   await writeDag(pool, projectId, tasks);
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'replanned',$2)", [projectId, `rebuild #${params.rebuilds} · ${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · data preserved via migration`]);
+  for (const n of (result.notes || [])) await pool.query("insert into run_events(project_id, type, detail) values ($1,'plan_repair',$2)", [projectId, n]).catch(() => {});
 }
 
 async function writeDag(pool: pg.Pool, projectId: string, tasks: Task[]): Promise<void> {

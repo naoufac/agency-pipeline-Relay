@@ -300,7 +300,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       // list one collection's rows + its editable columns (for the admin table + edit form)
       if (table && rid === null && req.method === 'GET') {
-        try { return send(res, 200, 'application/json', JSON.stringify({ columns: await appdb.formColumns(pool, sid, table), rows: await appdb.readRows(pool, sid, table, 200) })); }
+        try { return send(res, 200, 'application/json', JSON.stringify({ columns: await appdb.formColumns(pool, sid, table), rows: await appdb.readRows(pool, sid, table, 200, 'owner') })); }
         catch { return send(res, 200, 'application/json', '{"columns":[],"rows":[]}'); }
       }
       // edit one record

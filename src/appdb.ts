@@ -4,8 +4,13 @@
 // and queryable while the engine's tables (public) can never be touched. This is the safety contract:
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
-import { parseModel, compile, lit } from './schema.ts';
+import { parseModel, compile, lit, PRIVATE_READ } from './schema.ts';
 import { localRowImage } from './rowmedia.ts';
+
+// FS0 — who is reading? 'public' = the produced site's anonymous data API (private visitor-record
+// tables answer [] / null exactly like tables that don't exist — no existence leak); 'owner' = the
+// auth-gated content admin, which must keep seeing bookings/orders to run the business.
+export type ReadAudience = 'public' | 'owner';
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;            // a legal, safe SQL identifier (no quoting tricks)
 
@@ -284,9 +289,10 @@ async function decorateRows(pool: pg.Pool, projectId: string, schema: string, ta
 }
 
 // Read rows from a REAL project table (validated against the schema's own catalog; never arbitrary SQL).
-export async function readRows(pool: pg.Pool, projectId: string, table: string, limit = 50): Promise<any[]> {
+export async function readRows(pool: pg.Pool, projectId: string, table: string, limit = 50, audience: ReadAudience = 'public'): Promise<any[]> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table)) return [];
+  if (audience !== 'owner' && PRIVATE_READ.test(table)) return [];   // FS0: visitor records are never publicly listable
   const tables = await listTables(pool, projectId);
   if (!tables.includes(table)) return [];
   const lim = Math.max(1, Math.min(200, Number(limit) || 50));
@@ -296,9 +302,10 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
 
 // PDP — ONE record by id, decorated exactly like the list read (relations resolved, secrets stripped,
 // cached photo attached). null when the table or row doesn't exist — the caller answers 404 honestly.
-export async function readRow(pool: pg.Pool, projectId: string, table: string, id: number): Promise<any | null> {
+export async function readRow(pool: pg.Pool, projectId: string, table: string, id: number, audience: ReadAudience = 'public'): Promise<any | null> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table) || !Number.isInteger(id) || id < 1 || id > 2147483647) return null;   // int4-bounded — a huge URL id is a 404, never a thrown query
+  if (audience !== 'owner' && PRIVATE_READ.test(table)) return null;   // FS0: a visitor record is not publicly addressable by id
   const tables = await listTables(pool, projectId);
   if (!tables.includes(table)) return null;
   const rows = (await pool.query(`select * from "${schema}"."${table}" where id=$1`, [id])).rows;

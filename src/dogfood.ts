@@ -8,6 +8,8 @@
 import pg from 'pg';
 import { ev } from './db.ts';
 import * as appdb from './appdb.ts';
+import { PRIVATE_READ } from './schema.ts';
+import { FACADE_PAGE } from './archetype.ts';
 import { withPage } from './browser.ts';
 
 export type Issue = { page: string; viewport: string; kind: string; detail: string; severity: 'high' | 'medium' | 'low' };
@@ -100,6 +102,13 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         }
       }
     }
+    // FS0 · HONEST SURFACE: a facade page (dashboard/portal/track…) on a data archetype is fiction —
+    // the planner+site_model now prevent them; the reviewer still flags any legacy site serving one.
+    const paramsF = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
+    if (['app', 'store'].includes(String(paramsF.archetype)))
+      for (const pg2 of pages)
+        if (FACADE_PAGE.test(String(pg2.slug)))
+          issues.push({ page: pg2.slug, viewport: 'all', kind: 'facade-page', detail: `page "${pg2.slug}" promises an app surface (dashboard/portal/tracking) the system does not power — it can only render fiction`, severity: 'high' });
     // one site = one logo: flag any per-page logo drift (the deterministic site_consistent gate also
     // enforces this, but the reviewer must SEE and report it — the verdict is what's shown on the board)
     if (siteLogos.size > 1) issues.push({ page: '(site)', viewport: 'all', kind: 'logo-drift', detail: `the logo differs across pages: ${[...siteLogos].map(l => JSON.stringify(l)).join(' · ')} — one website must show one logo`, severity: 'high' });
@@ -240,6 +249,15 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       for (let k = 0; k < 8 && after <= before; k++) { await page.waitForTimeout(500); after = await count(); }
       if (after <= before) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-not-persisted', detail: table ? `"add" form did not create a row in "${table}"` : 'form submission did not reach the database', severity: 'high' });
       else if (!(r as any)?.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirmation', detail: 'row saved, but the visitor saw no confirmation message', severity: 'low' });
+      // FS0 · PRIVACY: what a visitor just submitted about themselves must NOT be publicly listable.
+      // The reviewer checks the LIVE public API right after its own submission landed.
+      if (table && after > before && PRIVATE_READ.test(table)) {
+        try {
+          const pub: any = await (await fetch(`${baseUrl}/api/site/${projectId}/data/${table}`)).json();
+          if (((pub && pub.rows) || []).length > 0)
+            issues.push({ page: pg.slug, viewport: 'desktop', kind: 'private-data-public', detail: `table "${table}" is publicly listable through the read API — a visitor's ${table} are on display to anyone`, severity: 'high' });
+        } catch {}
+      }
       if (table) await pool.query(`delete from "${sch}"."${table}" where id > $1`, [before]).catch(() => {});
       else await pool.query("delete from site_submissions where project_id=$1 and (data->>'message'='Automated QA check — please ignore.' or data->>'name' like 'QA Test%')", [projectId]).catch(() => {});
       break;

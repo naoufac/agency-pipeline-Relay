@@ -30,3 +30,10 @@ export function archetypeFor(named: any, brief: string): Archetype {
 
 // Does this archetype require a real data model (a verified database department)?
 export function needsData(a: Archetype): boolean { return a === 'app' || a === 'store'; }
+
+// FS0 — HONEST APP SURFACE. Page roles the system cannot power yet: an owner "dashboard" lives in
+// the board's Content tab, visitor "portal/track/account" views arrive with FS1/FS2 (receipts,
+// sign-in). Until then, planning such a page renders FICTION — a brochure ABOUT a dashboard with
+// invented stats and dead buttons (the facade class the reviewer failed on a real build). The
+// planner drops these loudly; site_model rejects any that slip through; the reviewer flags them.
+export const FACADE_PAGE = /^(dashboard|admin|portal|client-?portal|customer-?portal|my-?account|account|profile|login|log-?in|sign-?in|track|tracking|console|panel|backoffice|back-?office|manage|management)$/i;

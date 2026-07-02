@@ -8,6 +8,8 @@
 //
 // Pure, synchronous, side-effect-free -> trivially unit-testable (see spec-test.ts / `npm run spec:check`).
 
+import { PRIVATE_READ } from './schema.ts';   // FS0: visitor-record tables are never publicly rendered
+
 export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string };
 export type SpecResult = { spec: any; repairs: string[]; errors: string[] };
 
@@ -212,8 +214,13 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
     case 'collection': {
       // resolve against the project's REAL tables; fall back to the primary catalog table; else DROP
       // (a collection with no real table can only render empty — that is slop, not a page).
+      // FS0: a collection over a PRIVATE visitor-record table (bookings/orders/messages…) is a privacy
+      // hole dressed as a feature — dropped, never rendered (the read API answers [] for it anyway).
       const tables = ctx.tables || [];
-      const real = (t: any) => nonEmpty(t) && tables.length > 0 && tables.includes(str(t));
+      const real = (t: any) => nonEmpty(t) && tables.length > 0 && tables.includes(str(t)) && !PRIVATE_READ.test(str(t));
+      if (nonEmpty(s.table) && (ctx.tables || []).includes(str(s.table)) && PRIVATE_READ.test(str(s.table))) {
+        repairs.push(`dropped collection over private table "${str(s.table)}" — visitor records are never publicly listed`); return null;
+      }
       if (real(s.table)) s.table = str(s.table);
       else if (real(ctx.primaryTable)) { repairs.push(`collection table "${str(s.table) || '∅'}" -> primary "${ctx.primaryTable}"`); s.table = ctx.primaryTable; }
       else { repairs.push(`dropped collection with no resolvable table ("${str(s.table) || '∅'}")`); return null; }
@@ -408,7 +415,8 @@ export function normalizeSpec(raw: any, ctx: SpecCtx = {}): SpecResult {
   const sections: any[] = Array.isArray(raw.sections) ? raw.sections.map((s: any) => repairSection(s, ctx, repairs)).filter(Boolean) : [];
 
   // GUARANTEE the catalog shows: on a main/catalog page, ensure a collection on the primary table.
-  if (nonEmpty(ctx.primaryTable) && CATALOG_PAGE.test(str(ctx.slug))) {
+  // FS0: never inject over a private visitor-record table — no catalog is better than a leak.
+  if (nonEmpty(ctx.primaryTable) && !PRIVATE_READ.test(str(ctx.primaryTable)) && CATALOG_PAGE.test(str(ctx.slug))) {
     if (!sections.some((x) => x.type === 'collection' && x.table === ctx.primaryTable)) {
       sections.splice(Math.min(1, sections.length), 0, { type: 'collection', title: 'Browse', intro: '', table: ctx.primaryTable });
       repairs.push(`injected collection on primary table "${ctx.primaryTable}"`);
