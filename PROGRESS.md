@@ -282,3 +282,20 @@ Commits a0598f3 · a0532ea · 9993a9b · dcc232b, all deployed (prod HEAD dcc232
   via PDP → cart → checkout (run_events), 3 PDPs live with real photos/prices, ← Shop crumb.
 - Polish from own phone check: zero-valued numeric meta hidden ("Weight Grams: 0" was spec noise).
 - Owner phone check sent: mobile PDP + shop screenshots via Telegram.
+
+## 2026-07-02 (night) — FULL-STACK APP track planned (owner-directed: "real planning and thinking")
+Evidence gathered BEFORE designing: zero-touch barbershop baseline (4c89fc1f) — reviewer FAILED it
+(facade dashboard page: invented stats, feature-fiction cards, dead buttons; visitor loop open:
+book → toast → void; all bookings publicly listable via the read API). Prior owner brief a3625565
+("full stack delivery app - user accounts - client portal") = users table + portal/track pages with
+nothing behind them, never reviewed. 2/6 historical app builds failed with the core form unwired.
+Code map (4 explorers): no WHERE reads, no visitor identity, no record views for app data, no
+act-probe. Plan chosen by a 3-plan × 3-judge panel (risk-first sequencing + systems-first
+primitives + product-first safeguards): FS0 honest surface (closed-set pages, private-by-default
+form-target tables, force-injected core form, act-probe) → FS1 receipt (readScoped + ref_token +
+find-my-booking) → FS2 visitor accounts (magic link, sessions in app schema, claim-on-verify) →
+FS3 real semantics (typed slots, capacity-aware UNIQUE, status lifecycle + visitor email) →
+FS4 redemption of the two facade briefs. Full track with phone checks + machine gates in PLAN.md.
+Key safeguards locked: ref_token additive-migration backfill hazard (nullable + partial unique +
+random backfill, proven in migrate:check); probes never send real mail; bidirectional token gate;
+capacity-aware uniqueness detection. NEXT: implement FS0.

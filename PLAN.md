@@ -143,6 +143,79 @@ once the product is worth it.
 
 ---
 
+# FULL-STACK APPS — the FS track (locked 2026-07-02, owner-directed)
+
+The locked goal's far end: "a full-stack app with a database and user accounts." Today that is a
+facade — evidence from real builds: a barbershop booking app ships a "dashboard" page that is a
+brochure ABOUT a dashboard (invented stats, feature cards for features that don't exist, dead
+buttons — the reviewer failed it); a prior "full stack delivery app with user accounts" brief
+produced client-portal/track pages and a users table with NOTHING behind them; a visitor who books
+gets a toast and a void (no confirmation, no way to ever see the booking); every visitor's booking
+is publicly listable through the read API (privacy hole); 2 of 6 historical app builds failed with
+the core form unwired. Plan chosen by a 3-plan × 3-judge panel on this evidence.
+Design doctrine (unchanged): one new primitive at a time, forced in deterministic code, proven by a
+browser probe as unforgeable as the store's buy-probe. Hero art-direction + polish picks stay
+queued behind this track.
+
+## FS0 · Honest app surface — no facades, no public dumps, a probe on every build
+**You get:** an app page may only exist if the system can wire it to something real (closed-set page
+roles; "dashboard/portal/track" either map to a real capability or are dropped loudly — never
+rendered as fiction). The core action form is force-injected from the schema (retiring the
+form-unwired failure class). Visitor-submitted rows (form-target tables) stop being publicly
+listable — server-side, which protects already-built sites at deploy. And the ACT-PROBE lands in
+the reviewer: on every app build a real browser performs the core action with real related records
+and proves the row landed where the site claims.
+**Phone check:** rebuild the barbershop brief → every nav page does something real (no brochure
+dashboard, no dead buttons) → book → open the site in a private tab: your booking appears nowhere.
+**Machine gate:** site_model rejects unwired app pages (closed set); readRows returns [] for private
+tables exactly like unknown tables; app:check (new suite, joins npm run check) proves the split on a
+real scratch schema; the act-probe is a loud verdict when skipped (checkout-eviction lesson).
+
+## FS1 · The visitor keeps a receipt — confirmation, secret reference, find-my-booking
+**You get:** every core action answers back: a confirmation view with the visitor's record + a
+secret reference code; a "find my booking" page (paste the code, or get a tokenized link by email —
+codes are never enumerable). Built on ONE new primitive: the policy-classed WHERE-scoped read
+(readScoped) — the first filtered read a produced app has ever had. Every table is declared
+public-content or private-record in the entity model; an unclassed table fails the build.
+**Phone check:** book on your phone → confirmation page shows your booking + a code → close it all,
+open Find my booking, paste the code → your booking, only yours; a made-up code says not found.
+**Machine gate:** act-probe extends bidirectionally: the token renders on the confirmation AND never
+appears in any public read; wrong token → 404; ref_token is nullable + partial-unique with random
+server-side backfill (proven under migrate:check — an additive '' backfill would break old rows).
+
+## FS2 · User accounts on the produced app — the locked promise
+**You get:** end-users sign in on the produced app: email → magic link → "My bookings", scoped to
+them, past and present. Pre-account bookings attach on verified email (claim-on-verify). Sessions
+live in the app's OWN schema; server-side token validation is the boundary (cookies are convenience).
+**Phone check:** sign in on the produced app with your email → tap the emailed link → My bookings
+lists yours only; a second address in a private tab sees an empty list.
+**Machine gate:** app-auth:check per scratch build — two-visitor isolation is SQL-scoped; a cross-app
+probe proves app A's session token is worthless on app B; probes never send real mail (tokens read
+from the scratch DB; the mail path verified once via the sent-mail ledger).
+
+## FS3 · Real booking semantics — truth in the data, not the copy
+**You get:** time fields are real date/time types validated server-side; double-booking is impossible
+via a capacity-aware UNIQUE constraint (never an LLM promise); every submission carries a status
+(pending → confirmed/declined/cancelled) the owner flips in the existing Content tab; the visitor's
+reference page shows it live and a confirmation email lands when the owner confirms.
+**Phone check:** book yesterday → refused; book a taken slot → refused; as owner confirm the booking
+→ the visitor's reference page says Confirmed and their email arrives.
+**Machine gate:** compiled-in constraints asserted on a scratch schema (types, unique index, CHECK);
+browser probe proves past-date + duplicate-slot rejections render in-page; status transitions are a
+closed set; each visitor notification writes a verified sent-mail record.
+
+## FS4 · The facade briefs redeemed — the standing full-loop gate
+**You get:** the two briefs that produced facades (the delivery app with accounts, the bakery
+pre-order) re-run zero-touch and come out as real apps — the full loop (act → receipt → sign-in →
+status) proven by the standing act-probe on every app build from then on.
+**Phone check:** submit the original delivery-app brief text verbatim → track a delivery end to end
+from your phone.
+**Machine gate:** the act-probe suite green on both redemption builds with zero human edits; the
+deterministic brief-intent map (track → find-by-reference, portal → my-records, dashboard → owner
+Content tab) drops NO core intent silently — a dropped intent is a failing gate.
+
+---
+
 ## Standing rules (locked — same as GOAL.md)
 1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.
 2. **Work only on Relay, never on a produced site.** Fix the generator, rebuild the output.
