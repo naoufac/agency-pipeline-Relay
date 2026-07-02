@@ -2,6 +2,7 @@ import pg from 'pg';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
+import { alertStuck } from './alert.ts';
 import { runAgentTracked, type Ctx } from './agents.ts';
 import { verify, SITES } from './verify.ts';
 import { reviewSite } from './qa.ts';
@@ -283,9 +284,13 @@ export async function runLoop(
 
   const c = await counts(pool, projectId);
   const done = (c.blocked + c.ready + c.running + c.verifying) === 0 && c.failed === 0;
-  // genuinely stuck after exhausting recovery → emit an alertable event instead of dying silently.
-  if (!done && c.failed > 0)
-    await ev(pool, projectId, null, 'project_stuck', `${c.failed} task(s) failed after ${await evCount(pool, 'project_id', projectId, 'project_retry')} resurrect round(s) — needs attention`);
+  // genuinely stuck after exhausting recovery → alert the OPERATOR (Telegram, once per project) —
+  // a stuck build must interrupt a human, never wait to be noticed on a dashboard (M5).
+  if (!done && c.failed > 0) {
+    const detail = `${c.failed} task(s) failed after ${await evCount(pool, 'project_id', projectId, 'project_retry')} resurrect round(s) — needs attention`;
+    await ev(pool, projectId, null, 'project_stuck', detail);
+    alertStuck(pool, projectId, detail).catch(() => {});
+  }
   await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
   // auto-review only in the SERVER context (opts.review). CLI/demo/scratch runs don't launch a browser
   // (it would keep a short-lived process alive and isn't wanted for offline tests).

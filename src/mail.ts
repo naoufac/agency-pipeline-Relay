@@ -37,12 +37,17 @@ export async function sendMail(pool: pg.Pool | null, projectId: string | null, t
 
 // Lead notification — a produced site's form was submitted; the operator hears about it in minutes,
 // not when they next open a dashboard. Fire-and-forget from the submission handlers.
-export function notifyLead(pool: pg.Pool, projectId: string, brief: string, form: string, data: Record<string, any>): void {
+// Returns whether a mail was queued (false for QA probes) so the gate can assert the guard.
+const QA_MARKER = /Automated QA check — please ignore|^QA Test \d/;
+export function notifyLead(pool: pg.Pool, projectId: string, brief: string, form: string, data: Record<string, any>): boolean {
   const to = process.env.OPERATOR_EMAIL;
-  if (!to || !mailReady()) return;
+  if (!to || !mailReady()) return false;
+  // the interaction reviewer submits test rows on every build — those are probes, not leads
+  if (Object.values(data || {}).some((v) => QA_MARKER.test(String(v)))) return false;
   const lines = Object.entries(data || {}).slice(0, 12).map(([k, v]) => `${k}: ${String(v).slice(0, 200)}`).join('\n');
   const site = String(brief || '').slice(0, 80);
   sendMail(pool, projectId, to, `New lead — ${site}`,
     `A visitor just submitted the "${form}" form on your produced site:\n\n${lines}\n\nProject: https://board.naples.agency/#/p/${projectId}/data\nSite: https://board.naples.agency/sites/${projectId}/`)
     .catch(() => {});
+  return true;
 }
