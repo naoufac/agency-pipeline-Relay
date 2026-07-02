@@ -80,10 +80,14 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
           nLinks++;
           if (vp.name === 'desktop' && /^[^#?:/][^#?:]*\.html(#.*)?$/.test(a.href)) targets.add(a.href.split('#')[0]);
         }
-        // ALL-SAME: 3+ CTAs on a page that every point to the SAME destination = a broken resolver
-        // (what shipped the recolored-template sites where every button went to index.html).
+        // ALL-SAME calibration: the BROKEN-resolver signature is 3+ CTAs all collapsing to HOME
+        // (index.html) — that stays a high finding. 3+ CTAs sharing a legitimate ACTION page
+        // (shop/checkout/contact/book) is normal store design (everything drives to the shop) —
+        // surfaced as a medium style note, never a blocker, never a wasted recompose.
         if (vp.name === 'desktop' && btnTargets.length >= 3 && new Set(btnTargets).size === 1) {
-          issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `all ${btnTargets.length} buttons on this page point to the same place (${btnTargets[0]}) — CTAs aren't routing`, severity: 'high' });
+          const target = btnTargets[0];
+          if (target === 'index.html') issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `all ${btnTargets.length} buttons on this page collapse to home (${target}) — CTAs aren't routing`, severity: 'high' });
+          else issues.push({ page: pg.slug, viewport: vp.name, kind: 'cta-monotone', detail: `all ${btnTargets.length} buttons on this page share one destination (${target}) — consider varying secondary CTAs`, severity: 'medium' });
         }
         if (vp.name === 'desktop') {
           await page.waitForFunction('(function(){var e=document.querySelector(".collection[data-table]");return !e||e.querySelector(".card")})()', { timeout: 5000 }).catch(() => {});
