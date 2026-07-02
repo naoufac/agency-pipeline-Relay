@@ -48,6 +48,13 @@ try {
   const rb = await fetch(`${BASE}/api/rebuild`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: CB }, body: JSON.stringify({ id: projId }) });
   ok('rebuild: B blocked (404, no existence leak)', rb.status === 404);
   ok('schema: B blocked', (await get(`/api/schema?id=${projId}`, CB)).schema === null);
+  // PQ3 content admin is owner-only: B cannot list/edit A's content
+  const cList = await fetch(`${BASE}/api/site/${projId}/content`, { headers: { cookie: CB } });
+  ok('content list: B blocked (404)', cList.status === 404);
+  const cEdit = await fetch(`${BASE}/api/site/${projId}/content/products/1`, { method: 'PATCH', headers: { 'content-type': 'application/json', cookie: CB }, body: JSON.stringify({ data: { price: 1 } }) });
+  ok('content edit: B blocked (404, no leak)', cEdit.status === 404);
+  const cAnon = await fetch(`${BASE}/api/site/${projId}/content`);
+  ok('content list: anonymous blocked', cAnon.status === 404);
 
   // legacy ownerless projects remain public (the demo board)
   const legacy = (await pool.query('select id from projects where owner_id is null limit 1')).rows[0];

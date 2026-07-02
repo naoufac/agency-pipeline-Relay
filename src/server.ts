@@ -274,6 +274,46 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       return send(res, 200, 'application/json', JSON.stringify({ submissions: r.rows }));
     }
 
+    // ---- PQ3 · CLIENT CONTENT ADMIN (owner-only): edit the site's real content (products/menu/…) ----
+    // Directus can't reach the app_<hex> schema (separate DB), so the OWNER edits content here; the
+    // live site reads these tables live, so an edit shows immediately.
+    const contentM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/content(?:\/([a-zA-Z_][a-zA-Z0-9_]{0,62}))?(?:\/(\d{1,12}))?$/);
+    if (contentM) {
+      if (!UUID_RE.test(contentM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      if (!canSee(user, await ownerOf(contentM[1]))) return send(res, 404, 'application/json', '{"error":"not found"}');
+      const sid = contentM[1], table = contentM[2], rid = contentM[3] ? Number(contentM[3]) : null;
+      // list the editable collections
+      if (!table && req.method === 'GET') {
+        try { return send(res, 200, 'application/json', JSON.stringify({ collections: await appdb.contentTables(pool, sid) })); }
+        catch { return send(res, 200, 'application/json', '{"collections":[]}'); }
+      }
+      // list one collection's rows + its editable columns (for the admin table + edit form)
+      if (table && rid === null && req.method === 'GET') {
+        try { return send(res, 200, 'application/json', JSON.stringify({ columns: await appdb.formColumns(pool, sid, table), rows: await appdb.readRows(pool, sid, table, 200) })); }
+        catch { return send(res, 200, 'application/json', '{"columns":[],"rows":[]}'); }
+      }
+      // edit one record
+      if (table && rid !== null && (req.method === 'PATCH' || req.method === 'PUT')) {
+        let raw = ''; for await (const c of req) raw += c;
+        let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+        const ok = await appdb.updateRow(pool, sid, table, rid, (b && b.data) || {});
+        return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
+      }
+      // delete one record
+      if (table && rid !== null && req.method === 'DELETE') {
+        const ok = await appdb.deleteRow(pool, sid, table, rid);
+        return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
+      }
+      // add a record (reuses the validated insert path)
+      if (table && rid === null && req.method === 'POST') {
+        let raw = ''; for await (const c of req) raw += c;
+        let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+        const ok = await appdb.insertRow(pool, sid, table, (b && b.data) || {});
+        return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
+      }
+      return send(res, 405, 'application/json', '{"error":"method not allowed"}');
+    }
+
     // ---- Interaction QA (dogfood): a real browser used the site; latest verdict ----
     if (path === '/api/dogfood') {
       const id = url.searchParams.get('id'); if (!id) return send(res, 400, 'application/json', '{"error":"id required"}');

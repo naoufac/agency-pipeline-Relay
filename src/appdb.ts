@@ -294,6 +294,62 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
   return true;
 }
 
+// PQ3 — CLIENT CONTENT EDITING. Directus lives in a SEPARATE database and cannot reach the app_<hex>
+// schema (that's where products/menu/posts really live), so the owner edits their content through
+// Relay's own owner-scoped admin over THIS API. The live site already reads these tables live, so an
+// edit shows immediately. Same safety contract as insert/read: namespace-confined, identifier-checked,
+// parameterized, type-coerced, secret columns never touched.
+
+// System tables the client should NOT hand-edit as "content": join/system/transactional tables and
+// anything with no human-meaningful display column. Everything else (products, menu, posts, team…) is
+// editable content the client owns.
+const CONTENT_HIDDEN = /^(order_items|orders|submissions|sessions|auth|tokens?|migrations?|users?|accounts?)$/i;
+
+// The editable content collections of a site — the "Products / Menu / Posts" a client manages.
+export async function contentTables(pool: pg.Pool, projectId: string): Promise<{ table: string; label: string; rows: number; display: string }[]> {
+  const schema = schemaName(projectId);
+  const out: { table: string; label: string; rows: number; display: string }[] = [];
+  for (const t of await listTables(pool, projectId)) {
+    if (CONTENT_HIDDEN.test(t)) continue;
+    const disp = await displayColumn(pool, schema, t);
+    if (disp === 'id') continue;   // no human handle -> not client-facing content
+    let rows = 0; try { rows = Number((await pool.query(`select count(*)::int n from "${schema}"."${t}"`)).rows[0].n); } catch {}
+    out.push({ table: t, label: t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), rows, display: disp });
+  }
+  return out;
+}
+
+// One record by id (secret columns stripped) — for the edit form.
+export async function getRow(pool: pg.Pool, projectId: string, table: string, id: number): Promise<any | null> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !Number.isInteger(id) || !(await listTables(pool, projectId)).includes(table)) return null;
+  const r = (await pool.query(`select * from "${schema}"."${table}" where id=$1`, [id])).rows[0];
+  if (!r) return null;
+  const o = { ...r }; for (const k of Object.keys(o)) if (SENSITIVE.test(k)) delete o[k];
+  return o;
+}
+
+// UPDATE a record — only real, non-system columns the caller supplied; type-coerced; id/created_at and
+// secret columns can never be written. Returns false if the table/row/columns don't validate.
+export async function updateRow(pool: pg.Pool, projectId: string, table: string, id: number, data: Record<string, any>): Promise<boolean> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !Number.isInteger(id) || !(await listTables(pool, projectId)).includes(table)) return false;
+  const use = (await typedColumns(pool, schema, table)).filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name));
+  if (!use.length) return false;
+  const set = use.map((c, i) => `"${c.name}"=$${i + 1}`).join(',');
+  const r = await pool.query(`update "${schema}"."${table}" set ${set} where id=$${use.length + 1}`,
+    [...use.map(c => coerce(data[c.name], c.type)), id]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+// DELETE a record. Confined to the project schema; parameterized id.
+export async function deleteRow(pool: pg.Pool, projectId: string, table: string, id: number): Promise<boolean> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !Number.isInteger(id) || !(await listTables(pool, projectId)).includes(table)) return false;
+  const r = await pool.query(`delete from "${schema}"."${table}" where id=$1`, [id]);
+  return (r.rowCount ?? 0) > 0;
+}
+
 // Columns of a table suitable for an "add a record" form: scalar user-fillable fields PLUS real
 // relations (M2): a column with an actual FK constraint is returned with {ref, display} so the
 // renderer emits a <select> of the referenced table's real records — the form matches the schema

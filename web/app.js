@@ -179,7 +179,7 @@ const tabLink = (id, key, label, cur) =>
 
 function project(id, tab, seq){
   app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
-  let wasBuilt = false, prow = {}, editInit = false, qaInit = false, dataInit = false;
+  let wasBuilt = false, prow = {}, editInit = false, qaInit = false, dataInit = false, contentInit = false;
 
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
@@ -193,7 +193,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
       </div>`;
   }
 
@@ -325,6 +325,55 @@ function project(id, tab, seq){
     await render();
   }
 
+  // ---- Content tab (PQ3): edit the site's REAL content (products/menu/posts). Owner-only; the live
+  // site reads these tables live, so an edit shows on the next load. ----
+  async function contentTab(){
+    const body = document.getElementById('pbody');
+    body.innerHTML = `<h2 class="rv-h" style="margin-top:0">Content <span class="muted" style="font-size:13px;font-weight:400">— edit what\'s on your site; changes go live immediately</span></h2><div id="cbody"><div class="muted" style="padding:12px 2px">Loading…</div></div>`;
+    let cols = {};
+    async function loadCollections(){
+      let d; try { d = await j(`/api/site/${id}/content`); } catch { d = { collections: [] }; }
+      const el = document.getElementById('cbody');
+      if (!d.collections || !d.collections.length){ el.innerHTML = `<div class="empty">This site has no editable content collections${me?'':' — sign in as the owner to edit'}.</div>`; return; }
+      el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:18px">${d.collections.map((c,i)=>`<button class="btn btn-sm ${i?'btn-ghost':''}" data-coll="${esc(c.table)}">${esc(c.label)} <span class="muted">· ${c.rows}</span></button>`).join('')}</div><div id="coll"></div>`;
+      el.querySelectorAll('[data-coll]').forEach(bt=>bt.onclick=()=>{ el.querySelectorAll('[data-coll]').forEach(x=>x.classList.add('btn-ghost')); bt.classList.remove('btn-ghost'); openCollection(bt.getAttribute('data-coll')); });
+      openCollection(d.collections[0].table);
+    }
+    async function openCollection(table){
+      const wrap = document.getElementById('coll'); wrap.innerHTML = '<div class="muted" style="padding:12px 2px">Loading…</div>';
+      let d; try { d = await j(`/api/site/${id}/content/${table}`); } catch { d = { columns: [], rows: [] }; }
+      cols[table] = d.columns || [];
+      if (!d.rows || !d.rows.length){ wrap.innerHTML = `<div class="empty">No records yet.</div>`; return; }
+      const fields = (d.columns||[]).map(c=>c.name);
+      wrap.innerHTML = d.rows.map(r=>`<div class="card" style="margin-bottom:12px" data-rid="${r.id}">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+          <div style="flex:1;min-width:0">${fields.slice(0,4).map(f=>`<div style="font-size:14px;margin-bottom:2px"><b class="muted" style="font-weight:600">${esc(f)}</b> ${esc(String(r[f]??''))}</div>`).join('')}</div>
+          <div class="row" style="gap:6px"><button class="btn btn-sm btn-ghost cedit">Edit</button><button class="btn btn-sm btn-ghost cdel" title="Delete">✕</button></div>
+        </div></div>`).join('');
+      wrap.querySelectorAll('.card[data-rid]').forEach(card=>{
+        const rid = card.getAttribute('data-rid'); const rec = d.rows.find(x=>String(x.id)===String(rid));
+        card.querySelector('.cedit').onclick = ()=>editRecord(table, rid, rec, card);
+        card.querySelector('.cdel').onclick = async ()=>{ if(!confirm('Delete this record?'))return; const res=await fetch(`/api/site/${id}/content/${table}/${rid}`,{method:'DELETE'}).then(r=>r.json()).catch(()=>({})); if(res.ok){card.remove();} else alert('Could not delete (are you signed in as the owner?)'); };
+      });
+    }
+    function editRecord(table, rid, rec, card){
+      const fs = (cols[table]||[]).filter(c=>!c.ref);
+      card.innerHTML = `<form class="rform" style="margin:0">${fs.map(c=>{
+        const v = esc(String(rec[c.name]??'')); const num = /int|numeric|real|double|decimal/.test(c.type);
+        return `<label>${esc(c.name.replace(/_/g,' '))}<input name="${esc(c.name)}" type="${num?'number':'text'}"${num?' step="0.01"':''} value="${v}"></label>`;
+      }).join('')}<div class="row" style="gap:8px"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" id="ccancel">Cancel</button><span class="rform-msg muted" hidden></span></div></form>`;
+      card.querySelector('#ccancel').onclick = ()=>openCollection(table);
+      card.querySelector('form').onsubmit = async e=>{
+        e.preventDefault(); const data={}; new FormData(e.target).forEach((v,k)=>data[k]=v);
+        const msg=card.querySelector('.rform-msg'); const res=await fetch(`/api/site/${id}/content/${table}/${rid}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({data})}).then(r=>r.json()).catch(()=>({}));
+        if(res.ok){ msg.hidden=false; msg.textContent='Saved ✓ — live on your site'; setTimeout(()=>openCollection(table),700); }
+        else { msg.hidden=false; msg.textContent='Could not save (sign in as the owner).'; }
+        return false;
+      };
+    }
+    loadCollections();
+  }
+
   // ---- Data tab: form submissions stored in Postgres (the full-stack layer) ----
   async function dataTab(){
     const body = document.getElementById('pbody');
@@ -399,6 +448,7 @@ function project(id, tab, seq){
     else if (tab === 'files') filesTab(b);
     else if (tab === 'metrics') metricsTab();
     else if (tab === 'qa') { if (!qaInit) { qaInit = true; qaTab(); } }
+    else if (tab === 'content') { if (!contentInit) { contentInit = true; contentTab(); } }
     else if (tab === 'data') { if (!dataInit) { dataInit = true; dataTab(); } }
     // resolution moment
     if (!wasBuilt && built && tab === 'site') { toast('✓ Done — your site is live'); }
@@ -661,7 +711,7 @@ function router(){
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
-  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','qa','data'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
+  else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','qa','content','data'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();
 
   document.querySelectorAll('.nav-links a').forEach(a => a.classList.toggle('active', a.getAttribute('data-route') === navPath));

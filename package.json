@@ -6,7 +6,7 @@
   "description": "Autonomous agency pipeline: brief -> planner -> dependency DAG of AI calls, stage-by-stage, zero-trust verification, Supabase/Postgres board.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check",
+    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check",
     "serve": "set -a; . ./.env 2>/dev/null; set +a; tsx src/server.ts",
     "worker": "set -a; . ./.env 2>/dev/null; set +a; tsx src/worker.ts",
     "kpi": "set -a; . ./.env 2>/dev/null; set +a; tsx src/kpi-cli.ts",
@@ -19,6 +19,7 @@
     "leak:check": "tsx src/leak-check.ts",
     "layout:check": "tsx src/layout-check.ts",
     "ecom:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/ecom-check.ts",
+    "content:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/content-check.ts",
     "prove:directus": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/prove-directus.ts",
     "cms:status": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/status.ts",
     "cms:build": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/finalize-cli.ts",
