@@ -46,6 +46,7 @@ export interface BuildCtx {
   // M2: the schema snapshot taken at compose (params.schema_forms) — REQUIRED for any render of a
   // page that may carry a typed form; without it the form degrades to the contact fallback.
   schemaForms?: { tables: string[]; forms: Record<string, any[]>; primaryTable: string };
+  layout?: any;   // structure variant (hero/nav/band), passed to renderPage on CMS re-serve
 }
 
 // The contract. See docs/CMS-ARCHITECTURE.md for how it maps onto Directus.

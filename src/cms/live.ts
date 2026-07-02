@@ -30,7 +30,7 @@ export async function renderLiveFromCms(pool: pg.Pool, projectId: string, slug: 
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: row.sections };
   // M2: pass the schema snapshot — without it a typed form silently degrades to the contact fallback
   const sf = params.schema_forms || {};
-  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', forms: sf.forms, primaryTable: sf.primaryTable });
+  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable });
   try { html = await processMedia(html, new URL(projectId + '/', SITES)); } catch { /* image-light or no key */ }
   return `<!--relay:cms=directus LIVE doc=${row.id} (rendered from CMS on request)-->\n` + html;
 }

@@ -83,6 +83,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const params = proj.rows[0].params || {};
   const pages = params.pages || [];
   const theme = params.theme;   // deterministic design language chosen by the planner (rooted in the brief)
+  const layout = params.layout; // deterministic STRUCTURE (hero/nav/band), chosen once per project
   // SINGLE SOURCE OF TRUTH: the canonical site identity is locked into params.brand the moment Branding
   // passes (see processTask). For a build, read it. If it's somehow not set yet, derive it DETERMINISTICALLY
   // from the upstream branding output — resolveBrand() always returns a complete palette. NEVER the page spec.
@@ -115,7 +116,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, shape: params.shape, tables, forms, primaryTable, brand, site };
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, tables, forms, primaryTable, brand, site };
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -137,7 +138,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       applyBrand(spec, canon);                                          // FORCE the one identity onto the projection
       mkdirSync(fileURLToPath(dir), { recursive: true });
       const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));   // rendered page -> served file (CMS-native serving replaces the old edit-overlay; src/cms.ts removed)
       content = JSON.stringify(page);
       await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
@@ -201,7 +202,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
           applyBrand(spec, canon);
           const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
-          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
+          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable });
           writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));
         } else {
           let body = stripFences(content);

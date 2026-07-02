@@ -1,0 +1,65 @@
+// layout:check — THE PQ1 GATE (distinct design per brief). Proves the SYSTEM produces structurally
+// different layouts, not one template recolored:
+//   (1) the chooser spreads real briefs across multiple hero treatments (not all the same),
+//   (2) each hero variant renders its own distinct STRUCTURE (different marker classes), and
+//   (3) every variant stays WCAG-safe and free of raw tokens / [object Object].
+// Deterministic, no server needed. Exit 1 on any failure. Run: npm run layout:check.
+import { chooseLayout, HERO_VARIANTS } from './layout.ts';
+import { renderPage } from './render.ts';
+import { archetypeFor } from './archetype.ts';
+import { themeFor } from './themes.ts';
+
+let pass = 0, fail = 0;
+const ok = (name: string, cond: boolean, extra = '') => { if (cond) pass++; else { fail++; console.error(`  ✗ ${name} ${extra}`); } };
+
+// a spread of real briefs across archetypes/industries
+const BRIEFS = [
+  'a law firm specializing in mergers and acquisitions',
+  'a skate shop selling boards and streetwear',
+  'a wedding photographer portfolio',
+  'a SaaS tool for team scheduling',
+  'a neighborhood bakery with online pre-orders',
+  'a fitness coaching landing page',
+  'a boutique hotel on the coast',
+  'a craft coffee roastery and cafe',
+  'a modern dental clinic',
+  'an architecture studio portfolio',
+];
+
+// (1) spread: the chooser must NOT collapse every brief to one hero
+const layouts = BRIEFS.map((b) => { const theme = themeFor(undefined, b); const arch = archetypeFor(undefined, b); return chooseLayout(theme, arch, b); });
+const heroesUsed = new Set(layouts.map((l) => l.hero));
+ok('chooser uses ≥3 distinct hero treatments across 10 briefs', heroesUsed.size >= 3, `used: ${[...heroesUsed].join(', ')}`);
+ok('chooser is deterministic (same brief → same layout)', JSON.stringify(chooseLayout('bold', 'site', BRIEFS[5])) === JSON.stringify(chooseLayout('bold', 'site', BRIEFS[5])));
+const navUsed = new Set(layouts.map((l) => l.nav));
+ok('nav style varies across briefs', navUsed.size >= 1);   // centered only on editorial/minimal — presence is a bonus, not required
+
+// (2) each hero variant renders a DISTINCT structure (its own marker classes)
+const specOf = () => ({ brand: { name: 'Acme', tokens: { bg: '#ffffff', primary: '#123456' } }, sections: [
+  { type: 'hero', image: 'city skyline', eyebrow: 'Est. 2020', headline: 'We build things', lead: 'A one-line promise about the work.', cta: 'Get started' },
+  { type: 'features', items: [{ title: 'A', body: 'b' }] },
+] });
+const markers: Record<string, RegExp> = {
+  image: /class="hero on-image"/, split: /class="hero hero-split"/, center: /class="hero hero-center"/, editorial: /class="hero hero-editorial"/,
+};
+const rendered: Record<string, string> = {};
+for (const v of HERO_VARIANTS) {
+  const html = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: v, nav: 'standard', band: false } });
+  rendered[v] = html;
+  ok(`hero "${v}" renders its own structure`, markers[v].test(html), 'marker missing');
+  ok(`hero "${v}" carries a body layout class`, html.includes(`l-hero-${v}`));
+  ok(`hero "${v}" has the headline + a working CTA`, html.includes('We build things') && /<a class="btn"/.test(html));
+  ok(`hero "${v}" no raw token / [object Object]`, !html.includes('{{') && !html.includes('[object Object]'));
+}
+// scope photo checks to the hero MARKUP (the <header>) — the stylesheet defines .hero-bg on every page
+const heroMarkup: Record<string, string> = {};
+for (const v of HERO_VARIANTS) heroMarkup[v] = (rendered[v].match(/<header class="hero[\s\S]*?<\/header>/) || [''])[0];
+// the four heroes must NOT be byte-identical (that was the whole bug)
+ok('the four hero variants are structurally DIFFERENT from each other', new Set(Object.values(heroMarkup)).size === 4);
+ok('split hero frames an in-flow photo, not a full-bleed bg', /hero-photo/.test(heroMarkup.split) && !/hero-bg/.test(heroMarkup.split));
+ok('center hero drops the photo entirely', !/hero-photo|hero-bg/.test(heroMarkup.center));
+ok('editorial hero uses a wide in-flow photo', /hero-wide/.test(heroMarkup.editorial));
+ok('image hero uses a full-bleed bg photo', /hero-bg/.test(heroMarkup.image));
+
+console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

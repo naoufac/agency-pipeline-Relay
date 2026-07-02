@@ -87,7 +87,7 @@ async function main() {
     const problems: string[] = [];
 
     // 1. the body class actually carries the theme (proves wiring end-to-end)
-    if (!new RegExp(`<body class="t-${theme}"`).test(html)) problems.push('missing body class t-' + theme);
+    if (!new RegExp(`<body class="t-${theme}(\\s|")`).test(html)) problems.push('missing body class t-' + theme);
 
     // 2. structure / assets / placeholders
     const g = staticGate(html); if (g) problems.push(g);

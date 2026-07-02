@@ -86,15 +86,42 @@ p{margin:0 0 1rem}
 /* stats */
 .stats{text-align:center}.stat-n{font-family:var(--font-display);font-size:clamp(2rem,5vw,2.8rem);font-weight:700;color:var(--primary);line-height:1}
 @media(max-width:560px){.stats{grid-template-columns:1fr 1fr}}
-/* theme hero alignment — body carries .t-<theme>, set deterministically by the renderer */
-.t-bold .hero-inner{margin-left:auto;margin-right:auto;text-align:center}
-.t-bold .hero .lead{margin-left:auto;margin-right:auto}
-.t-editorial .hero-inner,.t-minimal .hero-inner{max-width:840px}
+/* ============================================================================
+   LAYOUT VARIANTS (src/layout.ts) — STRUCTURE, chosen once per project. Body carries
+   l-hero-<variant>; nav carries nav-<variant>; l-band alternates section surfaces. Each is
+   responsive + uses the contrast-guaranteed palette, so no variant can be illegible or broken.
+   ============================================================================ */
+/* HERO · split — copy beside a framed photo (no overlay; text on --bg) */
+.hero-split .hero-split-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(28px,5vw,72px);align-items:center;padding:clamp(56px,10vw,120px) 0}
+.hero-split .hero-copy .lead{margin:1rem 0 2rem}
+.hero-split .hero-media img{width:100%;aspect-ratio:5/4;object-fit:cover;border-radius:calc(var(--radius) + 6px)}
+@media(max-width:840px){.hero-split .hero-split-grid{grid-template-columns:1fr;gap:32px;padding:clamp(48px,12vw,80px) 0}.hero-split .hero-media{order:-1}}
+/* HERO · center — centered statement, no photo */
+.hero-center{text-align:center}
+.hero-center .hero-inner{max-width:820px;margin:0 auto;padding:clamp(80px,14vw,180px) 0}
+.hero-center .lead{margin-left:auto;margin-right:auto}
+.hero-center .eyebrow{margin-left:auto;margin-right:auto}
+/* HERO · editorial — oversized headline, wide photo beneath, lead + CTA below */
+.hero-editorial{padding:clamp(48px,8vw,96px) 0 0}
+.hero-editorial .hero-head{max-width:var(--container)}
+.hero-editorial .hero-head h1{font-size:clamp(2.8rem,9vw,6.2rem);margin:.2em 0 .5em}
+.hero-editorial .hero-wide{margin:clamp(24px,4vw,48px) 0}
+.hero-editorial .hero-wide img{width:100%;aspect-ratio:21/9;object-fit:cover;border-radius:var(--radius)}
+.hero-editorial .hero-foot{max-width:620px}
+.hero-editorial .hero-foot .lead{margin:0 0 1.6rem}
+/* NAV · centered — brand stacked above centered links */
+@media(min-width:761px){
+  .nav-centered .nav-inner{flex-direction:column;gap:12px;padding-top:20px;padding-bottom:16px}
+  .nav-centered .nav-brand{margin:0 auto;font-size:1.5rem}
+  .nav-centered .nav-links{margin:0 auto}
+}
+/* section rhythm — alternating surface bands (only when l-band) for real vertical variety */
+.l-band main>.section:nth-of-type(even){background:var(--surface)}
 `;
 
-export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#') {
+export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard') {
   const links = pages.map(p => `<li><a href="${esc(p.slug)}.html"${p.slug === current ? ' aria-current="page"' : ''}>${esc(p.title)}</a></li>`).join('');
-  return `<nav class="nav"><div class="nav-inner">
+  return `<nav class="nav nav-${esc(variant)}"><div class="nav-inner">
   <a class="nav-brand" href="index.html">${esc(brand)}</a>
   <input type="checkbox" id="navmenu" class="nav-toggle" aria-hidden="true">
   <label for="navmenu" class="nav-burger" aria-label="Toggle menu">☰</label>
@@ -108,7 +135,7 @@ export function footer(brand: string, pages: any[]) {
 }
 
 // section components — each takes a content object, returns perfect HTML
-type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string };
+type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string; hero?: string };
 const href = (o: SecOpts | undefined, raw: any, text: any) => esc(o?.link ? o.link(raw, text) : '#');
 // A CTA value may be a STRING or an OBJECT ({text/label, link/href}). Normalize to {text, link} or null
 // so a button is NEVER `esc(object)` ("[object Object]") and never renders with an empty label.
@@ -121,11 +148,30 @@ export function ctaParts(raw: any, sectionLink?: any): { text: string; link: any
 // Render a button only when there's real label text; resolve its destination via the renderer's link fn.
 const btn = (o: SecOpts | undefined, raw: any, sectionLink?: any) => { const c = ctaParts(raw, sectionLink); return c ? `<a class="btn" href="${href(o, c.link, c.text)}">${esc(c.text)}</a>` : ''; };
 export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
-  hero: (s, o) => `<header class="hero ${s.image ? 'on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
-    <div class="container"><div class="hero-inner">
-      ${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h1>${esc(s.headline)}</h1>
-      ${s.lead ? `<p class="lead">${esc(s.lead)}</p>` : ''}${btn(o, s.cta, s.link)}
-    </div></div></header>`,
+  // HERO — one of four STRUCTURALLY different treatments (chosen per project by src/layout.ts, passed
+  // in o.hero). Each is hand-built + WCAG-safe: image uses white-on-overlay; split/center/editorial use
+  // the contrast-guaranteed --text on --bg. Copy shape (eyebrow/headline/lead/cta) is identical across
+  // variants, so the composer never has to know which one renders.
+  hero: (s, o) => {
+    const v: string = (o && o.hero) || 'image';
+    const eyebrow = s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : '';
+    const lead = s.lead ? `<p class="lead">${esc(s.lead)}</p>` : '';
+    const cta = btn(o, s.cta, s.link);
+    const copy = `${eyebrow}<h1>${esc(s.headline)}</h1>${lead}${cta}`;
+    if (v === 'split') return `<header class="hero hero-split"><div class="container"><div class="hero-split-grid">
+      <div class="hero-copy">${copy}</div>
+      <div class="hero-media">${s.image ? q(s.image, 'hero-photo') : ''}</div>
+    </div></div></header>`;
+    if (v === 'center') return `<header class="hero hero-center"><div class="container"><div class="hero-inner">${copy}</div></div></header>`;
+    if (v === 'editorial') return `<header class="hero hero-editorial"><div class="container">
+      <div class="hero-head">${eyebrow}<h1>${esc(s.headline)}</h1></div>
+      ${s.image ? `<div class="hero-wide">${q(s.image, 'hero-photo')}</div>` : ''}
+      <div class="hero-foot">${lead}${cta}</div>
+    </div></header>`;
+    // image (default): full-bleed photo + overlay
+    return `<header class="hero on-image">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
+      <div class="container"><div class="hero-inner">${copy}</div></div></header>`;
+  },
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>

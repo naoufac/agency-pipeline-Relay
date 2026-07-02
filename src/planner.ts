@@ -3,6 +3,7 @@ import { llm } from './agents.ts';
 import { themeFor, type ThemeName } from './themes.ts';
 import { archetypeFor, needsData, type Archetype } from './archetype.ts';
 import { shapeFor, type Shape } from './landing.ts';
+import { chooseLayout } from './layout.ts';
 
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
@@ -147,7 +148,8 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   // built on Directus (the proven adapter: real e2e proof + servedFromCms gate). The old per-brief
   // 5-CMS selector is deleted; `npm run cms:check` asserts this invariant holds.
   const cms = 'directus';
-  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, cms };
+  const layout = chooseLayout(theme, archetype, brief);   // STRUCTURE, brief-rooted, once per project
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
@@ -167,6 +169,7 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
   const params: any = {
     planner: usedLLM ? 'llm' : 'template', pages, archetype, shape, cms: 'directus',
     theme: prev.theme || theme, brand: prev.brand,           // identity continuity across rebuilds
+    layout: prev.layout || chooseLayout(prev.theme || theme, archetype, brief),  // keep the site's structure across rebuilds
     rebuilds: Number(prev.rebuilds || 0) + 1,
   };
   await pool.query('delete from tasks where project_id=$1', [projectId]);

@@ -2,6 +2,7 @@
 // No LLM touches structure/CSS/nav/contrast here. spec = { brand:{name,cta,tokens}, sections:[{type,...}] }.
 import { DS_CSS, navBar, footer, SECTIONS, esc, ctaParts } from './components.ts';
 import { themeFor, themeFonts, themeVars } from './themes.ts';
+import { DEFAULT_LAYOUT, isHeroVariant, type Layout } from './layout.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -11,7 +12,10 @@ const hex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16
 function mix(a: string, b: string, t: number) { const x = rgb(a), y = rgb(b); return '#' + [0, 1, 2].map(i => hex(x[i] * (1 - t) + y[i] * t)).join(''); }
 const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg) ? '#ffffff' : '#0b1220';   // readable text for a bg
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; forms?: Record<string, any[]>; primaryTable?: string }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string }): string {
+  // LAYOUT (structure) is chosen once per project (params.layout) and passed here; a stray value falls
+  // back to the safe default. Independent of THEME (tokens) — together they make sites distinct.
+  const lay: Layout = (ctx.layout && isHeroVariant(ctx.layout.hero)) ? ctx.layout : DEFAULT_LAYOUT;
   const t = (spec && spec.brand && spec.brand.tokens) || {};
   const bg = isHex(t.bg) ? t.bg.trim() : '#ffffff';
   const primary = isHex(t.primary) ? t.primary.trim() : '#4f46e5';
@@ -70,14 +74,14 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   const secTypes = new Set(((spec && spec.sections) || []).map((s: any) => String(s && s.type)));
   const onPageAnchor = secTypes.has('form') ? '#contact-form' : secTypes.has('offer') ? '#offer' : secTypes.has('cta') ? '#get-started' : '#';
   const link = (raw: any, text: any) => resolveCta(raw, text);
-  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable })).join('\n');
+  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable, hero: lay.hero })).join('\n');
   const html = `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <style>${vars}
 ${DS_CSS}</style></head>
-<body class="t-${theme}">
-${(() => { const nc = ctaParts(spec && spec.brand && spec.brand.cta, spec && spec.brand && spec.brand.ctaLink); return navBar(brand, ctx.pages, ctx.slug, nc?.text, nc ? resolveCta(nc.link, nc.text) : '#'); })()}
+<body class="t-${theme} l-hero-${lay.hero}${lay.band ? ' l-band' : ''}">
+${(() => { const nc = ctaParts(spec && spec.brand && spec.brand.cta, spec && spec.brand && spec.brand.ctaLink); return navBar(brand, ctx.pages, ctx.slug, nc?.text, nc ? resolveCta(nc.link, nc.text) : '#', lay.nav); })()}
 <main>
 ${sections}
 </main>
