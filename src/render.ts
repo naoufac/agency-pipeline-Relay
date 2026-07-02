@@ -45,12 +45,30 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     [/pric|plan|package/, /pric|plan|package/],
     [/service|what we|feature/, /service|feature|what-we/],
   ];
+  // an "action" page is the natural destination for a CTA that has no exact match — a real place to
+  // DO something, never silently "home". Order = intent priority.
+  const actionPage = findPage(/contact|touch|reach|enquir|quote/) || findPage(/book|reserv|appointment|schedul/)
+    || findPage(/order|checkout|cart|buy/) || findPage(/sign|join|start|register|apply|account/)
+    || findPage(/shop|store|product|catalog|menu/) || findPage(/pric|plan/);
   const resolveCta = (raw: any, text: any): string => {
-    if (raw) { const r = String(raw).replace(/\.html$/, ''); if (pgs.some((p: any) => p.slug === r)) return r + '.html'; }
-    const t = String(text || '').toLowerCase();
-    for (const [tr, sr] of CTA_GROUPS) if (tr.test(t)) { const p = findPage(sr); if (p) return p.slug + '.html'; }
-    return fallbackCta;
+    let target: string | null = null;
+    if (raw) { const r = String(raw).replace(/\.html$/, ''); if (pgs.some((p: any) => p.slug === r)) target = r; }
+    if (!target) { const t = String(text || '').toLowerCase(); for (const [tr, sr] of CTA_GROUPS) if (tr.test(t)) { const p = findPage(sr); if (p) { target = p.slug; break; } } }
+    if (!target) target = (actionPage ? actionPage.slug : fallbackCta.replace(/\.html$/, ''));
+    // NEVER a circular button: a CTA that resolves to the page it's ON is the "every button reloads
+    // home" bug. Redirect to the best OTHER action page, else the first different page. On a genuine
+    // one-page site (landing) an on-page anchor to the final CTA/form is the only sensible target.
+    if (target === ctx.slug) {
+      const other = (actionPage && actionPage.slug !== ctx.slug ? actionPage : pgs.find((p: any) => p.slug !== ctx.slug));
+      if (other) target = other.slug;
+      else return onPageAnchor;   // single-page site: jump to the real conversion section, never a reload
+    }
+    return target + '.html';
   };
+  // single-page (landing) sites have no other page to link to — a CTA must anchor to the real
+  // conversion section that exists on THIS page: the form, else the offer, else the final CTA band.
+  const secTypes = new Set(((spec && spec.sections) || []).map((s: any) => String(s && s.type)));
+  const onPageAnchor = secTypes.has('form') ? '#contact-form' : secTypes.has('offer') ? '#offer' : secTypes.has('cta') ? '#get-started' : '#';
   const link = (raw: any, text: any) => resolveCta(raw, text);
   const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable })).join('\n');
   const html = `<!doctype html><html lang="en"><head><!--relay:rendered--><meta charset="utf-8">

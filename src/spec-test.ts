@@ -296,7 +296,7 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('landing render: logos names present', h.includes('Miami Herald') && h.includes('As seen in'));
   ok('landing render: offer core present', h.includes('The 30-day kickstart') && h.includes('30-day money-back guarantee') && h.includes('$299'));
   ok('landing render: no [object Object]', !h.includes('[object Object]'));
-  ok('landing render: offer CTA is a real link', /<a class="btn" href="[^"#]+">Start today<\/a>/.test(h));
+  ok('landing render: offer CTA anchors on-page (form/offer/cta), never an index reload', /<a class="btn" href="#(contact-form|offer|get-started)">Start today<\/a>/.test(h) && !/<a class="btn" href="index\.html"/.test(h));
 }
 
 
@@ -355,6 +355,27 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('M2: form name bound to real table', f.length >= 1 && f[0].table === 'orders');
   ok('M2: no extra injected form after binding', f.length === 1);
   ok('M2: binding recorded', r.repairs.some((x) => /bound to its real table/.test(x)));
+}
+
+
+// ---- CTA routing (the "every button reloads home" bug, 2026-07-02) ----
+{
+  const pages = [{ slug: 'index', title: 'Home' }, { slug: 'track', title: 'Track' }, { slug: 'pricing', title: 'Pricing' }, { slug: 'contact', title: 'Contact' }];
+  const spec = { brand: { name: 'X', tokens: { bg: '#fff', primary: '#111' } }, sections: [
+    { type: 'hero', headline: 'Track it', cta: 'Get Started Free' },
+    { type: 'cta', headline: 'Ready?', cta: 'Get Started Free' },
+    { type: 'features', items: [{ title: 'A', body: 'b' }] },
+  ] };
+  const home = renderPage(spec, { pages, slug: 'index', title: 'Home' });
+  const hrefs = [...home.matchAll(/<a class="btn[^"]*" href="([^"]+)"/g)].map(m => m[1]).filter(h => !h.startsWith('#') && h.endsWith('.html'));
+  ok('CTA: no button on index links back to index (circular)', !hrefs.includes('index.html'), JSON.stringify(hrefs));
+  ok('CTA: a "Get Started" button routes to a real action page', hrefs.some(h => /contact|pricing|track/.test(h)));
+  // explicit model link is honoured
+  const s2 = renderPage({ brand: { name: 'X', tokens: {} }, sections: [{ type: 'hero', headline: 'Hi', cta: 'See pricing', link: 'pricing' }] }, { pages, slug: 'index', title: 'Home' });
+  ok('CTA: explicit link:"pricing" wins', /<a class="btn[^"]*" href="pricing\.html"/.test(s2));
+  // single-page site: CTA falls to the in-page form anchor, never a reload
+  const s3 = renderPage({ brand: { name: 'X', tokens: {} }, sections: [{ type: 'hero', headline: 'Hi', cta: 'Buy now' }, { type: 'form', title: 'Order', table: '' }] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home' });
+  ok('CTA: one-page site → #contact-form anchor, not index reload', s3.includes('href="#contact-form"') || !/<a class="btn[^"]*" href="index\.html"/.test(s3));
 }
 
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);

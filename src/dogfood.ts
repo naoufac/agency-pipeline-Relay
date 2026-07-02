@@ -61,15 +61,29 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
           if (vp.name === 'desktop' && st.logo) siteLogos.add(st.logo);
         }
         const links: any[] = ((await page.evaluate(LINKS).catch(() => [])) as any[]) || [];
+        const btnTargets: string[] = [];   // this page's button destinations, for the circular/all-same checks
+        const self = pg.slug + '.html';
         for (const a of links) {
           const lt = String(a.text || '').toLowerCase().trim();
           if (a.btn) {
             nButtons++;
-            if (!a.text || lt === '[object object]' || lt === 'undefined' || lt === 'null') issues.push({ page: pg.slug, viewport: vp.name, kind: 'garbage-button', detail: `button has no real label (text="${a.text}", href="${a.href}")`, severity: 'high' });
-            if (!a.href || a.href === '#' || a.href === '') issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `CTA "${a.text}" goes nowhere (href="${a.href}")`, severity: 'high' });
+            const href = String(a.href || '');
+            if (!a.text || lt === '[object object]' || lt === 'undefined' || lt === 'null') issues.push({ page: pg.slug, viewport: vp.name, kind: 'garbage-button', detail: `button has no real label (text="${a.text}", href="${href}")`, severity: 'high' });
+            if (!href || href === '#' || href === '') issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `CTA "${a.text}" goes nowhere (href="${href}")`, severity: 'high' });
+            // CIRCULAR: a CTA that links to the very page it sits on just reloads — the "every button
+            // goes home" bug. (An in-page #anchor is fine; a bare self .html reload is not.)
+            else if (vp.name === 'desktop' && (href === self || href.split('#')[0] === self) && !href.startsWith('#')) {
+              issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `CTA "${a.text}" links to its own page (${href}) — it just reloads`, severity: 'high' });
+            }
+            if (vp.name === 'desktop' && href && !href.startsWith('#')) btnTargets.push(href.split('#')[0]);
           }
           nLinks++;
           if (vp.name === 'desktop' && /^[^#?:/][^#?:]*\.html(#.*)?$/.test(a.href)) targets.add(a.href.split('#')[0]);
+        }
+        // ALL-SAME: 3+ CTAs on a page that every point to the SAME destination = a broken resolver
+        // (what shipped the recolored-template sites where every button went to index.html).
+        if (vp.name === 'desktop' && btnTargets.length >= 3 && new Set(btnTargets).size === 1) {
+          issues.push({ page: pg.slug, viewport: vp.name, kind: 'dead-button', detail: `all ${btnTargets.length} buttons on this page point to the same place (${btnTargets[0]}) — CTAs aren't routing`, severity: 'high' });
         }
         if (vp.name === 'desktop') {
           await page.waitForFunction('(function(){var e=document.querySelector(".collection[data-table]");return !e||e.querySelector(".card")})()', { timeout: 5000 }).catch(() => {});

@@ -136,7 +136,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   </div></div></section>`,
   gallery: (s) => `<section class="section"><div class="container">${s.title ? `<h2 style="margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
     <div class="gallery">${(s.images || []).slice(0, 6).map((x: string) => q(x)).join('')}</div></div></section>`,
-  cta: (s, o) => `<section class="section"><div class="container"><div class="cta">
+  cta: (s, o) => `<section class="section" id="get-started"><div class="container"><div class="cta">
     <h2>${esc(s.headline)}</h2>${s.body ? `<p>${esc(s.body)}</p>` : ''}${btn(o, s.cta, s.link)}
   </div></div></section>`,
   // pricing — tiered plans (one may be featured)
@@ -171,7 +171,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     <div style="display:flex;flex-wrap:wrap;gap:1.6rem 2.6rem;justify-content:center;align-items:center;opacity:.78">${(s.items || []).slice(0, 8).map((n: any) => `<span style="font-weight:700;font-size:1.05rem">${esc(n)}</span>`).join('')}</div>
   </div></section>`,
   // offer — the conversion core of a landing page: deliverable + price anchor + risk reversal + ONE action
-  offer: (s, o) => `<section class="section"><div class="container" style="max-width:760px">
+  offer: (s, o) => `<section class="section" id="offer"><div class="container" style="max-width:760px">
     <div class="card" style="text-align:center;padding:2.8rem 2rem">
       ${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2>
       ${s.body ? `<p class="lead muted">${esc(s.body)}</p>` : ''}
