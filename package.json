@@ -6,8 +6,6 @@
   "description": "Autonomous agency pipeline: brief -> planner -> dependency DAG of AI calls, stage-by-stage, zero-trust verification, Supabase/Postgres board.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "demo": "set -a; . ./.env 2>/dev/null; set +a; tsx src/demo.ts",
-    "run": "set -a; . ./.env 2>/dev/null; set +a; tsx src/run.ts",
     "serve": "set -a; . ./.env 2>/dev/null; set +a; tsx src/server.ts",
     "worker": "set -a; . ./.env 2>/dev/null; set +a; tsx src/worker.ts",
     "kpi": "set -a; . ./.env 2>/dev/null; set +a; tsx src/kpi-cli.ts",
@@ -19,8 +17,7 @@
     "cms:build": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/finalize-cli.ts",
     "stress": "set -a; . ./.env 2>/dev/null; set +a; tsx _stress.ts",
     "eval": "set -a; . ./.env 2>/dev/null; set +a; tsx src/eval.ts",
-    "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
-    "mail:test": "set -a; . ./.env 2>/dev/null; set +a; tsx src/mail-cli.ts"
+    "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

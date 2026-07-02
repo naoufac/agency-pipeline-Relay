@@ -62,7 +62,7 @@ planner ──► board (Postgres) ──► runLoop: claim ready → run agent 
 
 A task is **ready** when all its upstream dependencies are `done`. Finishing a task fires the SQL `trg_unblock` trigger, which promotes any successor whose upstreams are now all done. The scheduler holds no graph logic — readiness is recomputed from the rows, so you can kill the server mid-run and the boot-resume picks up exactly where it left off.
 
-**The model decides, the system builds.** The build agent never writes HTML or CSS — it only *decides* structure, copy, and two brand colours, emitting a small JSON spec. A deterministic renderer (`src/render.ts`) then *builds* the page from hand-built, vetted components (`src/components.ts`): nav, spacing, fonts, and WCAG-safe contrast are correct by construction and can't drift. One engine serves a stack of layers — a multi-page **website**, an **editable CMS**, a **full-stack form-to-database** backend, and **visual QA** — and the brief decides which apply, with no discrimination between them.
+**The model decides, the system builds.** The build agent never writes HTML or CSS — it only *decides* structure, copy, and two brand colours, emitting a small JSON spec. A deterministic renderer (`src/render.ts`) then *builds* the page from hand-built, vetted components (`src/components.ts`): nav, spacing, fonts, and WCAG-safe contrast are correct by construction and can't drift. One engine serves a stack of layers — a multi-page **website served live from a real CMS (Directus)**, a **full-stack form-to-database** backend, and **visual + interaction QA** — and the brief decides which apply, with no discrimination between them.
 
 ## Repo layout
 
@@ -80,20 +80,20 @@ src/
   planner.ts         LLM planner: brief → {pages, tasks}; forces one render-verified build task per page
                      and one canonical WCAG-checked branding task; falls back to a template if the LLM is down
   runner.ts          runLoop: claim (SKIP LOCKED) + lease/reclaim, run the agent, render the spec via
-                     components, fill in real Pexels media, freeze the editable snapshot, verify, retry-with-feedback
+                     components, fill in real Pexels media, verify, retry-with-feedback; on completion re-serve through the CMS
   agents.ts          the agent contract: a department role prompt + context → one MiniMax call → text/JSON (build ⇒ a page spec)
   render.ts          the deterministic renderer: a JSON spec → perfect HTML, with the WCAG-safe palette derived from bg + primary
   components.ts      the design system: token-driven CSS, the section components (hero/features/split/gallery/cta/form),
                      and a CSS-only responsive hamburger nav that's correct by construction
   media.ts           processMedia: swaps the build's image search-terms for real, locally-served Pexels photos
-  cms.ts             the editable CMS: freeze each rendered page's snapshot + blocks; edits are pure string overlays
-                     (no LLM); republish runs the IDENTICAL render gate against a .tmp, atomic-renames on pass
+  cms/               CMS-native layer (ONE CMS: Directus — see GOAL.md): directus.ts adapter, gate.ts
+                     (served_from_cms mutation proof), finalize.ts, live.ts (pages served fresh from the CMS)
   qa.ts / vision.ts  visual QA: screenshot each page (mobile + desktop), a vision model scores it, upsert qa_reviews
   verify.ts          the zero-trust gates: nonempty · contains · min:N · json[:keys] · wcag · sql_applies · site_renders
   fonts.ts           the base64 @font-face blocks inlined by the design system (components.ts)
   kpi.ts             computeKpi: honest KPIs (real checks only; deadlock ⇒ 'blocked', never 'running')
   db.ts              pg Pool + small DB helpers
-  demo.ts / run.ts / kpi-cli.ts   CLI entry points (demo proves crash + restart resumability)
+  kpi-cli.ts         CLI: rigor/completion KPIs from real rows
 
 web/                 the dashboard: index.html (nav), app.js (hash router #/ , #/p/:id, #/roadmap), styles.css
 tools/               the offline SVG diagram renderers (render-dag.mjs, render-mindmap.mjs)

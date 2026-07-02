@@ -29,41 +29,43 @@ Where we've been, where we are, where we're going. See [`MISSION.md`](MISSION.md
 | 11 · Live per-project database | An app/store brief gets a **real, isolated Postgres schema** (`app_<hex>`, never `public`). The DB department designs a typed **data model**; a deterministic compiler (`src/schema.ts`) emits flawless DDL (serial PKs, FK constraints + indexes, `numeric` money, `timestamptz`); `app_db` provisions + verifies it; a `collection` section reads it back live. | ✅ | `appdb` |
 | 12 · Interaction QA (dogfood) | A real headless browser **uses** every finished site: measures header alignment + overflow, checks every CTA goes somewhere, **types into + submits** the form (asserts it persisted), confirms collections show live rows → `dogfood_reviews`, shown per project. Auto-runs on completion. | ✅ | `dogfood` |
 | 13 · Robust browser layer (stack review) | Killed spawn-per-call chromium + hand-rolled CDP-over-`ws` (the recurring "chromium didn't come up" breakage) → **ONE persistent Playwright browser** (`src/browser.ts`, Playwright's own Chromium, context-per-call, concurrency-gated) behind every browser path (dogfood/qa/theme:check). Removed the **redundant screenshot from the verify hot path** (`site_renders` is now static; pages are correct by construction) — bigger throughput/cost/fragility win. Runner split into an opt-in **worker process** (`src/worker.ts`, `RELAY_BUILD=0` flag) for horizontal build scale. | ✅ | `4cc1d3e` |
-| 14 · Web-grounded intelligence | **Wired:** planner + research/strategy call a MiniMax reasoning model via OpenRouter with the server-side `web` plugin (keys set). **But no persisted record of a successful web-grounded run exists** (no `llm_calls` table) — wired, not proven. Downgraded from ✅ until a real run is logged. | 🟡 wired/unproven | `web-grounding` |
+| 14 · Web-grounded intelligence | Research/strategy departments call the model via OpenRouter with the server-side `web` plugin. **Proven:** 24 successful web-grounded runs persisted in `run_events` (`llm_call` events, `web:true ok:true`, 2026-06-28 → 2026-07-02). | ✅ | `web-grounding` |
 
 ### Verification today (what "done" means — never the agent's word)
 `site_renders` (**static**: valid structural HTML, no external/placeholder assets, **no dead CTA / unwired form** — no browser; pages are correct by construction) · `app_db` (the project's isolated schema actually provisions + has tables) · `wcag` (text/bg ≥ 4.5:1) · `json` (structured output parses) · `sql_applies` (DDL runs) · `min:N` (length floor, honest — not counted as rigor). Plus the post-completion **dogfood** interaction pass (real Playwright browser). Rigor is reported honestly.
 
 ---
 
-## Where we're moving (forward roadmap)
+## Where we're moving (forward plan — owner priorities, 2026-07-02)
 
-### Next — User accounts
-Each operator signs in and owns their own projects + produced sites. The system is built to be multi-user; today it runs single-operator while the engine matures.
+**The product ladder: high-converting landing page → multi-page site → full-stack app with database → user accounts. Every rung produced by the same pipeline, verified by the same deterministic gates, zero humans.**
 
-### Scale-out 100 → 1000 users (see [`docs/STACK-REVIEW.md`](docs/STACK-REVIEW.md))
-The fresh-eyes stack review. **Done:** robust browser layer + screenshot removed from the hot path (Phase 13); the worker-split is **code-ready and opt-in** (`src/worker.ts`, `RELAY_BUILD=0`) — flip it when concurrent builds exceed ~a dozen. **Blocked on an infra decision / your accounts** (not unilaterally applicable, and not load-justified yet): artifacts → object storage (R2/S3, `src/storage.ts` seam), managed Postgres + pgbouncer off the shared box, a dedicated build host. STACK-REVIEW carries the exact steps; we apply them when load (or a box-loss durability requirement) earns it, per "don't optimise what shouldn't exist yet."
+### 1 · Conversion-grade landing pages (NOW)
+Today's output is *correct*; the next bar is *converting*. One focused sales page per brief when
+that's what the brief needs: proof-first section ordering (pain → promise → proof → offer → CTA),
+sharper CRO copy patterns in the copywriter role, social-proof/urgency/offer components joining the
+vetted library, and a `landing` shape in the planner (single page, no thin filler pages).
+Done = a landing brief ships one coherent sales page that passes every existing gate.
 
-### Deeper database (the technical-perfection track)
-The schema compiler is live; next: **typed forms generated from the model** (a form that writes a real row, fields + validation derived from the entity), relation-aware collections (show a product's category name via its FK), an **auth** department (accounts on the project's own schema), and safe **migrations** when a rebuild changes the model (today a populated schema is preserved, not altered).
+### 2 · Full-stack depth (the database track)
+The schema compiler + isolated per-project schemas are live (all app/store projects get one).
+Next: **typed forms generated from the data model** (fields + validation derived from the entity),
+relation-aware collections (a product shows its category via the FK), and **safe migrations** when
+a rebuild changes the model (today a populated schema is preserved, not altered).
 
-### Wider component library (in progress)
-Shipped: **pricing · testimonials · FAQ · stats** (+ hero/features/split/gallery/cta/form/feed/collection). Next: team, menu, logos, and per-section variants — so more briefs map cleanly onto vetted parts; the puzzle grows, the renderer stays deterministic.
+### 3 · User accounts
+Operators sign in and own their projects + produced sites: auth (accounts on Relay's own schema),
+per-user project scoping in the API + board, transactional email (re-add a mailer on the existing
+naples.agency SMTP/DNS, which stays configured — the old unused module was deleted 2026-07-02).
 
-### Trustworthy review ✅
-The interaction reviewer (`dogfood`) drives a real browser (Playwright): every link load-tested, every CTA labelled + targeted, the form typed + submitted + verified, layout measured — auto-run on completion, verdict shown on each project card. Now **accurate**: collections are judged against the data API (rows-in-DB-but-0-rendered = a real render bug, not "empty"), forms by DB persistence (truth), not message timing. A `theme:check` gate also parses every emitted inline `<script>` as JS, so a broken client script can never ship.
-
-### Self-correcting loop ✅
-The reviewer's verdict is now **load-bearing**. On a content-level high finding, `dogfood` re-opens the affected page build(s) with the findings injected as feedback (reusing retry-with-feedback), rebuilds, and re-reviews on completion — capped at one round, after which the verdict stands and the board flags it (so a *persistent* failure surfaces a system bug to a developer, not an infinite loop). Closes "autonomous + zero-trust + no human in the loop" for content defects. (`repairPlan` is a pure, unit-tested function; the full live exercise triggers on the next real content-level failure.)
-
-### NEXT (architecture) — Validated build-spec contract
-Robustness against malformed LLM specs is currently scattered as defensive patches in the renderer (CTA object→text, collection table fallback, …). Centralize it: one deterministic `validate/normalize` layer for the build spec (mirroring `planner.validate()`) that coerces/repairs/rejects at the boundary — making the `[object Object]`/wrong-table class structurally impossible, not patched.
-
-### Stack router (when it earns its keep)
-The archetype classifier is the first cut. An SSG (e.g. Eleventy) only where Markdown-owned layout (blog/docs) is genuinely better; the component renderer stays the default.
+### 4 · Architecture guard-rails (rolling)
+Validated build-spec contract: one deterministic `validate/normalize` layer at the spec boundary
+(mirroring `planner.validate()`), replacing scattered defensive patches in the renderer. Worker
+split (`src/worker.ts`, `RELAY_BUILD=0`) stays code-ready, flipped on when concurrent builds earn it.
 
 ### Deferred (only when a brief truly needs it)
-Astro · payments/store · app-shell. (A real headless CMS is **no longer deferred** — it is now the **core** direction: see "The one goal" at the top and `GOAL.md`.)
+Payments/store checkout · SSG for Markdown-owned layouts · object storage for artifacts
+(`docs/STACK-REVIEW.md` carries the exact scale-out steps; applied when load earns them).
 
 ---
 

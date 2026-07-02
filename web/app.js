@@ -45,7 +45,7 @@ function briefBar(){
   return `<section class="hero compact">
     <span class="eyebrow">● live · autonomous</span>
     <h1>What should we build?</h1>
-    <p class="lead">Describe it in a sentence. Relay builds a real, branded CMS website you can log into and edit.</p>
+    <p class="lead">Describe it in a sentence. Relay builds a real, branded website — served live from its CMS, verified by a real browser.</p>
     <div class="brief-bar">
       <input id="brief" class="input" placeholder='Describe the site you want — e.g. "a one-page site explaining our pricing"' />
       <button id="go" class="btn">Build my site →</button>
@@ -388,18 +388,19 @@ function roadmap(){
     { n:'02', t:'Honest quality gate', s:'done', d:'A verifier that refuses broken/external assets and dead links; KPIs that read “blocked” when a run is stuck instead of green; retry-with-feedback. The gate is real — not a guarantee of taste.' },
     { n:'03', t:'Generic + multi-page', s:'done', d:'An LLM planner that writes a bespoke task graph per brief, producing real multi-page sites with a shared navigation.' },
     { n:'04', t:'Real media', s:'done', d:'The build names the photos each section needs; Relay pulls real licensed Pexels images, downloads them into the site and serves them locally — gate-safe, never a broken link.' },
-    { n:'05', t:'Production email', s:'done', d:'Production email from noreply@naples.agency — authenticated SMTP, SPF/DKIM/DMARC aligned (inbox-grade), wired in as a reusable mailer. Verified: live delivery to a real inbox.' },
+    { n:'05', t:'Production email (infra)', s:'done', d:'noreply@naples.agency — authenticated SMTP, SPF/DKIM/DMARC aligned (inbox-grade), verified by live delivery to a real inbox. The unused in-app mailer module was removed in the 2026-07-02 cleanup; the DNS/SMTP config remains and email returns with user accounts.' },
     { n:'06', t:'Built to last', s:'done', d:'Relay and its own dedicated Cloudflare tunnel run under systemd (Restart=always, enabled); Postgres runs in Docker (restart=unless-stopped). DB backups every 6h (pg_dump, 14 kept) + an uptime check every 5 min with Telegram alerts — all real cron jobs. Survives crash/reboot.' },
     { n:'07', t:'Visual self-QA', s:'done', d:'Relay screenshots every page (phone + desktop) and a vision model reads them for real problems, scoring each and surfacing it in a QA tab. Runs automatically on every build.' },
     { n:'08', t:'Deterministic engine', s:'done', d:'The build no longer guesses HTML — vetted components + a renderer compose every page from a structured spec, so navigation, CSS, fonts, spacing and contrast cannot be wrong. Replaces the old LLM-Tailwind “excellence” approach.' },
     { n:'09', t:'Rooted identity', s:'done', d:'The brief is classified into one of five design languages (editorial, modern, warm, bold, minimal); the renderer expands it into typography, rhythm and shape. The chosen language is applied consistently to every page of a site — verified identical across pages on the live build, not re-rolled per page.' },
-    { n:'10', t:'Full-stack + database', s:'progress', d:'Mechanism live but not yet the default path: an app/store brief can get an isolated Postgres schema compiled from a typed data model (keys, relations, indexes), read back on the page. Exercised on 1 of 4 projects so far — real, still maturing toward every applicable brief.' },
+    { n:'10', t:'Full-stack + database', s:'done', d:'An app/store brief gets an isolated Postgres schema compiled from a typed data model (keys, relations, indexes), seeded and read back on the page. Injected automatically whenever the brief needs data — exercised on every applicable project, each with a live provisioned schema.' },
     { n:'11', t:'Interaction QA', s:'done', d:'A real browser then uses every finished site — clicks every button, types into and submits the form, checks the data came through, measures the layout on phone + desktop. Verification by interaction, not just a screenshot. The verdict shows on each project.' },
     { n:'12', t:'CMS-native generation (the core)', s:'done', d:'Every generated site is built on ONE real headless CMS — Directus — with content living in and served live from the CMS, proven by a zero-trust gate (a sentinel written through the CMS must surface in the re-served HTML). The earlier 5-CMS ambition and the parallel WordPress generator are retired: one pipeline, one CMS, every brief. See GOAL.md.' },
     { n:'13', t:'Robust browser layer', s:'done', d:'Killed spawn-per-call chromium + hand-rolled CDP-over-ws (the source of recurring "chromium didn\'t come up" breakage) → ONE persistent Playwright browser (src/browser.ts, Playwright\'s own Chromium, context-per-call, concurrency-gated) behind every browser path. Removed the redundant screenshot from the verify hot path (site_renders is now static; pages are correct by construction) — bigger throughput/cost/fragility win. Runner split into an opt-in worker process (src/worker.ts, RELAY_BUILD=0 flag) for horizontal build scale.' },
-    { n:'14', t:'Web-grounded intelligence', s:'progress', d:'Wired: the planner + research/strategy departments call a MiniMax reasoning model via OpenRouter with the server-side web-search plugin (keys are set). But there is no persisted record of a successful web-grounded run yet — so it is wired, not proven. Held at in-progress until a real run is logged.' },
-    { n:'15', t:'User accounts', s:'next', d:'Auth + multi-user, so people other than the developer can sign in and own their sites.' },
-    { n:'16', t:'Deeper database', s:'next', d:'Typed forms generated from the data model, relation-aware lists, an auth department, and safe migrations when a rebuild changes the model.' },
+    { n:'14', t:'Web-grounded intelligence', s:'done', d:'Research and strategy departments call the model via OpenRouter with the server-side web-search plugin — grounding briefs in live facts within the same call. Proven: dozens of successful web-grounded runs persisted in the event log (llm_call · web:true · ok:true).' },
+    { n:'15', t:'Conversion-grade landing pages', s:'next', d:'From correct to converting: proof-first section ordering (pain → promise → proof → offer → CTA), CRO copy patterns, social-proof and offer components, and a landing shape in the planner — one coherent sales page when that\'s what the brief needs.' },
+    { n:'16', t:'Deeper database', s:'next', d:'Typed forms generated from the data model, relation-aware lists, and safe migrations when a rebuild changes the model.' },
+    { n:'17', t:'User accounts', s:'next', d:'Auth + multi-user: sign in, own your projects and produced sites. Brings back transactional email on the existing naples.agency SMTP.' },
   ];
   const tag = s => s==='done' ? '<span class="rm-tag done">✓ Shipped</span>' : s==='progress' ? '<span class="rm-tag prog">● In progress</span>' : '<span class="rm-tag next">○ Planned</span>';
   const done = P.filter(p=>p.s==='done').length;
@@ -538,7 +539,6 @@ function docsPage(){
     { t:'DB backups', d:'pg_dump every 6h · 14 kept', s:'ok' },
     { t:'Uptime monitor', d:'5 min · Telegram alerts', s:'ok' },
     { t:'Real photography', d:'Pexels · downloaded + served locally', s:'ok' },
-    { t:'Production email', d:'SMTP · SPF/DKIM/DMARC aligned', s:'ok' },
     { t:'Visual QA', d:'vision model · mobile + desktop', s:'ok' },
   ];
   const verify = [

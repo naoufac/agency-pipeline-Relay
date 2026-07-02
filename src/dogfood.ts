@@ -129,8 +129,8 @@ export async function dogfoodSite(pool: pg.Pool, projectId: string, baseUrl?: st
       : `clean — one nav + one logo per page (no duplicates, no drift), ${checked.buttons} buttons across ${checked.pages} pages all labelled + every link target loads (${checked.linkTargets} checked), ${checked.forms} form(s) submit+persist, ${checked.collections} collection(s) live, headers aligned`;
     await pool.query(`create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())`).catch(() => {});
     await pool.query('insert into dogfood_reviews(project_id, passed, summary, issues, checked) values ($1,$2,$3,$4,$5)', [projectId, high === 0, summary, JSON.stringify(issues), JSON.stringify(checked)]);
-    // R2: also capture every HIGH-severity finding for the (inactive) evolver. Non-blocking via .catch
-    // so a logging insert never breaks the dogfood verdict. (Issues have no selector/screenshot here.)
+    // Persist every HIGH-severity finding to spec_findings (board visibility + future analysis).
+    // Non-blocking via .catch so a logging insert never breaks the dogfood verdict.
     for (const issue of (issues ?? [])) {
       if (issue && issue.severity === 'high') {
         await pool.query(

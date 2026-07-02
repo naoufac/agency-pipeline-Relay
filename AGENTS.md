@@ -10,6 +10,22 @@ you should work on the code.
 
 ---
 
+## 0. Current state (2026-07-02 — read before the map below)
+
+- **ONE pipeline, ONE CMS.** Every brief flows `POST /api/run` → plan → compose (one site model) →
+  deterministic render → verify → **Directus** finalize (served_from_cms mutation proof) → QA.
+  The CMS is **hardcoded** in the planner; `npm run cms:check` fails the build if a second CMS, a
+  selector, or a parallel build endpoint is reintroduced. The old 5-CMS goal, the per-brief
+  selector, and the WordPress/WooCommerce `/api/cms-run` generator are **deleted** (see `GOAL.md`).
+- **Deleted 2026-07-02 (do not resurrect):** `src/cms.ts` (regex text-overlay), `src/cms/select.ts`
+  + rotation, `src/cms/{wordpress,drupal,usecase,pending}*`, `src/mailer.ts`/`mail-cli.ts` (unused —
+  email returns with user accounts; the naples.agency SMTP/DNS config remains), `src/evolver.ts`,
+  and `src/demo.ts`/`src/run.ts` (dev CLIs that could DROP the live schema).
+- **Forward priority (owner, 2026-07-02):** high-converting landing pages → deeper full-stack
+  (typed forms, relations, migrations) → **user accounts**. See ROADMAP.md "Where we're moving".
+
+---
+
 ## 1. What Relay is (in one breath)
 
 A brief comes in → an LLM **planner** explodes it into a DAG of tasks → AI **department agents**
@@ -40,7 +56,7 @@ break. The essentials are also summarized in §7 below.
 |---|---|
 | `src/server.ts` | HTTP server on `0.0.0.0:8787`. Serves `web/` (static, mtime cache-busting), the JSON API (`/api/board`, `/api/projects`, `/api/kpi`, `/api/output`, `POST /api/run`), the produced sites under `/sites/<id>/*`, `/healthz`, and `/roadmap`→`/#/roadmap`. On boot it **resumes** every project that still has unfinished tasks (restart-safe). |
 | `src/planner.ts` | LLM planner: brief → `{pages, tasks}`. `validate()` is the spine: keeps 4–7 *thinking* tasks only, forces exactly one canonical `branding` task to `wcag`, content/copy → `json`, the rest → `min:280`, then appends **one render-verified build task per page** (`artifact=<slug>.html`, `verify=site_renders`) + a `qa` pass on Home. Stores `pages` in `projects.params`. Falls back to a small template plan if the LLM is unavailable. |
-| `src/runner.ts` | The whole scheduler (`runLoop`): `reclaim` (lease expiry → resurrect crashed tasks) → `reconcile` (promote ready via the `v_ready_tasks` view, a safety net) → `claim` (`FOR UPDATE SKIP LOCKED`) → `processTask`. `processTask` runs the agent, then for a build task parses its JSON **spec** (`firstSpec` — first brace-balanced object, rejected if <2 sections) → `renderPage` (deterministic vetted components) → `processMedia` (fills `<img data-q>` with real Pexels photos) → `cms.instrument` (stamp `data-edit` ids + freeze the snapshot) → write `cms.shipHtml(snapshot)` → verify. On project completion it fires `reviewSite` (visual QA, fire-and-forget). Retry-with-feedback: on a re-attempt it feeds the last failure reason back to the agent. |
+| `src/runner.ts` | The whole scheduler (`runLoop`): `reclaim` (lease expiry → resurrect crashed tasks) → `reconcile` (promote ready via the `v_ready_tasks` view, a safety net) → `claim` (`FOR UPDATE SKIP LOCKED`) → `processTask`. `processTask` runs the agent, then for a build task parses its JSON **spec** (`firstSpec` — first brace-balanced object, rejected if <2 sections) → `renderPage` (deterministic vetted components) → `processMedia` (fills `<img data-q>` with real Pexels photos) → write the artifact to disk → verify. On project completion it fires `cmsFinalize` (re-serve through Directus, gated by `served_from_cms`) and `reviewSite` (visual QA) — both fire-and-forget. Retry-with-feedback: on a re-attempt it feeds the last failure reason back to the agent. |
 | `src/verify.ts` | The verify rules — **the zero-trust gate.** `nonempty` · `contains:` · `min:N` (weak floors); `json` / `json:keys` · `wcag` (text/bg ≥ 4.5:1 AA) · `sql_applies` (DDL in a rolled-back tx) · `app_db` (provisions the project's **isolated** schema for real via `appdb`, asserts tables exist) · `site_renders` (**static, no browser**: structural HTML + no external/placeholder assets + **no dead CTA `href="#"` / no unwired form**; pages are composed from vetted components so contrast/layout are correct by construction — the board thumbnail is produced off the hot path by `qa.ts`). Exports `firstJson()` and `SITES`. |
 | `src/agents.ts` | An agent is *just one API call*: `Ctx {brief, upstream, feedback?, pages?, self?}` in → text/artifact out. `ROLE` holds one system prompt per department; `build` is a strict JSON **spec** contract (brand tokens + an ordered list of 3–6 sections) — it writes no HTML/CSS; a deterministic renderer turns the spec into the page. `content`/`branding` emit a single JSON object. Provider abstraction in `callLLM`: **OpenRouter preferred** (`OPENROUTER_API_KEY`, pinned to a MiniMax reasoning model `OPENROUTER_MODEL`=`minimax/minimax-m2.7`) with **server-side web search** (OpenRouter's `web` plugin) auto-enabled for the `research`/`strategy` departments and the planner — grounding them in live, cited facts within the SAME single call (downstream JSON agents inherit the facts through the DAG; the model's chain-of-thought returns in a separate `reasoning` field so `content` stays clean — no `<think>` leak). Falls back to **MiniMax-direct** (`MINIMAX_API_KEY`, no web), then deterministic **stubs** (no key) so the engine runs offline. `build` gets `max_tokens` 8000, web/reasoning roles 4000, others 3000. Exports `runAgent()` and the generic `llm(system, user, maxTokens, {web})` (used by the planner). |
 | `src/render.ts` | The **deterministic renderer**. `renderPage(spec, {pages, slug, title, projectId})` composes the full HTML from vetted components — no LLM touches structure/CSS/nav. It **derives the whole WCAG-safe palette** (text/muted/lines/on-primary/surface) from just `bg`+`primary` via luminance/contrast math, so legibility is guaranteed regardless of which 2 colours the model picked. Stamps the marker `<!--relay:rendered-->` in `<head>` and injects a small `relaySubmit()` script (forms POST to `/api/site/<id>/submit`). |
@@ -49,9 +65,7 @@ break. The essentials are also summarized in §7 below.
 | `src/archetype.ts` | **Archetype routing (roadmap 10).** `classifyArchetype(brief)` → `site` / `app` / `store` (closed set, `archetypeFor` validates an LLM value); `needsData()` ⇒ app/store get a real, `app_db`-verified database department, injected by the planner if missing. |
 | `src/fonts.ts` | Generated. The base64 `@font-face` WOFF2 blob (`FONT_FACES`) that the design system (`components.ts`, via `DS_CSS`) inlines (Inter / Space Grotesk / Fraunces). Large; do not hand-edit. |
 | `src/media.ts` | **Real media (roadmap 06).** The build agent emits `<img data-q="search terms">`; `processMedia` pulls a real licensed photo from **Pexels**, downloads it into `sites/<id>/assets/`, and rewrites the tag to a **local** `src` — so it renders in the `file://` gate AND passes the "no external asset" check. Existing photos only, never generation. No `PEXELS_API_KEY` → placeholders dropped (text-only site). |
-| `src/mailer.ts` | **Production email (roadmap 07).** `sendMail` / `verifyMailer` over authenticated SMTP (`nodemailer`) to the naples.agency mail server — SPF/DKIM/DMARC aligned, inbox-grade. Config from `SMTP_*` env (`/root/secrets/relay-smtp.env`, also the gitignored `.env`). |
-| `src/mail-cli.ts` | `npm run mail:test -- <to@addr>` — verify the SMTP connection + auth, then send a production test. |
-| `src/cms.ts` | **Editable CMS (roadmap 08).** Each build freezes the deterministically-rendered page (post-media) — instrumented with stable `data-edit` ids by `instrument()` — into `page_snapshots`, and its text leaves into `page_blocks`. Editing is a PURE string overlay on that frozen snapshot (`applyOverlay`, no LLM → design can't drift). `republishPage()` overlays drafts+dirty edits, runs the shared `shipHtml`, writes `<slug>.html.tmp`, runs the IDENTICAL `site_renders` gate, and atomically renames over the live file ONLY on pass. `shipHtml` (now just strips the edit ids — the rendered page is already complete) is the shared build tail so build & republish never diverge. v1 = text; photos stay byte-identical. |
+| `src/cms/` | **CMS-native layer (ONE CMS: Directus — GOAL.md).** ONE shared Directus instance (`DIRECTUS_URL`/`DIRECTUS_TOKEN`) backed by the existing Postgres; per-project isolation via `project_id` row filtering in shared collections. `types.ts` (CmsTarget contract) · `directus.ts` (provision + content sync + buildAndServe from CMS reads) · `gate.ts` (`served_from_cms` mutation proof) · `finalize.ts` (re-serve a finished site through the CMS, guarded) · `live.ts` (serve pages fresh from the CMS per request) · `check.ts` (`npm run cms:check`, the one-CMS invariant) · `prove-directus.ts` (real e2e proof). Replaces the deleted inline text-editor. |
 | `src/schema.ts` | **Database perfection (roadmap 11) — the schema compiler.** `parseModel()` reads the DB department's typed JSON **data model** (entities, fields, relations); `compile()` emits flawless Postgres DDL: serial PK + `created_at timestamptz default now()` on every table, `money → numeric(12,2)`, `ref:<entity> → real FK + index`, required/unique/defaults, dependency-ordered (cycles demoted). The DB analog of the page renderer — the model says *what*, the compiler configures *how*. |
 | `src/appdb.ts` | **Live per-project database (roadmap 11).** Each project's tables live in their **own** schema `app_<hex>`, NEVER `public` (`schemaName` throws on anything else). `compileDDL` (model → perfect DDL, else confined raw SQL); `provision()` is idempotent + non-destructive (preserves data on rebuild), `statement_timeout`-bounded; `readRows`/`insertRow` validate identifiers against the schema's own catalog + parameterize + strip sensitive columns; `describeSchema()` introspects it (the system **knows** the DB). |
 | `src/kpi.ts` | `computeKpi`: the one source of truth for KPIs (API + CLI). **Honest by construction**: a deadlocked project reports `status: 'blocked'`, not `'running'`; "verification rigor" counts **only** real checks (`sql_applies` / `app_db` / `site_renders` / `wcag` / `json*`), never the weak floors. |
@@ -59,8 +73,6 @@ break. The essentials are also summarized in §7 below.
 | `src/dogfood.ts` | **Interaction QA (roadmap 12) — the human-experience reviewer.** Drives the shared **Playwright** browser (`page.goto(networkidle)` + `page.evaluate` probes): visits every page at desktop + mobile, measures header alignment + overflow, checks every CTA goes somewhere, **types into + submits** the form (asserts the confirmation AND that the row persisted, then deletes its own QA row), confirms collections render live rows (judged against the data API — rows-in-DB-but-0-rendered = a real bug). `repairPlan()` (pure) re-opens affected page builds with the findings as feedback (capped 1 round). `dogfoodSite()` auto-runs on completion → `dogfood_reviews`; `npm run dogfood -- <id>`. |
 | `src/qa.ts` | **Visual QA + board thumbnail.** `reviewSite()` screenshots the **served http url** (so live collections render) mobile + desktop via the shared browser, ALWAYS writes the board `preview.png` first, then (if a vision key is set) scores issues → `qa_reviews`. |
 | `src/db.ts` | The `pg` Pool + helpers: `makePool`, `ensureDatabase` (create a scratch DB), `applySchema` (**guarded**: refuses to drop a populated board unless `ALLOW_DB_RESET=1`), `ev`, `counts`, `board`. `DATABASE_URL` resolved lazily; defaults to local docker Postgres `:5439`. |
-| `src/run.ts` | CLI entrypoint: `npm run run -- "your brief"` — plan + run a brief to completion, print the board. (Re-applies the schema unless `RESET=0`.) |
-| `src/demo.ts` | The end-to-end **proof**: plan → run 3 steps → simulate a crash → restart → finish, then assert against the DB (all tasks `done`, the unblock trigger fired, the database task produced real SQL). Exits non-zero on any failure. This is your "is the engine still honest" test. |
 | `src/kpi-cli.ts` | `npm run kpi -- [projectId]` — the same numbers as `/api/kpi`, in the terminal. |
 | `src/worker.ts` | **Standalone build worker (stack review #7), opt-in.** Polls Postgres for projects with unfinished tasks and runs `runLoop` with a unique `runnerId` (`worker-<pid>`); safe to run many alongside the API (`SKIP LOCKED` + leases). To flip the split on: set `RELAY_BUILD=0` on `relay.service` (web then only PLANS, never builds in-process) and start `relay-worker.service` / `npm run worker`. **Default is unchanged** — the web server still builds; the worker is extra capacity until you flip it. |
 
@@ -128,7 +140,7 @@ honest. Breaking one is a regression even if everything still "looks" green.
 ## 4. How to extend safely
 
 General rule: make the smallest change that adds the capability **plus its deterministic check**,
-then prove it with `npm run demo` and a real run. Don't gold-plate.
+then prove it with the deterministic checks (`npm run build` · `spec:check` · `cms:check` · `theme:check`) and a real brief through the running server. Don't gold-plate.
 
 ### Add a new verify rule
 1. Add a branch in `verify(pool, task, content)` in `src/verify.ts`. It must do real work
@@ -183,10 +195,10 @@ then prove it with `npm run demo` and a real run. Don't gold-plate.
 
 ## 5. Known gotchas (these have bitten before)
 
-- **NEVER run `npm run demo` / `npm run run` against the live board — they DROP the schema.** Both
-  reset the DB to prove crash/restart, and the default `DATABASE_URL` is the live `agency` board. They
-  now **default to an isolated `agency_test` DB** and `db.ts` `applySchema()` **refuses** to drop a DB
-  whose `projects` table is non-empty unless `ALLOW_DB_RESET=1`. Do **not** set `ALLOW_DB_RESET=1` just
+- **Never reset the live schema.** `src/demo.ts`/`src/run.ts` (dev CLIs that re-applied
+  `db/schema.sql`, which opens with `DROP TABLE … CASCADE`) were **deleted 2026-07-02** for exactly
+  this foot-gun; `db.ts` `applySchema()` still **refuses** to drop a DB whose `projects` table is
+  non-empty unless `ALLOW_DB_RESET=1`. Do **not** set `ALLOW_DB_RESET=1` just
   to make a test/run pass — that is exactly how a live board got wiped once (recovered from
   `/root/backups/relay-db`). To exercise a real board, set `DATABASE_URL` explicitly **and** `RESET=0`
   (append, never wipe). Production briefs go through `POST /api/run` in `server.ts`, which never resets.
@@ -222,7 +234,7 @@ then prove it with `npm run demo` and a real run. Don't gold-plate.
 - **`max_attempts` is 3.** A task retries with feedback up to 3 times, then goes `failed`. A
   permanently-failing verify rule will burn 3 LLM calls per task — make new rules deterministic and
   fast.
-- **Stub mode is real mode for tests.** With no provider key (`OPENROUTER_API_KEY` or `MINIMAX_API_KEY`), `npm run demo`/`run` use
+- **Stub mode is real mode for tests.** With no provider key (`OPENROUTER_API_KEY` or `MINIMAX_API_KEY`), the pipeline uses
   deterministic stubs. That's how the proof stays reproducible offline. Don't write code that assumes
   a live key is present.
 - **`fonts.ts` is generated and huge.** Don't hand-edit it. Regenerate from `assets/*.woff2` if fonts
@@ -245,12 +257,12 @@ npm install                      # that's it after clone — no binary to vendor
 # 2. typecheck — a real check, not a vibe
 npm run build
 
-# 3. THE proof: plan -> run 3 steps -> crash -> restart -> finish, with DB assertions.
-#    Exits non-zero if any task isn't verified done, or the unblock trigger never fired.
-npm run demo
+# 3. THE deterministic checks — every one must pass
+npm run spec:check && npm run cms:check && npm run theme:check
 
-# 4. run a real brief end-to-end and confirm a site exists on disk
-npm run run -- "a coffee roastery in Lisbon"
+# 4. run a real brief end-to-end through the RUNNING server (never reset the live DB)
+curl -s -X POST localhost:8787/api/run -H 'content-type: application/json' \
+  -d '{"brief":"a coffee roastery in Lisbon"}'
 ls sites/*/index.html          # the artifact must physically exist
 npm run kpi                    # rigor/completion from real rows, honest by construction
 ```
@@ -267,7 +279,7 @@ curl -s localhost:8787/api/kpi | head
 ```
 
 What "real" means, concretely:
-- **Engine honest** → `npm run demo` exits 0 (all tasks `done`, trigger fired, DB-task SQL applied).
+- **Engine honest** → `spec:check`/`cms:check`/`theme:check` exit 0 and a real brief reaches `done` with `params.cms_built='directus'` (the served_from_cms gate passed).
 - **Site shipped** → `sites/<id>/index.html` exists, > 400 bytes, passes `site_renders` (non-blank
   chromium shot, structural HTML, zero external/placeholder assets).
 - **Dashboard honest** → a deadlocked project shows `blocked`; rigor counts only real checks.
