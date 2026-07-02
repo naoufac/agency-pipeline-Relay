@@ -109,14 +109,45 @@ try {
   const mal = (await pool.query(`select status from "${schema}"."bookings" where customer_name='Mallory'`)).rows[0];
   ok('a crafted public POST cannot set status', mal && mal.status !== 'confirmed', String(mal?.status));
 
-  // ---- site_model gate: a facade page on a data archetype is REJECTED ----
+  // ---- FS1: the receipt loop, end to end on the real scratch schema ----
   const mk = (slugs: string[]) => ({
     archetype: 'app', shape: 'multi', theme: 'warm',
+    brand: { name: 'Chop', tokens: { bg: '#ffffff', primary: '#7a1f1f' } },
     pages: slugs.map(s => ({ slug: s, title: s === 'index' ? 'Home' : s[0].toUpperCase() + s.slice(1) })),
     site: { pages: slugs.map(s => ({ slug: s, title: s, sections: [
       { type: 'hero', headline: 'Fresh fades, zero waiting' },
       s === 'book' ? { type: 'form', table: 'bookings', form: 'bookings' } : { type: 'features', items: [{ title: 'A', body: 'b' }] }] })) } });
-  await pool.query(`insert into projects(id, brief, status, params) values ($1,'app gate scratch','done',$2)`, [id, JSON.stringify(mk(['index', 'book', 'dashboard']))]);
+  await pool.query(`insert into projects(id, brief, status, params) values ($1,'app gate scratch','done',$2)`, [id, JSON.stringify(mk(['index', 'book']))]);
+{
+  const ins = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Rex Receipt', email: 'rex@example.com' });
+  ok('insert returns the generated receipt token', ins.ok === true && typeof ins.ref === 'string' && ins.ref.length === 32, JSON.stringify(ins));
+  const scoped = await appdb.readScoped(pool, id, 'bookings', 'ref_token', ins.ref!);
+  ok('readScoped finds the row by its token', scoped.length === 1 && scoped[0].customer_name === 'Rex Receipt', JSON.stringify(scoped));
+  ok('the token itself is stripped from the read (a secret)', !('ref_token' in (scoped[0] || {})));
+  ok('a wrong token finds nothing', (await appdb.readScoped(pool, id, 'bookings', 'ref_token', '0'.repeat(32))).length === 0);
+  ok('readScoped refuses email scoping on a private table (no enumeration)', (await appdb.readScoped(pool, id, 'bookings', 'email', 'rex@example.com')).length === 0);
+  const hit = await appdb.findByToken(pool, id, ins.ref!);
+  ok('findByToken resolves the table from just the code', !!hit && hit.table === 'bookings');
+  ok('receiptLinksByEmail lists the mailed links (server-internal only)', (await appdb.receiptLinksByEmail(pool, id, 'REX@example.com')).some(l => l.ref === ins.ref));
+  ok('the public read API still hides the whole table', (await appdb.readRows(pool, id, 'bookings')).length === 0);
+  const { renderLiveReceipt, renderLiveFind } = await import('./cms/live.ts');
+  const lr = await renderLiveReceipt(pool, id, 'bookings', ins.ref!);
+  ok('receipt page renders the record + code + one nav chrome', !!lr && lr.includes('Rex Receipt') && lr.includes(ins.ref!) && (lr!.match(/class="nav-brand"/g) || []).length === 1, lr ? 'content' : 'null');
+  ok('receipt page answers null for a wrong token', (await renderLiveReceipt(pool, id, 'bookings', '0'.repeat(32))) === null);
+  const lf = await renderLiveFind(pool, id);
+  ok('find page renders paste-code + email-me forms', !!lf && lf.includes('relayFindCode') && lf.includes('relayFindMail'));
+  // migration: a pre-receipt table gains the token SAFELY (nullable, no '' backfill, unique-when-present)
+  await pool.query(`alter table "${schema}"."bookings" drop column ref_token`);
+  await pool.query(`insert into "${schema}"."bookings" (customer_name) values ('Old Row')`);
+  const mig = await appdb.migrate(pool, id, MODEL, await appdb.listTables(pool, id));
+  ok('migrate adds ref_token to a pre-receipt table', mig.applied.some((a: string) => /ref_token/.test(a)), JSON.stringify(mig.applied));
+  const oldRow = (await pool.query(`select ref_token from "${schema}"."bookings" where customer_name='Old Row'`)).rows[0];
+  ok("pre-existing rows stay null — never '' backfilled", !!oldRow && oldRow.ref_token === null, String(oldRow?.ref_token));
+  ok('new rows on the migrated table get tokens again', !!(await appdb.insertRow(pool, id, 'bookings', { customer_name: 'New Row' })).ref);
+}
+
+  // ---- site_model gate: a facade page on a data archetype is REJECTED ----
+  await pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify(mk(['index', 'book', 'dashboard']))]);
   const bad = await verify(pool, { verify: 'site_model', project_id: id }, '');
   ok('site_model REJECTS a facade page on an app', bad.ok === false && /cannot power/.test(bad.log), bad.log);
   await pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify(mk(['index', 'book']))]);

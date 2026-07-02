@@ -100,6 +100,11 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
   const resolved: Resolved = { order: [], cols: {}, createSql: {}, indexSql: {}, seedSql: {} };
   for (const name of order) {
     const e = ents.find(x => x.name === name)!; const list = cols.get(name)!;
+    // FS1 — every private (visitor-record) entity carries a nullable receipt token: generated
+    // server-side on insert, unique when present. Nullable by design — pre-receipt rows stay null
+    // (an '' default would collide on the unique index and make old rows "findable" by nothing).
+    if (PRIVATE_READ.test(name) && !list.some(c => c.name === 'ref_token'))
+      list.push({ name: 'ref_token', type: 'text', required: false, unique: false, def: undefined });
     const perTableIndexes: string[] = [];
     const lines = ['  id serial primary key'];
     for (const c of list) {
@@ -110,6 +115,7 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       if (c.def !== undefined && !c.ref) line += ' default ' + lit(c.def, c.type);
       if (c.ref && refOk) { line += ` references "${c.ref}"(id) on delete set null`; indexes.push(`create index "${name}_${c.name}_idx" on "${name}" ("${c.name}");`); perTableIndexes.push(indexes[indexes.length - 1]); }
       else if (c.ref) warnings.push(`${name}.${c.name}: FK to ${c.ref} demoted (cycle/forward-ref)`);
+      if (c.name === 'ref_token') { indexes.push(`create unique index "${name}_ref_token_uq" on "${name}" ("ref_token") where "ref_token" is not null;`); perTableIndexes.push(indexes[indexes.length - 1]); }
       lines.push(line);
     }
     lines.push('  created_at timestamptz not null default now()');

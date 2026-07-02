@@ -36,7 +36,7 @@ try {
   const p1 = await appdb.provision(pool, id, V1);
   ok('v1 provisions 2 tables', p1.tables.length === 2, JSON.stringify(p1.tables));
   ok('v1 not a migration', !p1.migration);
-  ok('v1 live row inserted', await appdb.insertRow(pool, id, 'products', { title: 'Croissant', price: 2.8, category_id: 2 }));
+  ok('v1 live row inserted', (await appdb.insertRow(pool, id, 'products', { title: 'Croissant', price: 2.8, category_id: 2 })).ok);
   const before = Number((await pool.query(`select count(*)::int n from "${schema}"."products"`)).rows[0].n);
   ok('v1 products has seeds + live row', before === 3, String(before));
 

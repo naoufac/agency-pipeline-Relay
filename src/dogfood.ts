@@ -256,7 +256,25 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       let after = await count();
       for (let k = 0; k < 8 && after <= before; k++) { await page.waitForTimeout(500); after = await count(); }
       if (after <= before) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-not-persisted', detail: table ? `"add" form did not create a row in "${table}"` : 'form submission did not reach the database', severity: 'high' });
-      else if (!(r as any)?.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirmation', detail: 'row saved, but the visitor saw no confirmation message', severity: 'low' });
+      else if (!(r as any)?.ok && !String(page.url()).includes('receipt-')) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-no-confirmation', detail: 'row saved, but the visitor saw no confirmation message', severity: 'low' });
+      // FS1 · THE RECEIPT (act-probe): a visitor's action must answer back. The probe reads the new
+      // row's token straight from the DB (never from mail), proves the receipt page renders, a wrong
+      // token 404s, and the token never leaks through the public read API.
+      if (table && after > before && PRIVATE_READ.test(table)) {
+        try {
+          const tok = (await pool.query(`select ref_token from "${sch}"."${table}" where id=(select max(id) from "${sch}"."${table}")`)).rows[0]?.ref_token;
+          if (!tok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'no-receipt', detail: `the new "${table}" row has no receipt token — the visitor gets no way back to their record`, severity: 'high' });
+          else {
+            const rp = await fetch(`${baseUrl}/sites/${projectId}/receipt-${table}-${tok}.html`);
+            const rbody = await rp.text();
+            if (!rp.ok || rbody.length < 400) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'no-receipt', detail: `the receipt page for "${table}" does not load (status ${rp.status})`, severity: 'high' });
+            const bad = await fetch(`${baseUrl}/sites/${projectId}/receipt-${table}-${'0'.repeat(32)}.html`);
+            if (bad.ok) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'receipt-not-private', detail: 'a WRONG receipt token still renders a page — receipts are not actually secret', severity: 'high' });
+            const pub = await (await fetch(`${baseUrl}/api/site/${projectId}/data/${table}`)).text();
+            if (pub.includes(tok)) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'receipt-not-private', detail: 'the receipt token leaks through the public read API', severity: 'high' });
+          }
+        } catch (e: any) { issues.push({ page: pg.slug, viewport: 'desktop', kind: 'no-receipt', detail: 'receipt probe failed: ' + String(e?.message ?? e).slice(0, 100), severity: 'high' }); }
+      }
       // FS0 · PRIVACY: what a visitor just submitted about themselves must NOT be publicly listable.
       // The reviewer checks the LIVE public API right after its own submission landed.
       if (table && after > before && PRIVATE_READ.test(table)) {

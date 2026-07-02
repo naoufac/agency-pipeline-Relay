@@ -4,6 +4,7 @@
 // and queryable while the engine's tables (public) can never be touched. This is the safety contract:
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
+import { randomBytes } from 'node:crypto';
 import { parseModel, compile, lit, PRIVATE_READ } from './schema.ts';
 import { localRowImage } from './rowmedia.ts';
 
@@ -126,6 +127,14 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
       const cur = have.get(c.name);
       if (cur) {
         if (typeFamily(cur.type) !== typeFamily(c.type)) skipped.push(`~"${t}"."${c.name}": kept ${cur.type} (model wants ${c.type} — retype would risk data)`);
+        continue;
+      }
+      if (c.name === 'ref_token') {
+        // FS1: the receipt token joins populated tables NULLABLE with a partial unique index — old
+        // rows stay null (an '' backfill would collide on unique and pretend to be findable).
+        stmts.push(`alter table "${t}" add column "ref_token" text;`);
+        stmts.push(`create unique index if not exists "${t}_ref_token_uq" on "${t}" ("ref_token") where "ref_token" is not null;`);
+        applied.push(`+"${t}"."ref_token" (nullable receipt token; pre-existing rows stay null)`);
         continue;
       }
       if (c.ref) {
@@ -300,6 +309,54 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
   return decorateRows(pool, projectId, schema, table, tables, rows);
 }
 
+// FS1 — THE scoped read: ONE column, ONE value, parameterized, identifier-validated, decorated like
+// every other read. The only public way into a private table is its secret ref_token (the receipt) —
+// long enough to be unguessable, unique by index, stripped from every row the API returns (the
+// caller already holds it, from their own URL). Everything downstream (receipts, find-my-booking,
+// later my-bookings) composes over this single primitive.
+export async function readScoped(pool: pg.Pool, projectId: string, table: string, col: string, value: string, limit = 20): Promise<any[]> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !IDENT.test(col)) return [];
+  if (PRIVATE_READ.test(table) && (col !== 'ref_token' || String(value || '').length < 16)) return [];
+  const tables = await listTables(pool, projectId);
+  if (!tables.includes(table)) return [];
+  if (!(await typedColumns(pool, schema, table)).some(c => c.name === col)) return [];
+  const lim = Math.max(1, Math.min(50, Number(limit) || 20));
+  const rows = (await pool.query(`select * from "${schema}"."${table}" where "${col}"=$1 order by id desc limit ${lim}`, [String(value)])).rows;
+  return decorateRows(pool, projectId, schema, table, tables, rows);
+}
+
+// FS1 — resolve a receipt token to its table without knowing which private table it lives in
+// (find-my-booking pastes just the code). Bounded: only private tables that carry a ref_token column.
+export async function findByToken(pool: pg.Pool, projectId: string, token: string): Promise<{ table: string; row: any } | null> {
+  if (String(token || '').length < 16 || !/^[0-9a-f]{16,64}$/i.test(String(token))) return null;
+  const schema = schemaName(projectId);
+  for (const t of await listTables(pool, projectId)) {
+    if (!PRIVATE_READ.test(t)) continue;
+    if (!(await typedColumns(pool, schema, t)).some(c => c.name === 'ref_token')) continue;
+    const rows = await readScoped(pool, projectId, t, 'ref_token', token, 1);
+    if (rows.length) return { table: t, row: rows[0] };
+  }
+  return null;
+}
+
+// FS1 — the MAILED lookup: every receipt link for an email address across private tables. Server-
+// internal ONLY: the route mails the result and always answers "sent" — the API never returns it,
+// so there is no public enumeration path.
+export async function receiptLinksByEmail(pool: pg.Pool, projectId: string, email: string): Promise<{ table: string; ref: string }[]> {
+  const schema = schemaName(projectId); const out: { table: string; ref: string }[] = [];
+  const em = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return out;
+  for (const t of await listTables(pool, projectId)) {
+    if (!PRIVATE_READ.test(t)) continue;
+    const cols = await typedColumns(pool, schema, t);
+    if (!cols.some(c => c.name === 'ref_token') || !cols.some(c => c.name === 'email')) continue;
+    const rows = (await pool.query(`select ref_token from "${schema}"."${t}" where lower(email)=$1 and ref_token is not null order by id desc limit 10`, [em])).rows;
+    for (const r of rows) out.push({ table: t, ref: r.ref_token });
+  }
+  return out;
+}
+
 // PDP — ONE record by id, decorated exactly like the list read (relations resolved, secrets stripped,
 // cached photo attached). null when the table or row doesn't exist — the caller answers 404 honestly.
 export async function readRow(pool: pg.Pool, projectId: string, table: string, id: number, audience: ReadAudience = 'public'): Promise<any | null> {
@@ -318,16 +375,24 @@ export async function readRow(pool: pg.Pool, projectId: string, table: string, i
 const SYSTEM_COLS = /^(status|state|approved|confirmed|verified)$/i;
 
 // Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.
-export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>, audience: ReadAudience = 'public'): Promise<boolean> {
+// FS1: on a private (visitor-record) table with a ref_token column, a 128-bit receipt token is
+// generated HERE (never client-supplied — SENSITIVE already blocks it from `data`) and returned so
+// the visitor can be shown their receipt. Returns { ok, ref? }.
+export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>, audience: ReadAudience = 'public'): Promise<{ ok: boolean; ref?: string }> {
   const schema = schemaName(projectId);
-  if (!IDENT.test(table)) return false;
-  if (!(await listTables(pool, projectId)).includes(table)) return false;
-  const use = (await typedColumns(pool, schema, table)).filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name) && (audience === 'owner' || !SYSTEM_COLS.test(c.name)));
-  if (!use.length) return false;
-  const vals = use.map((_, i) => '$' + (i + 1));
-  await pool.query(`insert into "${schema}"."${table}" (${use.map(c => `"${c.name}"`).join(',')}) values (${vals.join(',')})`,
-    use.map(c => coerce(data[c.name], c.type)));
-  return true;
+  if (!IDENT.test(table)) return { ok: false };
+  if (!(await listTables(pool, projectId)).includes(table)) return { ok: false };
+  const cols = await typedColumns(pool, schema, table);
+  const use = cols.filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name) && (audience === 'owner' || !SYSTEM_COLS.test(c.name)));
+  if (!use.length) return { ok: false };
+  const names = use.map(c => `"${c.name}"`); const vals: any[] = use.map(c => coerce(data[c.name], c.type));
+  let ref: string | undefined;
+  if (PRIVATE_READ.test(table) && cols.some(c => c.name === 'ref_token')) {
+    ref = randomBytes(16).toString('hex');
+    names.push('"ref_token"'); vals.push(ref);
+  }
+  await pool.query(`insert into "${schema}"."${table}" (${names.join(',')}) values (${vals.map((_, i) => '$' + (i + 1)).join(',')})`, vals);
+  return { ok: true, ref };
 }
 
 // PQ3 — CLIENT CONTENT EDITING. Directus lives in a SEPARATE database and cannot reach the app_<hex>

@@ -152,6 +152,14 @@ p{margin:0 0 1rem}
 /* shop cards: image + title link to the product's own page */
 .products .card h3 a{color:inherit;text-decoration:none}.products .card h3 a:hover{text-decoration:underline}
 .products .card a.p-imglink{display:block}
+/* FS1 · receipt (record) + find-my-booking */
+.receipt-box{max-width:640px;margin:0 auto}
+.receipt-ref{background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius);padding:16px 20px;margin:1.2rem 0;text-align:center}
+.receipt-ref code{font-size:1.25rem;font-weight:700;letter-spacing:.06em;word-break:break-all}
+.receipt-ref .muted{display:block;font-size:.85rem;margin-top:.4rem}
+.receipt-meta{list-style:none;padding:0;margin:1.2rem 0;display:grid;gap:.5rem}
+.receipt-meta b{font-weight:600}
+.receipt-status{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.3rem .9rem;font-weight:600;margin:.2rem 0 .8rem}
 `;
 
 export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard') {
@@ -278,6 +286,45 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     </div>
   </div></section>`;
   },
+  // FS1 · record — the RECEIPT for one visitor-submitted row (booking/order/message). SYSTEM-ONLY
+  // (not in spec KNOWN): cms/live.ts synthesizes it per request from the live row; the reference
+  // code comes from the visitor's own URL, never from the row (reads strip it as a secret).
+  record: (s) => {
+    const row = (s && s.row && typeof s.row === 'object') ? s.row : {};
+    const keys = Object.keys(row).filter(k => !['id', 'created_at', '_image'].includes(k) && row[k] != null && row[k] !== '' && !/pass|secret|token|hash|salt|api_?key|private|credential/i.test(k));
+    const status = typeof row.status === 'string' && row.status.trim() ? row.status.trim() : '';
+    const meta = keys.filter(k => k !== 'status').slice(0, 8).map(k => {
+      const v = row[k];
+      if (typeof v === 'boolean') return v ? `<li>✓ ${esc(humanize(k))}</li>` : '';
+      return `<li><b>${esc(humanize(k))}:</b> ${esc(String(v).slice(0, 200))}</li>`;
+    }).join('');
+    const back = (s.back && s.back.slug) ? s.back : null;
+    return `<section class="section receipt"><div class="container"><div class="receipt-box">
+    ${back ? `<p class="pdp-crumb"><a href="${esc(back.slug)}.html">← ${esc(back.title || 'Back')}</a></p>` : ''}
+    <span class="eyebrow">${esc(s.eyebrow || 'Request received')}</span>
+    <h1>${esc(s.title || 'We got it — here is your receipt')}</h1>
+    ${status ? `<span class="receipt-status">Status: ${esc(status)}</span>` : ''}
+    <div class="receipt-ref"><code>${esc(String(s.refCode || ''))}</code><span class="muted">Save this reference code — it is the key to this page.</span></div>
+    ${meta ? `<ul class="receipt-meta">${meta}</ul>` : ''}
+    ${s.findSlug ? `<p class="muted">Lost the link? Retrieve it anytime at <a href="${esc(String(s.findSlug))}.html">${esc(String(s.findTitle || 'Find my booking'))}</a>.</p>` : ''}
+  </div></div></section>`;
+  },
+  // FS1 · find — paste the reference code (or ask for an email with the links). SYSTEM-ONLY, served
+  // live at find.html. No enumeration: the email path always answers "sent" and mails only real matches.
+  find: (s) => `<section class="section" id="find"><div class="container"><div class="receipt-box">
+    <span class="eyebrow">${esc(s.eyebrow || 'Your receipts')}</span>
+    <h1>${esc(s.title || 'Find my booking')}</h1>
+    <form class="rform" onsubmit="return relayFindCode(event)" style="margin-bottom:2rem">
+      <label>Reference code<input name="code" type="text" required minlength="16" placeholder="e.g. 3f9c…"></label>
+      <button class="btn" type="submit">Open my receipt</button>
+      <p class="rform-msg" hidden></p>
+    </form>
+    <form class="rform" onsubmit="return relayFindMail(event)">
+      <label>…or email me my links<input name="email" type="email" required placeholder="you@example.com"></label>
+      <button class="btn" type="submit">Email me</button>
+      <p class="rform-msg" hidden></p>
+    </form>
+  </div></div></section>`,
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>

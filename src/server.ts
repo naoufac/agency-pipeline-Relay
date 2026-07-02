@@ -8,7 +8,7 @@ import { plan, replan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
-import { renderLiveFromCms, renderLivePdp } from './cms/live.ts';
+import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind } from './cms/live.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 import { mailReady, notifyLead, sendMail } from './mail.ts';
@@ -186,6 +186,23 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           } catch (e: any) { console.error('live-pdp', live[1], pdp[1], e?.message ?? e); }
           return send(res, 404, 'text/plain', 'product not found');
         }
+        // FS1 · RECEIPT: the visitor's own record, keyed by the secret token in their URL. Honest 404
+        // on a wrong token — never a stale or someone else's page.
+        const rcpt = live[2].match(/^receipt-([a-z_][a-z0-9_]{0,62})-([0-9a-f]{16,64})$/i);
+        if (rcpt) {
+          try {
+            const rhtml = await renderLiveReceipt(pool, live[1], rcpt[1].toLowerCase(), rcpt[2].toLowerCase());
+            if (rhtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(rhtml); return; }
+          } catch (e: any) { console.error('live-receipt', live[1], rcpt[1], e?.message ?? e); }
+          return send(res, 404, 'text/plain', 'receipt not found');
+        }
+        // FS1 · FIND MY BOOKING: system page, live-rendered with the site's chrome.
+        if (live[2] === 'find') {
+          try {
+            const fhtml = await renderLiveFind(pool, live[1]);
+            if (fhtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(fhtml); return; }
+          } catch (e: any) { console.error('live-find', live[1], e?.message ?? e); }
+        }
       }
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {
@@ -245,14 +262,42 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
       const data = (b.data && typeof b.data === 'object') ? b.data : {};
       try {
-        const ok = await appdb.insertRow(pool, dataM[1], dataM[2], data);
-        if (ok) {
+        const r = await appdb.insertRow(pool, dataM[1], dataM[2], data);
+        if (r.ok) {
           const proj = (await pool.query('select brief from projects where id=$1', [dataM[1]])).rows[0];
           if (proj) notifyLead(pool, dataM[1], proj.brief, dataM[2], data);   // typed rows are leads too
         }
-        return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
+        // FS1: the receipt ref rides back so the form can land the visitor on their receipt page
+        return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r.ref ? { ok: r.ok, ref: r.ref, table: dataM[2] } : { ok: r.ok }));
       }
       catch (e: any) { console.error('site data insert', dataM[1], dataM[2], e?.message ?? e); return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'could not save — please check the form and try again' })); }
+    }
+    // ---- FS1 · receipts: resolve a pasted code to its receipt page; or mail every link for an email ----
+    const rfindM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/receipt\/([0-9a-f]{16,64})$/i);
+    if (rfindM && req.method === 'GET') {
+      if (!UUID_RE.test(rfindM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"error":"rate limited"}');
+      try {
+        const hit = await appdb.findByToken(pool, rfindM[1], rfindM[2].toLowerCase());
+        if (hit) return send(res, 200, 'application/json', JSON.stringify({ page: `receipt-${hit.table}-${rfindM[2].toLowerCase()}.html` }));
+      } catch (e: any) { console.error('receipt find', rfindM[1], e?.message ?? e); }
+      return send(res, 404, 'application/json', '{"error":"no receipt for that code"}');
+    }
+    const rmailM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/receipt-mail$/i);
+    if (rmailM && req.method === 'POST') {
+      if (!UUID_RE.test(rmailM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      if (formLimited(clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many requests — try again shortly"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let email = ''; try { email = String(JSON.parse(raw || '{}').email || '').trim(); } catch {}
+      try {
+        const links = await appdb.receiptLinksByEmail(pool, rmailM[1], email);
+        if (links.length) {
+          const base = (process.env.PUBLIC_URL || 'https://board.naples.agency') + '/sites/' + rmailM[1] + '/';
+          const body = 'Here are your receipt links:\n\n' + links.map(l => `• ${base}receipt-${l.table}-${l.ref}.html`).join('\n') + '\n\nEach link opens your record directly — keep them private.';
+          sendMail(pool, rmailM[1], email, 'Your receipt links', body).catch(() => {});
+        }
+      } catch (e: any) { console.error('receipt mail', rmailM[1], e?.message ?? e); }
+      return send(res, 200, 'application/json', '{"ok":true}');   // ALWAYS "sent" — no enumeration
     }
     // ---- PQ2 · CHECKOUT: cart -> one transactional order (server-priced, never client prices) ----
     const orderM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/order$/i);
@@ -319,7 +364,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (table && rid === null && req.method === 'POST') {
         let raw = ''; for await (const c of req) raw += c;
         let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
-        const ok = await appdb.insertRow(pool, sid, table, (b && b.data) || {}, 'owner');
+        const ok = (await appdb.insertRow(pool, sid, table, (b && b.data) || {}, 'owner')).ok;
         return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
       }
       return send(res, 405, 'application/json', '{"error":"method not allowed"}');

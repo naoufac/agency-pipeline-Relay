@@ -48,7 +48,7 @@ try {
   ok('non-integer id refused', !(await appdb.updateRow(pool, id, 'products', NaN as any, { price: 1 })));
 
   // (4) ADD + DELETE
-  ok('add a record', await appdb.insertRow(pool, id, 'products', { title: 'Vase', price: 64 }));
+  ok('add a record', (await appdb.insertRow(pool, id, 'products', { title: 'Vase', price: 64 })).ok);
   const rowsNow = await appdb.readRows(pool, id, 'products', 50);
   ok('added record is live-readable', rowsNow.some((r: any) => r.title === 'Vase'));
   const vase = rowsNow.find((r: any) => r.title === 'Vase');
