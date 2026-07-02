@@ -178,11 +178,18 @@ function project(id, tab, seq){
         <div class="actionbar">
           <a class="btn" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>
           <button class="btn btn-ghost" id="share">Share link</button>
+          <button class="btn btn-ghost" id="rebuild" title="Update the brief — rebuilds this site in place; its database and identity survive">Rebuild</button>
           <button class="btn btn-ghost" id="rerun" title="Re-run as a new site">Re-run</button>
           <span class="muted" style="margin-left:auto;font-size:13px">${prow.wall?`Built in ${prow.wall}s · `:''}${done}/${total} steps · verified</span>
         </div>`;
       body.querySelector('#share').onclick = e => { navigator.clipboard?.writeText(location.origin + b.site); e.target.textContent='Copied ✓'; setTimeout(()=>e.target.textContent='Share link',1500); };
       body.querySelector('#rerun').onclick = async e => { e.target.textContent='Re-running…'; e.target.disabled=true; try{ const r=await j('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({brief:b.project.brief})}); location.hash='#/p/'+r.id; }catch{} };
+      body.querySelector('#rebuild').onclick = async e => {
+        const nb = prompt('Update the brief — the site rebuilds in place. Your data and branding survive.', b.project.brief);
+        if (!nb || !nb.trim()) return;
+        e.target.textContent='Rebuilding…'; e.target.disabled=true;
+        try { await j('/api/rebuild',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id, brief:nb.trim()})}); location.reload(); } catch { e.target.textContent='Rebuild'; e.target.disabled=false; }
+      };
     } else if (failed){
       const blocked = b.tasks.find(t=>t.status==='failed');
       body.innerHTML = `<div class="empty" style="text-align:left">

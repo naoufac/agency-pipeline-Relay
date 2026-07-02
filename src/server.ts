@@ -4,7 +4,7 @@ import http from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
-import { plan } from './planner.ts';
+import { plan, replan } from './planner.ts';
 import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
@@ -215,6 +215,23 @@ const server = http.createServer(async (req, res) => {
       const id = await plan(pool, brief);
       // build in-process by default; with RELAY_BUILD=0 the web server only PLANS and a worker builds it
       if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('run', id, e?.message));
+      return send(res, 200, 'application/json', JSON.stringify({ id }));
+    }
+
+    // M3 — REBUILD IN PLACE: update the brief, replan the SAME project. Brand + theme + the app's
+    // DATABASE survive (the schema is migrated, never dropped — rows are guarded by a rollback).
+    if (path === '/api/rebuild' && req.method === 'POST') {
+      const ip = clientIp(req);
+      if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many builds — try again shortly.' }));
+      let raw = ''; for await (const c of req) raw += c;
+      let id = '', brief = ''; try { const b = JSON.parse(raw || '{}'); id = (b.id || '').trim(); brief = (b.brief || '').trim(); } catch {}
+      if (!/^[0-9a-f-]{36}$/i.test(id)) return send(res, 400, 'application/json', '{"error":"id required"}');
+      const pr = (await pool.query('select brief, status from projects where id=$1', [id])).rows[0];
+      if (!pr) return send(res, 404, 'application/json', '{"error":"project not found"}');
+      const active = (await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [id])).rows[0].n;
+      if (active) return send(res, 409, 'application/json', '{"error":"this project is still building"}');
+      await replan(pool, id, brief || pr.brief);
+      if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('rebuild', id, e?.message));
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
 

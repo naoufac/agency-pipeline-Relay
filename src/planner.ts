@@ -151,6 +151,31 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
+  await writeDag(pool, projectId, tasks);
+  await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
+  return projectId;
+}
+
+// M3 — REBUILD IN PLACE: replan the SAME project with an updated brief. The brand identity and the
+// theme survive (same business, updated site); the app schema survives via appdb's migration
+// (provision migrates instead of skipping). The old task DAG is replaced; params derived from the
+// old build (site/schema_forms/cms_built) are dropped and recomputed by the new run.
+export async function replan(pool: pg.Pool, projectId: string, brief: string): Promise<void> {
+  const prev = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
+  const { plan: result, usedLLM } = await buildPlan(brief);
+  const { tasks, pages, theme, archetype, shape } = result;
+  const params: any = {
+    planner: usedLLM ? 'llm' : 'template', pages, archetype, shape, cms: 'directus',
+    theme: prev.theme || theme, brand: prev.brand,           // identity continuity across rebuilds
+    rebuilds: Number(prev.rebuilds || 0) + 1,
+  };
+  await pool.query('delete from tasks where project_id=$1', [projectId]);
+  await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);
+  await writeDag(pool, projectId, tasks);
+  await pool.query("insert into run_events(project_id, type, detail) values ($1,'replanned',$2)", [projectId, `rebuild #${params.rebuilds} · ${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · data preserved via migration`]);
+}
+
+async function writeDag(pool: pg.Pool, projectId: string, tasks: Task[]): Promise<void> {
   const seqToId: Record<number, string> = {};
   for (const t of tasks) {
     const r = await pool.query('insert into tasks(project_id, seq, title, department, verify, artifact) values ($1,$2,$3,$4,$5,$6) returning id',
@@ -160,6 +185,4 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   for (const t of tasks) for (const d of t.depends_on)
     if (seqToId[d]) await pool.query('insert into task_dependencies(upstream_id, downstream_id) values ($1,$2) on conflict do nothing', [seqToId[d], seqToId[t.seq]]);
   await pool.query(`update tasks set status='ready' where project_id=$1 and status='blocked' and not exists (select 1 from task_dependencies d where d.downstream_id = tasks.id)`, [projectId]);
-  await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
-  return projectId;
 }

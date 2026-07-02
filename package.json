@@ -12,6 +12,7 @@
     "theme:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/theme-check.ts",
     "spec:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/spec-test.ts",
     "cms:check": "tsx src/cms/check.ts",
+    "migrate:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/migrate-check.ts",
     "prove:directus": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/prove-directus.ts",
     "cms:status": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/status.ts",
     "cms:build": "set -a; . ./.env 2>/dev/null; set +a; tsx src/cms/finalize-cli.ts",

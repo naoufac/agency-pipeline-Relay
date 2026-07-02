@@ -4,7 +4,7 @@
 // and queryable while the engine's tables (public) can never be touched. This is the safety contract:
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
-import { parseModel, compile } from './schema.ts';
+import { parseModel, compile, lit } from './schema.ts';
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;            // a legal, safe SQL identifier (no quoting tricks)
 
@@ -58,14 +58,18 @@ export function compileDDL(content: string): { ddl: string; warnings: string[] }
   const ddl = sanitizeDdl(content); assertConfined(ddl); return { ddl, warnings: [] };       // raw SQL -> confine
 }
 
-export async function provision(pool: pg.Pool, projectId: string, content: string): Promise<{ schema: string; tables: string[] }> {
+export async function provision(pool: pg.Pool, projectId: string, content: string): Promise<{ schema: string; tables: string[]; migration?: { applied: string[]; skipped: string[] } }> {
   const schema = schemaName(projectId);
   const { ddl } = compileDDL(content);
   if (!/create\s+table/i.test(ddl)) throw new Error('appdb: no tables in the data model / schema output');
-  // IDEMPOTENT + non-destructive: if the project schema is already provisioned, keep its data — never
-  // re-drop on a rebuild or a verify retry (that would wipe the live app's records).
+  // IDEMPOTENT + non-destructive. A provisioned schema is never re-dropped; on a REBUILD (M3) the
+  // new model is MIGRATED onto it: missing tables created (+seeded), missing columns added — rows
+  // always survive (a row-count guard rolls the whole migration back if any table loses data).
   const existing = await listTables(pool, projectId);
-  if (existing.length) return { schema, tables: existing };
+  if (existing.length) {
+    const migration = await migrate(pool, projectId, content, existing);
+    return { schema, tables: await listTables(pool, projectId), migration };
+  }
   const c = await pool.connect();
   try {
     await c.query('begin');
@@ -77,6 +81,81 @@ export async function provision(pool: pg.Pool, projectId: string, content: strin
   } catch (e) { try { await c.query('rollback'); } catch {} throw e; }
   finally { c.release(); }
   return { schema, tables: await listTables(pool, projectId) };
+}
+
+// M3 — SAFE SCHEMA MIGRATION. Diff the new model against the live catalog and apply ONLY additive,
+// data-preserving changes: new tables (with their indexes + seeds), new columns (with a sensible
+// default so NOT NULL holds on populated tables; relations stay nullable — a guess would be a lie).
+// NEVER drops or retypes anything; a type drift is reported and the stored type kept. The whole
+// migration runs in ONE transaction with a row-count guard: if any pre-existing table would end up
+// with fewer rows, everything rolls back.
+const typeDefault = (t: string): string | null =>
+  t === 'boolean' ? 'false'
+  : /^(integer|numeric)/.test(t) ? '0'
+  : t === 'date' || t === 'timestamptz' || /^timestamp/.test(t) ? 'now()'
+  : t === 'jsonb' ? `'{}'::jsonb`
+  : t === 'text' ? `''`
+  : null;
+// information_schema data_type -> our compiled type family, for drift comparison
+const typeFamily = (t: string): string =>
+  /char|text/.test(t) ? 'text' : /^(int|integer|bigint|smallint)/.test(t) ? 'integer'
+  : /numeric|decimal|real|double/.test(t) ? 'numeric' : /bool/.test(t) ? 'boolean'
+  : /timestamp/.test(t) ? 'timestamptz' : /^date$/.test(t) ? 'date' : /json/.test(t) ? 'jsonb' : t;
+
+export async function migrate(pool: pg.Pool, projectId: string, content: string, existing: string[]): Promise<{ applied: string[]; skipped: string[] }> {
+  const schema = schemaName(projectId);
+  const model = parseModel(content);
+  const applied: string[] = [], skipped: string[] = [];
+  if (!model) { skipped.push('raw-SQL model — migration unsupported, existing schema left untouched'); return { applied, skipped }; }
+  const { resolved } = compile(model);
+  const stmts: string[] = [];
+  for (const t of resolved.order) {
+    if (!existing.includes(t)) {
+      stmts.push(resolved.createSql[t], ...resolved.indexSql[t], ...resolved.seedSql[t]);
+      applied.push(`+table "${t}" (${resolved.seedSql[t].length} seed rows)`);
+      continue;
+    }
+    const have = new Map((await typedColumns(pool, schema, t)).map(c => [c.name, c]));
+    for (const c of resolved.cols[t]) {
+      const cur = have.get(c.name);
+      if (cur) {
+        if (typeFamily(cur.type) !== typeFamily(c.type)) skipped.push(`~"${t}"."${c.name}": kept ${cur.type} (model wants ${c.type} — retype would risk data)`);
+        continue;
+      }
+      if (c.ref) {
+        // a new relation on a populated table stays NULLABLE — inventing FK values would be a lie
+        const refExists = existing.includes(c.ref) || resolved.order.includes(c.ref);
+        stmts.push(`alter table "${t}" add column "${c.name}" integer${refExists ? ` references "${c.ref}"(id) on delete set null` : ''};`);
+        if (refExists) stmts.push(`create index "${t}_${c.name}_idx" on "${t}" ("${c.name}");`);
+        applied.push(`+"${t}"."${c.name}" (relation → ${c.ref}, nullable)`);
+        if (c.required) skipped.push(`~"${t}"."${c.name}": required relation added as nullable — existing rows can't be guessed`);
+        continue;
+      }
+      const def = c.def !== undefined ? lit(c.def, c.type) : typeDefault(c.type);
+      let sql = `alter table "${t}" add column "${c.name}" ${c.type}`;
+      if (def !== null && def !== 'null') sql += ` default ${def}`;
+      stmts.push(sql + ';');
+      if (c.required && def !== null && def !== 'null') stmts.push(`alter table "${t}" alter column "${c.name}" set not null;`);
+      applied.push(`+"${t}"."${c.name}" ${c.type}${def && def !== 'null' ? ` default ${def}` : ''}`);
+    }
+  }
+  if (!stmts.length) return { applied, skipped };
+  const before = new Map<string, number>();
+  for (const t of existing) before.set(t, Number((await pool.query(`select count(*)::int n from "${schema}"."${t}"`)).rows[0].n));
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    await c.query("set local statement_timeout = '15s'");
+    await c.query(`set local search_path to "${schema}"`);
+    for (const s of stmts) await c.query(s);
+    for (const [t, n] of before) {
+      const now = Number((await c.query(`select count(*)::int n from "${schema}"."${t}"`)).rows[0].n);
+      if (now < n) throw new Error(`migration guard: "${t}" would lose rows (${n} → ${now}) — rolled back`);
+    }
+    await c.query('commit');
+  } catch (e) { try { await c.query('rollback'); } catch {} throw e; }
+  finally { c.release(); }
+  return { applied, skipped };
 }
 
 export async function listTables(pool: pg.Pool, projectId: string): Promise<string[]> {

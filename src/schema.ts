@@ -25,7 +25,7 @@ const TYPE: Record<string, string> = {
 const pgType = (t: any) => TYPE[String(t || 'text').toLowerCase()] || 'text';
 const RESERVED = new Set(['id', 'created_at', 'updated_at']);
 
-function lit(v: any, type: string): string {
+export function lit(v: any, type: string): string {
   if (v === null || v === undefined) return 'null';
   if (type === 'boolean') return v === true || v === 'true' ? 'true' : 'false';
   if (/^(integer|numeric)/.test(type)) { const n = Number(v); return Number.isFinite(n) ? String(n) : 'null'; }
@@ -43,8 +43,13 @@ export function parseModel(content: string): DataModel | null {
   return obj as DataModel;
 }
 
+// Per-table artifacts, exposed for the MIGRATION planner (M3): resolved column specs, the CREATE,
+// its indexes and its seeds — so a rebuild can create ONLY missing tables / add ONLY missing columns.
+export type ResolvedCol = { name: string; type: string; required: boolean; unique: boolean; def: any; ref?: string };
+export type Resolved = { order: string[]; cols: Record<string, ResolvedCol[]>; createSql: Record<string, string>; indexSql: Record<string, string[]>; seedSql: Record<string, string[]> };
+
 // Compile a data-model into perfect Postgres DDL + the table list. Deterministic and self-contained.
-export function compile(model: DataModel): { ddl: string; tables: string[]; warnings: string[] } {
+export function compile(model: DataModel): { ddl: string; tables: string[]; warnings: string[]; resolved: Resolved } {
   const warnings: string[] = [];
   // normalize + de-dupe entities by snake name
   const ents: Entity[] = [];
@@ -86,8 +91,10 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
   ents.forEach(e => visit(e.name));
 
   const tables: string[] = []; const ddl: string[] = []; const indexes: string[] = []; const seeds: string[] = [];
+  const resolved: Resolved = { order: [], cols: {}, createSql: {}, indexSql: {}, seedSql: {} };
   for (const name of order) {
     const e = ents.find(x => x.name === name)!; const list = cols.get(name)!;
+    const perTableIndexes: string[] = [];
     const lines = ['  id serial primary key'];
     for (const c of list) {
       const refOk = !c.ref || order.indexOf(c.ref) < order.indexOf(name) || c.ref === name; // only real FK if target precedes
@@ -95,13 +102,18 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       if (c.required) line += ' not null';
       if (c.unique) line += ' unique';
       if (c.def !== undefined && !c.ref) line += ' default ' + lit(c.def, c.type);
-      if (c.ref && refOk) { line += ` references "${c.ref}"(id) on delete set null`; indexes.push(`create index "${name}_${c.name}_idx" on "${name}" ("${c.name}");`); }
+      if (c.ref && refOk) { line += ` references "${c.ref}"(id) on delete set null`; indexes.push(`create index "${name}_${c.name}_idx" on "${name}" ("${c.name}");`); perTableIndexes.push(indexes[indexes.length - 1]); }
       else if (c.ref) warnings.push(`${name}.${c.name}: FK to ${c.ref} demoted (cycle/forward-ref)`);
       lines.push(line);
     }
     lines.push('  created_at timestamptz not null default now()');
     ddl.push(`create table "${name}" (\n${lines.join(',\n')}\n);`);
     tables.push(name);
+    resolved.order.push(name);
+    resolved.cols[name] = list;
+    resolved.createSql[name] = ddl[ddl.length - 1];
+    resolved.indexSql[name] = perTableIndexes;
+    resolved.seedSql[name] = [];
     // seeds: scalar columns by name; FK columns by the field name OR <field>_id, when given an integer id
     const colByKey = (k: string) => list.find(c => !c.ref && c.name === k) || list.find(c => c.ref && (c.name === k || c.name === k + '_id'));
     for (const row of (e.seed || []).slice(0, 12)) {
@@ -112,7 +124,8 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       const cols2 = used.map(x => x.col.name);
       const vals = used.map(x => lit(x.col.ref ? Number(x.v) : x.v, x.col.type));
       seeds.push(`insert into "${name}" (${cols2.map(c => `"${c}"`).join(', ')}) values (${vals.join(', ')});`);
+      resolved.seedSql[name].push(seeds[seeds.length - 1]);
     }
   }
-  return { ddl: [...ddl, ...indexes, ...seeds].join('\n'), tables, warnings };
+  return { ddl: [...ddl, ...indexes, ...seeds].join('\n'), tables, warnings, resolved };
 }
