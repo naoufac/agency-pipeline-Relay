@@ -151,11 +151,31 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
   return true;
 }
 
-// Columns of a table suitable for an "add a record" form: scalar, user-fillable (no id/created_at/FK/secrets).
-export async function formColumns(pool: pg.Pool, projectId: string, table: string): Promise<{ name: string; type: string; nullable: boolean }[]> {
+// Columns of a table suitable for an "add a record" form: scalar user-fillable fields PLUS real
+// relations (M2): a column with an actual FK constraint is returned with {ref, display} so the
+// renderer emits a <select> of the referenced table's real records — the form matches the schema
+// by construction, never hand-emitted. Non-FK `*_id` columns stay hidden (opaque numbers).
+export async function formColumns(pool: pg.Pool, projectId: string, table: string): Promise<{ name: string; type: string; nullable: boolean; ref?: string; display?: string }[]> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table) || !(await listTables(pool, projectId)).includes(table)) return [];
-  return (await typedColumns(pool, schema, table)).filter(c => !['id', 'created_at'].includes(c.name) && !/_id$/.test(c.name) && !SENSITIVE.test(c.name));
+  const fkMap = new Map<string, string>();
+  try {
+    const fks = (await pool.query(
+      `select kcu.column_name as col, ccu.table_name as ref
+       from information_schema.table_constraints tc
+       join information_schema.key_column_usage kcu on kcu.constraint_name=tc.constraint_name and kcu.table_schema=tc.table_schema
+       join information_schema.constraint_column_usage ccu on ccu.constraint_name=tc.constraint_name and ccu.table_schema=tc.table_schema
+       where tc.constraint_type='FOREIGN KEY' and tc.table_schema=$1 and tc.table_name=$2`, [schema, table])).rows;
+    for (const fk of fks) if (IDENT.test(fk.col) && IDENT.test(fk.ref) && fk.ref !== table) fkMap.set(fk.col, fk.ref);
+  } catch {}
+  const out: { name: string; type: string; nullable: boolean; ref?: string; display?: string }[] = [];
+  for (const c of await typedColumns(pool, schema, table)) {
+    if (['id', 'created_at'].includes(c.name) || SENSITIVE.test(c.name)) continue;
+    const ref = fkMap.get(c.name);
+    if (ref) out.push({ ...c, ref, display: await displayColumn(pool, schema, ref) });
+    else if (!/_id$/.test(c.name)) out.push(c);
+  }
+  return out;
 }
 
 // INTROSPECTION — the system knows the database: every table's columns/types, real relations, row counts.

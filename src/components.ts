@@ -216,14 +216,18 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       : /date|time/.test(c.type) ? 'date'
       : (/desc|message|note|bio|content|about|detail|summary|story/.test(c.name) ? 'textarea' : (/email/.test(c.name) ? 'email' : 'text'));
     const fields = tcols
-      ? tcols.map((c: any) => ({ name: c.name, label: humanize(c.name), type: inputType(c), required: !c.nullable }))
+      ? tcols.map((c: any) => ({ name: c.name, label: humanize(c.name.replace(/_id$/, '')), type: inputType(c), required: !c.nullable, ref: c.ref, display: c.display, rawType: c.type }))
       : (Array.isArray(s.fields) && s.fields.length ? s.fields : [
           { name: 'name', label: 'Full name', required: true }, { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'message', label: 'Message', type: 'textarea', required: true }]);
     const field = (f: any) => {
       const req = f.required === false ? '' : ' required';
+      // RELATION (M2): a real FK renders as a <select> of the referenced table's records — options are
+      // loaded live from the data API (empty under file:// so the static gate still passes).
+      if (f.ref) return `<label>${esc(f.label)}<select name="${esc(f.name)}" data-ref="${esc(f.ref)}"${f.display ? ` data-display="${esc(f.display)}"` : ''}${req}><option value="">Choose…</option></select></label>`;
       if (f.type === 'checkbox') return `<label class="rcheck"><input type="checkbox" name="${esc(f.name)}"> ${esc(f.label)}</label>`;
       if (f.type === 'textarea') return `<label>${esc(f.label)}<textarea name="${esc(f.name)}"${req}></textarea></label>`;
-      return `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}"${req}></label>`;
+      const step = f.type === 'number' ? (/int/.test(String(f.rawType || '')) ? ' step="1"' : ' step="0.01" min="0"') : '';
+      return `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}"${req}${step}></label>`;
     };
     return `<section class="section" id="contact-form"><div class="container"><div class="formwrap">
       ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}

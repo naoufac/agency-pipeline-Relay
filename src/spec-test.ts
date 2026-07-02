@@ -299,5 +299,33 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('landing render: offer CTA is a real link', /<a class="btn" href="[^"#]+">Start today<\/a>/.test(h));
 }
 
+
+// ---- M2 · FORMS THAT MATCH THE DATABASE (PLAN.md): typed fields + relation dropdowns ----
+{
+  const forms = { reservations: [
+    { name: 'guest_name', type: 'text', nullable: false },
+    { name: 'party_size', type: 'integer', nullable: false },
+    { name: 'total', type: 'numeric', nullable: true },
+    { name: 'date', type: 'date', nullable: false },
+    { name: 'table_type_id', type: 'integer', nullable: false, ref: 'table_types', display: 'name' },
+  ] };
+  const spec = { brand: { name: 'Trattoria', tokens: { bg: '#ffffff', primary: '#7a1f1f' } }, sections: [
+    { type: 'hero', headline: 'Book a table tonight' },
+    { type: 'form', title: 'Reserve', table: 'reservations', cta: 'Reserve' },
+  ] };
+  const h = renderPage(spec, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', forms });
+  ok('M2: typed fields generated from schema', h.includes('name="guest_name"') && h.includes('name="party_size"') && h.includes('name="date"'));
+  ok('M2: FK renders as a relation dropdown', /<select name="table_type_id" data-ref="table_types" data-display="name" required>/.test(h));
+  ok('M2: FK label humanized (no _id)', h.includes('Table Type') && !h.includes('Table Type Id'));
+  ok('M2: required from NOT NULL', /<input name="guest_name"[^>]*required/.test(h) && /<input name="party_size"[^>]*required/.test(h));
+  ok('M2: money gets decimal step', /<input name="total"[^>]*step="0.01"/.test(h));
+  ok('M2: int gets whole step', /<input name="party_size"[^>]*step="1"/.test(h));
+  ok('M2: dropdown ships with placeholder only (options load live)', /<select name="table_type_id"[^>]*><option value="">Choose…<\/option><\/select>/.test(h));
+  ok('M2: client fills selects from the data API', h.includes("select[data-ref]"));
+  // a table the schema does NOT know → falls back to the contact form (never a broken typed form)
+  const h2 = renderPage({ brand: { name: 'X', tokens: {} }, sections: [ { type: 'hero', headline: 'Hi' }, { type: 'form', title: 'Contact', table: 'ghosts' } ] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', forms });
+  ok('M2: unknown table → contact fallback (no data-table)', !h2.includes('data-table="ghosts"') && h2.includes('name="message"'));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

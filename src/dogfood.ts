@@ -14,7 +14,7 @@ export type Issue = { page: string; viewport: string; kind: string; detail: stri
 
 // Self-correction: which findings a REBUILD-with-feedback can plausibly fix (content the LLM controls)
 // vs. system/CSS issues a rebuild can't (header/overflow → surfaced to a developer instead).
-const CONTENT_FIXABLE = new Set(['dead-button', 'garbage-button', 'broken-link', 'empty-collection', 'collection-not-rendering', 'form-not-persisted']);
+const CONTENT_FIXABLE = new Set(['dead-button', 'garbage-button', 'broken-link', 'empty-collection', 'collection-not-rendering', 'form-not-persisted', 'form-schema-mismatch']);
 export function repairPlan(issues: Issue[], pageSlugs: string[]): { slug: string; notes: string[] }[] {
   const byPage = new Map<string, string[]>();
   for (const i of issues) {
@@ -33,8 +33,8 @@ const LAYOUT = `(()=>{var n=document.querySelector('.nav-inner'),c=document.quer
 const STRUCT = `(function(){var b=document.querySelector('.nav-brand');return{navs:document.querySelectorAll('nav').length,logos:document.querySelectorAll('.nav-brand').length,logo:b?(b.textContent||'').trim():''}})()`;
 const LINKS = `Array.from(document.querySelectorAll('a')).map(function(a){return{text:(a.textContent||'').trim().slice(0,60),href:a.getAttribute('href')||'',btn:a.classList.contains('btn')}})`;
 const COLLS = `Array.from(document.querySelectorAll('.collection[data-table]')).map(el=>({table:el.getAttribute('data-table'),cards:el.querySelectorAll('.card').length}))`;
-const FORMINFO = `(function(){var f=document.querySelector('form.rform');return f?{table:f.getAttribute('data-table')||''}:null})()`;
-const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea').forEach(function(el,i){var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value='2026-01-01';}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
+const FORMINFO = `(function(){var f=document.querySelector('form.rform');if(!f)return null;var fields=[];f.querySelectorAll('input,textarea,select').forEach(function(el){if(!el.name)return;fields.push({name:el.name,tag:el.tagName.toLowerCase(),required:!!el.required,ref:el.getAttribute('data-ref')||null,options:el.tagName==='SELECT'?el.options.length:0})});return{table:f.getAttribute('data-table')||'',fields:fields}})()`;
+const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea,select').forEach(function(el,i){if(el.tagName==='SELECT'){if(el.options.length>1)el.selectedIndex=1;el.dispatchEvent(new Event('change',{bubbles:true}));return;}var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value='2026-01-01';}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
 
 export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http://localhost:8787'): Promise<{ issues: Issue[]; checked: { pages: number; buttons: number; links: number; linkTargets: number; forms: number; collections: number } }> {
   const proj = await pool.query('select params from projects where id=$1', [projectId]);
@@ -94,11 +94,28 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
     await page.setViewportSize({ width: 1280, height: 900 });
     for (const pg of pages) {
       await goto(page, url(pg.slug));
-      const info: any = await page.evaluate(FORMINFO).catch(() => null);
+      let info: any = await page.evaluate(FORMINFO).catch(() => null);
       if (!info) continue;
       nForms++;
       const table = (typeof info.table === 'string' && /^[a-z_][a-z0-9_]*$/.test(info.table)) ? info.table : '';
       const sch = table ? appdb.schemaName(projectId) : '';
+      // M2 GATE: the rendered form must MATCH the schema — every required column present, every
+      // relation dropdown filled with real records. Compiled-from-schema is VERIFIED, never assumed.
+      if (table) {
+        await page.waitForFunction(`(function(){var ok=true;document.querySelectorAll('form.rform select[data-ref]').forEach(function(s){if(s.options.length<2)ok=false});return ok})()`, { timeout: 6000 }).catch(() => {});
+        info = (await page.evaluate(FORMINFO).catch(() => null)) || info;
+        try {
+          const expected = await appdb.formColumns(pool, projectId, table);
+          const domNames = new Set(((info.fields || []) as any[]).map((f: any) => String(f.name)));
+          const missing = expected.filter((c: any) => !c.nullable && !domNames.has(c.name)).map((c: any) => c.name);
+          if (missing.length) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'form-schema-mismatch', detail: `form on "${table}" is missing required schema field(s): ${missing.join(', ')} — form fields must be generated from the data model`, severity: 'high' });
+          for (const f of ((info.fields || []) as any[]).filter((x: any) => x.ref && /^[a-z_][a-z0-9_]*$/.test(x.ref))) {
+            let refRows = 0;
+            try { refRows = Number((await pool.query(`select count(*)::int n from "${sch}"."${f.ref}"`)).rows[0].n); } catch {}
+            if (refRows > 0 && f.options <= 1) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'empty-ref-dropdown', detail: `the "${f.name}" dropdown should list ${refRows} real record(s) from "${f.ref}" but shows none — relation options aren't loading`, severity: 'high' });
+          }
+        } catch {}
+      }
       const count = async () => table
         ? Number((await pool.query(`select coalesce(max(id),0)::int n from "${sch}"."${table}"`)).rows[0].n)
         : Number((await pool.query('select count(*)::int n from site_submissions where project_id=$1', [projectId])).rows[0].n);
