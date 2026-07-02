@@ -119,6 +119,11 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
         if (!addBtns) {
           issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'the shop grid shows no purchasable products (no Add-to-cart buttons rendered)', severity: 'high' });
         } else {
+          // agency-grade imagery is a SYSTEM responsibility: product cards without photos are the
+          // unanimous agency-panel blocker — the reviewer flags it so no build can ship it silently.
+          const imgCards = await page.evaluate(`(function(){var c=document.querySelectorAll('.products .card');var n=0;c.forEach(function(x){if(x.querySelector('img'))n++});return {cards:c.length,withImg:n}})()`).catch(() => null) as any;
+          if (imgCards && imgCards.cards > 0 && imgCards.withImg === 0)
+            issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'no-product-imagery', detail: `all ${imgCards.cards} product cards rendered without a photo — the image enrichment did not run or failed`, severity: 'high' });
           await page.evaluate(`(function(){var b=document.querySelectorAll('.p-add');b[0].click();if(b.length>1)b[1].click();else b[0].click()})()`);
           await page.waitForTimeout(400);
           const before2 = await oCount();
