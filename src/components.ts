@@ -296,7 +296,11 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const meta = keys.filter(k => k !== 'status').slice(0, 8).map(k => {
       const v = row[k];
       if (typeof v === 'boolean') return v ? `<li>✓ ${esc(humanize(k))}</li>` : '';
-      return `<li><b>${esc(humanize(k))}:</b> ${esc(String(v).slice(0, 200))}</li>`;
+      if (isFinite(Number(v)) && Number(v) === 0) return '';   // zero-valued numerics are spec noise (same rule as PDP meta)
+      const shown = (v instanceof Date) ? v.toDateString()      // a raw JS date dump is not a receipt line
+        : /^\d{4}-\d{2}-\d{2}T/.test(String(v)) ? new Date(v).toDateString()
+        : String(v).slice(0, 200);
+      return `<li><b>${esc(humanize(k))}:</b> ${esc(shown)}</li>`;
     }).join('');
     const back = (s.back && s.back.slug) ? s.back : null;
     return `<section class="section receipt"><div class="container"><div class="receipt-box">
