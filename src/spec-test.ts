@@ -327,5 +327,23 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('M2: unknown table → contact fallback (no data-table)', !h2.includes('data-table="ghosts"') && h2.includes('name="message"'));
 }
 
+
+// M2 invariant: an app model that FORGOT its form gets one injected on the best page
+{
+  const base = { tables: ['reservations', 'guests'], forms: { reservations: [{ name: 'guest_name', type: 'text', nullable: false }] }, primaryTable: 'reservations' };
+  const model = { pages: [
+    { slug: 'index', title: 'Home', sections: [hero('Book a table'), { type: 'features', items: [{ title: 'A', body: 'b' }] }] },
+    { slug: 'book', title: 'Book', sections: [hero('Reserve'), { type: 'split', body: 'why book with us' }] },
+  ] };
+  const r = normalizeSite(model, [{ slug: 'index', title: 'Home' }, { slug: 'book', title: 'Book' }], base);
+  const book = r.site.pages.find((p) => p.slug === 'book');
+  ok('M2 invariant: missing typed form injected', !!book && book.sections.some((s) => s.type === 'form' && s.table === 'reservations'));
+  ok('M2 invariant: injected on the ACTION page (book), not index', !r.site.pages.find((p) => p.slug === 'index').sections.some((s) => s.type === 'form'));
+  ok('M2 invariant: repair recorded', r.repairs.some((x) => /injected the missing typed form/.test(x)));
+  const already = { pages: [ { slug: 'index', title: 'Home', sections: [hero('Hi'), { type: 'form', title: 'Reserve', table: 'reservations' }] } ] };
+  const r2 = normalizeSite(already, [{ slug: 'index', title: 'Home' }], base);
+  ok('M2 invariant: no double-injection when a typed form exists', r2.site.pages[0].sections.filter((s) => s.type === 'form').length === 1);
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

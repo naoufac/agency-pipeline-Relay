@@ -98,7 +98,8 @@ function buildUser(ctx: Ctx, department?: string): string {
     if (ctx.tables && ctx.tables.length) {
       s += `\nThis app's REAL database tables: ${ctx.tables.join(', ')}.`;
       if (ctx.primaryTable) s += ` The MAIN catalog/list table is "${ctx.primaryTable}" — a product/listing/menu {"type":"collection"} or {"type":"form"} MUST use table:"${ctx.primaryTable}".`;
-      s += ` Use EXACT table names so live data shows.\n`;
+      s += ` Use EXACT table names so live data shows.`;
+      s += ` REQUIRED: the site's core user action (booking, ordering, reserving, signing up) MUST be a {"type":"form","table":"..."} section on the fitting page — its fields are auto-generated from the table's schema (relations become dropdowns of real records); you only write the title/intro/cta.\n`;
     }
     if (ctx.brand && ctx.brand.name) {
       s += `\nBUSINESS NAME — SYSTEM-OWNED: do NOT write the business name anywhere. Wherever the name would appear in copy, write the literal token {{brand}} — the system inserts the one locked name (the renderer also owns the logo, palette + nav button). You ONLY write copy + sections. Never invent or write a business name.\n`;

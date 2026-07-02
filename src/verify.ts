@@ -173,7 +173,7 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     // every planned page and each page is a valid, renderable spec (hero-first, >= 2 real sections) BEFORE
     // any deterministic render runs. A bad model rejects here into retry-with-feedback — pages never render
     // from a broken CMS.
-    const r = await pool.query("select params->'site' as site, params->'pages' as pages, params->>'shape' as shape from projects where id=$1", [task.project_id]);
+    const r = await pool.query("select params->'site' as site, params->'pages' as pages, params->>'shape' as shape, params->>'archetype' as archetype from projects where id=$1", [task.project_id]);
     const site = r.rows[0]?.site; const planned = Array.isArray(r.rows[0]?.pages) ? r.rows[0].pages : [];
     const ps = (site && Array.isArray(site.pages)) ? site.pages : [];
     if (!ps.length) return { ok: false, log: 'no composed site model (params.site empty)' };
@@ -181,6 +181,13 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     for (const p of ps) {
       if (!Array.isArray(p.sections) || p.sections.length < 2) return { ok: false, log: `page "${p.slug}" has <2 sections` };
       if (p.sections[0]?.type !== 'hero') return { ok: false, log: `page "${p.slug}" must open with a hero` };
+    }
+    // APP/STORE gate (PLAN.md M2): the core user action must be a REAL typed form. normalizeSite
+    // injects one when the schema has a primary table; a model that still lacks any typed form after
+    // that has no working action — reject into retry.
+    if (['app', 'store'].includes(String(r.rows[0]?.archetype))) {
+      const hasForm = ps.some((p: any) => (p.sections || []).some((s: any) => s.type === 'form' && typeof s.table === 'string' && s.table));
+      if (!hasForm) return { ok: false, log: 'an app/store site must include at least one {"type":"form","table":...} section — the core action (booking/ordering/signing up) has to be a REAL working form' };
     }
     // LANDING gate (PLAN.md M1): exactly one page, >=2 conversion sections, final section is the CTA.
     if (r.rows[0]?.shape === 'landing') {

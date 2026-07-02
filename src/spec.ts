@@ -133,6 +133,7 @@ const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|b
 
 const str = (v: any): string => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
 const nonEmpty = (v: any) => str(v).length > 0;
+const humanTitle = (t: string) => str(t).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 // A CTA may arrive as a string OR an object ({text|label|title|cta|name, link|href|url|page}).
 // Normalize to a plain string label on `.cta` (+ optional `.link`) so the renderer never sees [object Object].
@@ -342,6 +343,19 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     out.push({ slug: pg.slug, title: pg.title, sections: spec.sections });
   }
   if (out.length < (pages || []).length) errors.push(`only ${out.length}/${(pages || []).length} pages composed cleanly`);
+  // GUARANTEE THE CORE ACTION (M2): an app/store site whose schema has a primary table MUST carry a
+  // typed form somewhere — a booking/ordering app without its form is decoration. If the model forgot
+  // one, inject it deterministically on the best-fitting page (never trust, always force).
+  const pt = str(base.primaryTable);
+  if (pt && base.forms && Array.isArray(base.forms[pt]) && base.forms[pt].length && out.length) {
+    const hasTypedForm = out.some(p => p.sections.some((s: any) => s.type === 'form' && nonEmpty(s.table)));
+    if (!hasTypedForm) {
+      const ACTION_PAGE = /book|reserv|order|sign|apply|join|start|quote|contact/;
+      const target = out.find(p => ACTION_PAGE.test(p.slug)) || out[0];
+      target.sections.push({ type: 'form', title: humanTitle(pt), intro: '', table: pt, form: pt });
+      repairs.push(`injected the missing typed form on "${target.slug}" (table "${pt}") — an app's core action must be a real form`);
+    }
+  }
   // COPY GATE at the RETRYABLE stage: reject slop/placeholders now (compose retries with feedback) instead of
   // letting it reach the deterministic render, where a retry can't fix it. {{brand}} is ignored (not slop).
   const slop = siteCopySlop(out);
