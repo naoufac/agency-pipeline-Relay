@@ -102,6 +102,17 @@ server-side, line items verified in the database.
 **Phone check (yours):** open the store → add to cart → checkout → confirmation with a real order number.
 **Still ahead:** product detail pages, options/variants, stock awareness.
 
+## PQ · Agency-panel fixes (rolling — driven by "would a productive agency ship this?")
+A 3-lens agency panel (creative director · ecom lead · account director) judges Relay's real output;
+the #1 finding gets built + gated. Shipped 2026-07-02:
+- **Real photos on every DB-backed card** (was the unanimous blocker): product/collection/feed cards
+  render from the database, which the image pipeline never touched — so every catalog was text-on-
+  white. Now each content row gets a real, cached, on-topic photo at build (rowmedia.ts; deterministic,
+  retried against burst rate-limits). Proven: ceramics store, 6/6 products photographed.
+- **Grey hero void killed**: a failed hero photo is now an intentional dark branded panel, never grey.
+Gates: ecom:check + spec:check extended. Next panel picks: hero art-direction/overlay consistency,
+product detail pages, global spacing/interaction/empty-state polish.
+
 ## PQ3 · A CMS a client can actually use — CORE SHIPPED 2026-07-02, widening
 **Shipped + proven live:** every site has a Content tab — the owner sees their REAL collections
 (Products / Menu / Categories / Posts…), and edits, adds, or deletes records; changes are live on the
