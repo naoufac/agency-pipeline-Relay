@@ -309,10 +309,12 @@ browser review → live). Design work is PARKED at the current bar — the gates
 (art-direction, palettes, card hygiene) from regressing; no more style investment unless a sale
 needs the panel number. Remaining PQ1 residuals (register cards, re-score) move to the backlog.
 
-1. **PWA → Android** — every produced site installs as an app: manifest + brand icon + offline
-   shell + deterministic gate (pwa:check). Phone check: open a produced site on Android → Add to
-   Home Screen → a real app icon, full-screen launch. Then TWA packaging (same site, wrapped as a
-   Play-Store-publishable app) as the follow-up — ONE chain, no second codebase, no parallel system.
+1. ~~PWA → Android~~ ✅ **SHIPPED 2026-07-04** — every produced site installs as an app (manifest +
+   painted brand icons + offline shell; pages network-first so live edits keep showing; /api/ never
+   cached). pwa:check (28) is gate suite #12; the reviewer probes installability on every build;
+   SCOPE answers the android ask with a YES. Proven zero-touch on a fresh pizzeria brief.
+   **Phone check (yours):** open any new site on your phone → browser menu → Add to Home Screen →
+   a real app icon with the brand initial, full-screen launch. TWA (Play-Store packaging) = roadmap.
 2. **THE CHAIN as a surface** — "How it was built" becomes a first-class product page per site:
    the full production trace (scope verdict, archetype, data model, gates passed, review verdict,
    rebuild history) readable by a client, not just the operator. This is the magic made visible —

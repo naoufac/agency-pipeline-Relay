@@ -492,3 +492,20 @@ shipped the OLD head; restored + verified. Ops rule: after any worker run, verif
 origin moved.
 NEXT: register-aware commerce framing (service cards read like SKUs — prices/'in stock' on a law
 firm), then panel re-score toward ≤4 · PQ2 variants · PWA.
+
+## 2026-07-04 — PWA SHIPPED: every produced site installs as an app (chain pivot #1)
+Owner pivot honored (the chain over the pixels; design parked at the gates). Prod 48eafe5, 12 suites
+(pwa:check 28 is #12). Every produced site now ships, compiled from the locked brand, LLM untouched:
+manifest.webmanifest (brand name/short_name/colours, standalone) · icon-192/512 painted by the real
+browser (brand initial on brand primary, maskable-safe, zero new deps) · sw.js offline shell with
+pages NETWORK-FIRST (the live Content-tab edit promise outranks offline freshness) and /api/ NEVER
+cached (stale carts are worse than none). Reviewer probes installability LIVE on every build
+(pwa-broken = high). SCOPE now DELIVERS the android ask: 'installs as an app on any phone' is a
+capability (the astrology-brief class answered honestly with a yes); only store-LISTING remains
+unsupported; difficulty counts the brief's detected demands, not the system freebies.
+PROVEN zero-touch on a fresh brief ('pizzeria… android app for the regulars' → Sal's on Oak,
+warm/clay from the palette pool): PASSED review 0 high; externally verified live — manifest
+(application/manifest+json), sw scoped relay-<pid>, icons exact 192/512 PNG, head wired. Boss-eye
+catch: short_name truncated mid-phrase ("Sal's on") → whole-words-that-fit + no dangling stopword,
+gated. NEXT: chain-trace surface ("How it was built" as a product page) · TWA packaging on the
+roadmap · capability growth from real front-door briefs.
