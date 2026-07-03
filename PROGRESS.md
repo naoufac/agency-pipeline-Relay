@@ -563,3 +563,17 @@ built with 0 review issues, options served live, box on checkout. The proof's ow
 accept all major cards' — a lie over an instructions checkout → copy gate now rejects card claims
 on SELLING pages (brick-and-mortar wording stays legit). Card processing in-checkout (per-client
 Stripe keys, webhooks, key custody) = the owner-decision roadmap item, options documented in chat.
+
+## 2026-07-04 — PQ2 COMPLETE: VARIANTS — a store that actually sells, to real-shop grade
+Prod b9c55da, 13 suites (ecom:check 61→75). Canonical product_variants(product ref, name, price?
+inherits, stock? untracked); compile normalizes 'variants' + injects order_items snapshot columns
+(variant_id/variant_name — receipts read 'Tee — XL' forever). placeOrder resolves options INSIDE
+the locked transaction: ownership validated, variant price overrides, per-option stock guards +
+decrements, bare add on a varied product refused friendly. PDP option pills (sold-out disabled),
+variant-keyed cart, server re-prices everything; buy-probe picks an option. SCOPE promises variants
+on sizes/colours/flavours briefs AND the model gate requires the table on such briefs.
+PROOF zero-touch (tee shop, sizes S–XXL): review PASSED; externally: 5 pills on the PDP, per-size
+stock seeded, bare add refused ('"Classic Black Tee" comes in options…'), order with size S landed
+at the inherited price with the 'S' snapshot on the line item. PQ2's plan definition is DONE.
+Remaining queue: Stripe v2 (owner's call) · TWA packaging · PQ1 backlog (register cards, re-score)
+· freeSlots from an hours table.

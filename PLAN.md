@@ -129,7 +129,7 @@ first, site_model requires cart + checkout on every store, a checkout-less store
 **Stock awareness shipped 2026-07-03** (first boss/worker delegation): optional stock column honored
 end-to-end — row-locked oversell guard in the checkout transaction ('"Mug" is sold out' / 'only 3
 left'), Sold-out / Only-N-left on grid + product pages live, NULL = untracked. ecom:check 45→53.
-**Still ahead:** options/variants (sizes/colours).
+~~Still ahead: options/variants~~ **VARIANTS SHIPPED 2026-07-04** — canonical product_variants, option-aware pricing/stock/receipts, PDP pills, probe buys with an option; proven zero-touch on a sizes brief (ecom:check 75). PQ2 is COMPLETE to its plan definition.
 
 ## PQ · Agency-panel fixes (rolling — driven by "would a productive agency ship this?")
 A 3-lens agency panel (creative director · ecom lead · account director) judges Relay's real output;
