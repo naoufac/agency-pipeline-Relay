@@ -20,12 +20,15 @@ const CAPABILITIES: Cap[] = [
     promise: 'sign-in on the site: email magic link + a personal records page' },
   { name: 'landing',  detect: /landing/,
     promise: 'one focused conversion page' },
+  { name: 'installable', detect: /native app|android|\bios\b|iphone|mobile app|add to home/,
+    promise: 'installs as an app on any phone (Add to Home Screen — icon, full screen, offline shell)' },
 ];
 
 // Unconditionally appended for app archetype; store gets these plus lead-email.
 const ALWAYS_APP: ScopeItem[] = [
   { name: 'receipts', promise: 'every submission gets a private receipt page + find-my-booking' },
   { name: 'editing',  promise: "you edit your content live from the board's Content tab" },
+  { name: 'installable', promise: 'installs as an app on any phone (Add to Home Screen — icon, full screen, offline shell)' },
 ];
 const ALWAYS_STORE_EXTRA: ScopeItem[] = [
   { name: 'lead-email', promise: 'you are emailed every lead/order instantly' },
@@ -36,9 +39,9 @@ const UNSUPPORTED: Unsup[] = [
   { detect: /fedex|\bups\b|dhl|stripe|paypal|payment gateway|twilio|\bsms\b|whatsapp|google (maps|calendar)|instagram|open ?ai|third[- ]party api|api integration/,
     ask: "external API integrations aren't supported yet",
     alternative: 'we deliver the equivalent in-app flow (internal tracking, cash/invoice orders)' },
-  { detect: /native app|android app|ios app|app store|play store/,
-    ask: 'a store-listed native app',
-    alternative: 'an installable web app (add to home screen) — native packaging is on the roadmap' },
+  { detect: /app store|play store|store listing/,
+    ask: 'a store-LISTED app (Play Store / App Store)',
+    alternative: 'the site already installs as an app from the browser; store packaging is on the roadmap' },
   { detect: /multi-?lang|translat|bilingual/,
     ask: 'multilingual versions',
     alternative: 'one language per site today' },
@@ -68,6 +71,7 @@ export function evaluateScope(brief: string, archetype: string): Scope {
       seen.add(cap.name);
     }
   }
+  const detected = includes.length;   // the brief's own demands — freebies below don't raise difficulty
   if (archetype === 'app' || archetype === 'store') {
     for (const item of ALWAYS_APP) {
       if (!seen.has(item.name)) { includes.push(item); seen.add(item.name); }
@@ -84,10 +88,11 @@ export function evaluateScope(brief: string, archetype: string): Scope {
     if (u.detect.test(b)) excludes.push({ ask: u.ask, alternative: u.alternative });
   }
 
-  // 1 base (site) or 2 (app/store); +1 for ≥4 includes; +1 for ≥1 exclude;
+  // 1 base (site) or 2 (app/store); +1 for ≥4 DETECTED capabilities (the freebies every app ships —
+  // receipts/editing/installable — measure the system, not the brief); +1 for ≥1 exclude;
   // +1 for ≥4 compound conjunctions; capped at 5.
   let d = archetype === 'site' ? 1 : 2;
-  if (includes.length >= 4) d++;
+  if (detected >= 4) d++;
   if (excludes.length >= 1) d++;
   if ((b.match(/\band\b|\bplus\b|\balso\b|\bwith\b/g) || []).length >= 4) d++;
 

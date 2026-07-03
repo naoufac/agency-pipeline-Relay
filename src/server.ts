@@ -49,7 +49,7 @@ const STATIC: Record<string, string> = {
   '/styles.css': 'styles.css', '/app.js': 'app.js',
 };
 const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'text/javascript',
-  png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp' };
+  png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp', webmanifest: 'application/manifest+json' };
 
 async function boardJSON(user: User | null, projectId?: string) {
   const p = projectId

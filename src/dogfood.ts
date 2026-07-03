@@ -133,6 +133,22 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       try { const r = await fetch(`${baseUrl}/sites/${projectId}/${t}`); const body = await r.text(); if (!r.ok || body.length < 400) issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" does not load (status ${r.status}, ${body.length}b)`, severity: 'high' }); }
       catch { issues.push({ page: t, viewport: 'all', kind: 'broken-link', detail: `link target "${t}" failed to load`, severity: 'high' }); }
     }
+    // PWA PROBE (owner-directed): the site must be INSTALLABLE — manifest + brand icons + offline
+    // shell all served live. A missing piece is a broken "Add to Home Screen" on the client's phone.
+    try {
+      const mf = await fetch(`${baseUrl}/sites/${projectId}/manifest.webmanifest`);
+      const mj: any = mf.ok ? await mf.json().catch(() => null) : null;
+      if (!mj || mj.display !== 'standalone' || !Array.isArray(mj.icons) || !mj.icons.length) {
+        issues.push({ page: '(site)', viewport: 'all', kind: 'pwa-broken', detail: mf.ok ? 'manifest.webmanifest is incomplete — the site cannot install as an app' : `manifest.webmanifest does not load (${mf.status}) — the site cannot install as an app`, severity: 'high' });
+      } else {
+        for (const src of new Set(mj.icons.map((i: any) => String(i.src || '')).filter(Boolean))) {
+          const ir = await fetch(`${baseUrl}/sites/${projectId}/${src}`).catch(() => null);
+          if (!ir || !ir.ok) issues.push({ page: '(site)', viewport: 'all', kind: 'pwa-broken', detail: `app icon "${src}" does not load — install would ship a broken icon`, severity: 'high' });
+        }
+        const swr = await fetch(`${baseUrl}/sites/${projectId}/sw.js`).catch(() => null);
+        if (!swr || !swr.ok) issues.push({ page: '(site)', viewport: 'all', kind: 'pwa-broken', detail: 'sw.js does not load — no offline shell', severity: 'high' });
+      }
+    } catch { issues.push({ page: '(site)', viewport: 'all', kind: 'pwa-broken', detail: 'manifest fetch failed — the site cannot install as an app', severity: 'high' }); }
     // STORE PROBE (PQ2): a real browser BUYS — add 2 products to the cart, check out, and prove the
     // order + line items landed in the database. Runs only on store builds (checkout page present).
     const params2 = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
