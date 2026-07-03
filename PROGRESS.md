@@ -408,3 +408,15 @@ event; the Telegram front door replies Scope / Not-included before the build fin
 silent-drop class is dead (tested verbatim). Also shipped this stretch: per-theme button shapes
 (PQ1-C, worker 03), layout chooser un-clustered + distribution gate (PQ1-A, boss). Front door LIVE on
 @nao_openclaw_alibaba_bot (owner tested). NEXT: PQ1-B card anatomy closed set (boss design → worker).
+
+## 2026-07-03 — PQ1 CORE ARC LANDED: chooser un-clustered · button recipes · card anatomies · trio proof
+Prod 038f456; 11 suites green (layout 33, app 125). The trio phone-check (law firm / skate shop /
+cafe, all zero-touch): three visibly distinct designs — editorial+centered-nav+horizontal cards vs
+bold+image-hero+overlay cards vs warm+split. Structural space now hero(4) × cards(3) × nav(2) ×
+band(2) × theme(5) ≈ 240 combos, all closed-set, all hash-rooted in the brief. The trio ALSO caught:
+(1) 'bookings' plural blind in the archetype classifier + LLM 'site' trusted over classification →
+classifier is now the FLOOR (gated); cafe rebuilt as a real booking app, PASSED clean. (2) prod
+deploy gate REVERTED a push of mine that carried 1 failing assertion — the machine held the bar
+against the boss. Owner sent the side-by-side. Workers 01-05 all shipped first-pass (stock, tg-door,
+buttons, scope, cards) under boss review. Lesson recorded: background waiters must be systemd's, not
+the boss process's.
