@@ -12,7 +12,7 @@ export const DEFAULT_ARCHETYPE: Archetype = 'site';
 // First match wins; `store` before `app` (a shop is a more specific app). `site` is the fallback.
 const RULES: [Archetype, RegExp][] = [
   ['store', /\b(shop|store|e-?commerce|e-?shop|catalog(ue)?|checkout|\bcart\b|boutique|merch|webshop|sell (online|products?)|product (page|catalog))\b/],
-  ['app', /\b(app|application|platform|saas|dashboard|portal|booking|reservations?|reserve|delivery|marketplace|directory|listings?|\bcrm\b|\berp\b|tracker|tracking|sign[- ]?up|log[- ]?in|members? area|membership|subscription|orders?|inventory|appointments?|scheduling|on[- ]?demand|ride[- ]?hailing|fleet|jobs? board|classifieds)\b/],
+  ['app', /\b(app|application|platform|saas|dashboard|portal|bookings?|reservations?|reserve|delivery|marketplace|directory|listings?|\bcrm\b|\berp\b|tracker|tracking|sign[- ]?up|log[- ]?in|members? area|membership|subscription|orders?|inventory|appointments?|scheduling|on[- ]?demand|ride[- ]?hailing|fleet|jobs? board|classifieds)\b/],
 ];
 
 export function isArchetype(x: any): x is Archetype { return typeof x === 'string' && (ARCHETYPES as string[]).includes(x); }
