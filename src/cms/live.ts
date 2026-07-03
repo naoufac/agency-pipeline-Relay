@@ -3,7 +3,7 @@
 // the CMS and the live page changes on the next load, with NO rebuild. Returns null for non-CMS
 // projects (the caller then serves the static file as before).
 import pg from 'pg';
-import { renderPage, formPageSlug } from '../render.ts';
+import { renderPage, formPageSlug, receiptsEnabled } from '../render.ts';
 import { processMedia } from '../media.ts';
 import { brandFor } from './util.ts';
 import { SITES } from '../verify.ts';
@@ -31,7 +31,7 @@ export async function renderLiveFromCms(pool: pg.Pool, projectId: string, slug: 
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: row.sections };
   // M2: pass the schema snapshot — without it a typed form silently degrades to the contact fallback
   const sf = params.schema_forms || {};
-  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable, formSlug: formPageSlug(params.site) });
+  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   try { html = await processMedia(html, new URL(projectId + '/', SITES)); } catch { /* image-light or no key */ }
   return `<!--relay:cms=directus LIVE doc=${row.id} (rendered from CMS on request)-->\n` + html;
 }
@@ -58,7 +58,7 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const cartPage = navPages.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
   const title = String(row.title || row.name || 'Product #' + productId);
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: cartPage?.slug }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site) });
+  const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE pdp=${productId} (rendered from the live product row on request)-->\n` + html;
 }
 
@@ -80,7 +80,7 @@ export async function renderLiveReceipt(pool: pg.Pool, projectId: string, table:
   const back = navPages.find((p: any) => p.slug === backSlug) || navPages[0];
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [
     { type: 'record', row: rows[0], refCode: token, back, findSlug: 'find', findTitle: 'Find my booking', eyebrow: singular(table) + ' received', title: 'Your ' + singular(table).toLowerCase() + ' is in' }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'receipt', title: 'Your ' + singular(table).toLowerCase(), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site) });
+  const html = renderPage(spec, { pages: navPages, slug: 'receipt', title: 'Your ' + singular(table).toLowerCase(), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE receipt (rendered from the visitor's own row on request)-->\n` + html;
 }
 
@@ -94,6 +94,28 @@ export async function renderLiveFind(pool: pg.Pool, projectId: string): Promise<
   if (!['app', 'store'].includes(String(params.archetype))) return null;
   const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'find', title: 'Find my booking' }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'find', title: 'Find my booking', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site) });
+  const html = renderPage(spec, { pages: navPages, slug: 'find', title: 'Find my booking', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE find (system page)-->\n` + html;
+}
+
+// FS2 — MY BOOKINGS: account.html, served live. Signed out -> the sign-in (magic link) form; signed
+// in -> the visitor's records across the app's private tables, each opening its own receipt. The
+// visitor rides in from the route (validated server-side against the app's OWN token table).
+export async function renderLiveAccount(pool: pg.Pool, projectId: string, visitor: { id: number; email: string } | null): Promise<string | null> {
+  const pr = (await pool.query('select params from projects where id=$1', [projectId])).rows[0];
+  if (!pr) return null;
+  const params = pr.params || {};
+  if (!params.site || !Array.isArray(params.site.pages) || !params.site.pages.length) return null;
+  if (!['app', 'store'].includes(String(params.archetype))) return null;
+  const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
+  let sections: any[];
+  if (!visitor) sections = [{ type: 'signin', title: 'Sign in' }];
+  else {
+    const { visitorRecords } = await import('../visitors.ts');
+    const items = await visitorRecords(pool, projectId, visitor.email);
+    sections = [{ type: 'records', title: 'My bookings', email: visitor.email, items }];
+  }
+  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections };
+  const html = renderPage(spec, { pages: navPages, slug: 'account', title: visitor ? 'My bookings' : 'Sign in', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
+  return `<!--relay:cms=directus LIVE account (system page)-->\n` + html;
 }

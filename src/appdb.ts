@@ -404,7 +404,7 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
 // System tables the client should NOT hand-edit as "content": join/system/transactional tables and
 // anything with no human-meaningful display column. Everything else (products, menu, posts, team…) is
 // editable content the client owns.
-const CONTENT_HIDDEN = /^(order_items|orders|submissions|sessions|auth|tokens?|migrations?|users?|accounts?)$/i;
+const CONTENT_HIDDEN = /^(_relay_\w+|order_items|orders|submissions|sessions|auth|tokens?|migrations?|users?|accounts?)$/i;
 
 // The editable content collections of a site — the "Products / Menu / Posts" a client manages.
 export async function contentTables(pool: pg.Pool, projectId: string): Promise<{ table: string; label: string; rows: number; display: string }[]> {

@@ -161,6 +161,39 @@ try {
   ok('new rows on the migrated table get tokens again', !!(await appdb.insertRow(pool, id, 'bookings', { customer_name: 'New Row' })).ref);
 }
 
+  // ---- FS2: visitor accounts — magic link, sessions in the app's OWN schema, isolation ----
+{
+  const V = await import('./visitors.ts');
+  const rq = await V.requestVisitorMagic(pool, id, 'ada@example.com');
+  ok('magic token minted for a valid email', typeof rq.token === 'string' && rq.token!.length === 32, JSON.stringify(rq));
+  ok('junk email refused', !(await V.requestVisitorMagic(pool, id, 'not-an-email')).token);
+  const s1 = await V.verifyVisitorMagic(pool, id, rq.token!);
+  ok('magic verifies into a session for the right visitor', !!s1 && s1!.visitor.email === 'ada@example.com');
+  ok('a magic token is SINGLE-use', (await V.verifyVisitorMagic(pool, id, rq.token!)) === null);
+  const who = await V.visitorFromSession(pool, id, s1!.session);
+  ok('the session validates server-side', !!who && who!.email === 'ada@example.com');
+  ok('a made-up session validates to nobody', (await V.visitorFromSession(pool, id, '0'.repeat(32))) === null);
+  const mine = await V.visitorRecords(pool, id, 'ada@example.com');
+  ok('My bookings scopes to the verified email — pre-account rows attach', mine.some(r => r.row.customer_name === 'Ada Visitor'), JSON.stringify(mine.map(m => m.row.customer_name)));
+  const rqB = await V.requestVisitorMagic(pool, id, 'bob@example.com');
+  const sB = await V.verifyVisitorMagic(pool, id, rqB.token!);
+  ok('visitor B signs in cleanly', !!sB);
+  ok("visitor B sees NONE of A's records (SQL-scoped)", (await V.visitorRecords(pool, id, 'bob@example.com')).length === 0);
+  const id2 = randomUUID();
+  await appdb.provision(pool, id2, MODEL);
+  ok('a session from app A is WORTHLESS on app B', (await V.visitorFromSession(pool, id2, s1!.session)) === null);
+  ok('per-app cookie names never collide', V.visitorCookieName(id) !== V.visitorCookieName(id2));
+  await pool.query(`drop schema if exists "${appdb.schemaName(id2)}" cascade`).catch(() => {});
+  const { renderLiveAccount } = await import('./cms/live.ts');
+  const outp = await renderLiveAccount(pool, id, null);
+  ok('account page signed out = the sign-in form', !!outp && outp!.includes('relayVisitorRequest'), outp ? 'content' : 'null');
+  const inp = await renderLiveAccount(pool, id, s1!.visitor);
+  ok('account page signed in = My bookings with the visitor rows + sign out', !!inp && inp!.includes('Ada Visitor') && inp!.includes('relayVisitorLogout'));
+  ok('receipt-enabled sites carry the account doors in the footer', !!inp && inp!.includes('href="account.html"') && inp!.includes('href="find.html"'));
+  ok('_relay_ tables hidden from the owner content tab', !(await appdb.contentTables(pool, id)).some(t => t.table.startsWith('_relay_')));
+  ok('_relay_ tables invisible to the public read API', (await appdb.readRows(pool, id, '_relay_visitors')).length === 0);
+}
+
   // ---- site_model gate: a facade page on a data archetype is REJECTED ----
   await pool.query('update projects set params=$2 where id=$1', [id, JSON.stringify(mk(['index', 'book', 'dashboard']))]);
   const bad = await verify(pool, { verify: 'site_model', project_id: id }, '');

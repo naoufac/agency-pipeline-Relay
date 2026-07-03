@@ -3,6 +3,7 @@
 import { DS_CSS, navBar, footer, SECTIONS, esc, ctaParts } from './components.ts';
 import { themeFor, themeFonts, themeVars } from './themes.ts';
 import { DEFAULT_LAYOUT, isHeroVariant, type Layout } from './layout.ts';
+import { PRIVATE_READ } from './schema.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -17,7 +18,12 @@ const pickOn = (bg: string) => contrast('#ffffff', bg) >= contrast('#0b1220', bg
 export const formPageSlug = (site: any): string | undefined =>
   ((site && site.pages) || []).find((p: any) => (p.sections || []).some((s: any) => s && s.type === 'form'))?.slug;
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string }): string {
+// FS2 — does this site keep visitor receipts/accounts? True when any form targets a private
+// visitor-record table; drives the footer's Find-my-booking / My-bookings doors on every page.
+export const receiptsEnabled = (site: any): boolean =>
+  ((site && site.pages) || []).some((p: any) => (p.sections || []).some((s: any) => s && s.type === 'form' && typeof s.table === 'string' && PRIVATE_READ.test(s.table)));
+
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string; accountLinks?: boolean }): string {
   // LAYOUT (structure) is chosen once per project (params.layout) and passed here; a stray value falls
   // back to the safe default. Independent of THEME (tokens) — together they make sites distinct.
   const lay: Layout = (ctx.layout && isHeroVariant(ctx.layout.hero)) ? ctx.layout : DEFAULT_LAYOUT;
@@ -96,10 +102,12 @@ ${(() => { const nc = ctaParts(spec && spec.brand && spec.brand.cta, spec && spe
 <main>
 ${sections}
 </main>
-${footer(brand, ctx.pages)}
+${footer(brand, ctx.pages, !!ctx.accountLinks)}
 <script>window.RELAY_PID=${JSON.stringify(ctx.projectId || '')};function relaySubmit(e){e.preventDefault();var f=e.target,d={};new FormData(f).forEach(function(v,k){d[k]=v});var m=f.querySelector('.rform-msg'),b=f.querySelector('button');if(b)b.disabled=true;var tbl=f.getAttribute('data-table');var url=tbl?('/api/site/'+window.RELAY_PID+'/data/'+encodeURIComponent(tbl)):('/api/site/'+window.RELAY_PID+'/submit');fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({form:f.dataset.form,data:d})}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(res){if(res&&res.ok===false)throw 0;if(res&&res.ref&&res.table){window.location.href='receipt-'+res.table+'-'+res.ref+'.html';return}f.reset();if(m){m.hidden=false;m.textContent=tbl?'Added ✓':'Thanks — we got your message.'}if(tbl&&window.__relayLoad)window.__relayLoad();}).catch(function(){if(m){m.hidden=false;m.textContent='Sorry, something went wrong — please try again.'}}).finally(function(){if(b)b.disabled=false});return false}
 /* FS1: find-my-booking — resolve a pasted reference code to its receipt page; or mail the links (no enumeration). */
 window.relayFindCode=function(e){e.preventDefault();var f=e.target,m=f.querySelector('.rform-msg');var code=String((new FormData(f)).get('code')||'').trim();if(!code)return false;fetch('/api/site/'+window.RELAY_PID+'/receipt/'+encodeURIComponent(code)).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){if(d&&d.page){window.location.href=d.page}else throw 0}).catch(function(){if(m){m.hidden=false;m.textContent='No receipt found for that code — check it and try again.'}});return false};
+window.relayVisitorRequest=function(e){e.preventDefault();var f=e.target,m=f.querySelector('.rform-msg'),b=f.querySelector('button');var em=(new FormData(f)).get('email');if(b)b.disabled=true;fetch('/api/site/'+window.RELAY_PID+'/visitor/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em})}).then(function(r){return r.json()}).then(function(){f.reset();if(m){m.hidden=false;m.textContent='Check your inbox — your sign-in link is on its way.'}}).catch(function(){if(m){m.hidden=false;m.textContent='Something went wrong — please try again.'}}).finally(function(){if(b)b.disabled=false});return false};
+window.relayVisitorLogout=function(){fetch('/api/site/'+window.RELAY_PID+'/visitor/logout',{method:'POST'}).then(function(){window.location.href='account.html'}).catch(function(){window.location.href='account.html'})};
 window.relayFindMail=function(e){e.preventDefault();var f=e.target,m=f.querySelector('.rform-msg'),b=f.querySelector('button');var em=(new FormData(f)).get('email');if(b)b.disabled=true;fetch('/api/site/'+window.RELAY_PID+'/receipt-mail',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em})}).then(function(r){return r.json()}).then(function(){f.reset();if(m){m.hidden=false;m.textContent='If we have anything under that address, the links are on their way.'}}).catch(function(){if(m){m.hidden=false;m.textContent='Something went wrong — please try again.'}}).finally(function(){if(b)b.disabled=false});return false};
 /* live read paths: .feed reads form submissions, .collection reads a real DB table. Both no-op under
    file:// (the gate) and populate over HTTP. textContent ONLY — server data is never injected as HTML. */

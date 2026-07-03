@@ -274,6 +274,27 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
             if (pub.includes(tok)) issues.push({ page: pg.slug, viewport: 'desktop', kind: 'receipt-not-private', detail: 'the receipt token leaks through the public read API', severity: 'high' });
           }
         } catch (e: any) { issues.push({ page: pg.slug, viewport: 'desktop', kind: 'no-receipt', detail: 'receipt probe failed: ' + String(e?.message ?? e).slice(0, 100), severity: 'high' }); }
+        // FS2 · THE ACCOUNT DOOR: account.html serves the sign-in form; a magic link (minted directly
+        // — probes never send real mail) signs the BROWSER in; My bookings lists the probe's own row.
+        try {
+          const acct = await fetch(`${baseUrl}/sites/${projectId}/account.html`);
+          const acctBody = await acct.text();
+          if (!acct.ok || !acctBody.includes('relayVisitorRequest'))
+            issues.push({ page: 'account', viewport: 'desktop', kind: 'no-account', detail: 'account.html does not serve the sign-in form — the app has no visitor accounts', severity: 'high' });
+          else {
+            const V = await import('./visitors.ts');
+            const rq = await V.requestVisitorMagic(pool, projectId, 'qa@example.com');   // the form probe books with this email
+            if (rq.token) {
+              await goto(page, `${baseUrl}/api/site/${projectId}/visitor/verify?token=${rq.token}`);
+              const my: any = await page.evaluate(`(function(){var r=document.querySelector('#records');return{records:!!r,rows:r?r.querySelectorAll('.card').length:0,me:(document.body.textContent||'').indexOf('qa@example.com')>=0}})()`).catch(() => null);
+              if (!my || !my.records || !my.me) issues.push({ page: 'account', viewport: 'desktop', kind: 'no-account', detail: 'the magic link did not sign the browser in to My bookings', severity: 'high' });
+              else if (my.rows < 1) issues.push({ page: 'account', viewport: 'desktop', kind: 'no-account', detail: 'My bookings is empty although this visitor just booked with this email', severity: 'high' });
+              const schV = appdb.schemaName(projectId);
+              await pool.query(`delete from "${schV}"."_relay_visitor_tokens" where visitor_id in (select id from "${schV}"."_relay_visitors" where email='qa@example.com')`).catch(() => {});
+              await pool.query(`delete from "${schV}"."_relay_visitors" where email='qa@example.com'`).catch(() => {});
+            }
+          }
+        } catch (e: any) { issues.push({ page: 'account', viewport: 'desktop', kind: 'no-account', detail: 'account probe failed: ' + String(e?.message ?? e).slice(0, 100), severity: 'high' }); }
       }
       // FS0 · PRIVACY: what a visitor just submitted about themselves must NOT be publicly listable.
       // The reviewer checks the LIVE public API right after its own submission landed.

@@ -8,7 +8,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { renderPage, formPageSlug } from '../render.ts';
+import { renderPage, formPageSlug, receiptsEnabled } from '../render.ts';
 import { processMedia } from '../media.ts';
 import { servedPath, brandFor, heroHeadline } from './util.ts';
 import type { CmsTarget, CmsInstance, SiteModel, BuildCtx } from './types.ts';
@@ -114,7 +114,7 @@ export const directus: CmsTarget = {
       if (!row) throw new Error(`directus buildAndServe: no CMS row for ${page.slug}`);
       const spec = { brand: brandFor(model), sections: row.sections };
       // M2: the schema snapshot rides along — a typed form must survive the CMS re-serve
-      const html = renderPage(spec, { pages: navPages, slug: page.slug, title: row.title || page.title, projectId: ctx.projectId, theme: ctx.theme, layout: (ctx as any).layout, forms: ctx.schemaForms?.forms, primaryTable: ctx.schemaForms?.primaryTable, formSlug: formPageSlug(model) });
+      const html = renderPage(spec, { pages: navPages, slug: page.slug, title: row.title || page.title, projectId: ctx.projectId, theme: ctx.theme, layout: (ctx as any).layout, forms: ctx.schemaForms?.forms, primaryTable: ctx.schemaForms?.primaryTable, formSlug: formPageSlug(model), accountLinks: receiptsEnabled(model) });
       // localize any remote images into the site dir (gate-safe), best-effort.
       let body = html;
       try { body = await processMedia(html, pathToFileURL(dir + path.sep)); } catch { /* image-light page or no key: ship as-is */ }

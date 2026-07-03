@@ -9,7 +9,8 @@ import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { publicWriteTables } from './spec.ts';
-import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind } from './cms/live.ts';
+import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, renderLiveAccount } from './cms/live.ts';
+import { requestVisitorMagic, verifyVisitorMagic, visitorFromCookie, visitorCookie, clearVisitorCookie, logoutVisitor } from './visitors.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 import { mailReady, notifyLead, sendMail } from './mail.ts';
@@ -204,6 +205,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
             if (fhtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(fhtml); return; }
           } catch (e: any) { console.error('live-find', live[1], e?.message ?? e); }
         }
+        // FS2 · MY BOOKINGS: sign-in / the signed-in visitor's records. The session is validated
+        // server-side against the app's OWN token table — the cookie is only the courier.
+        if (live[2] === 'account') {
+          try {
+            const v = await visitorFromCookie(pool, live[1], req.headers.cookie);
+            const ahtml = await renderLiveAccount(pool, live[1], v);
+            if (ahtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(ahtml); return; }
+          } catch (e: any) { console.error('live-account', live[1], e?.message ?? e); }
+        }
       }
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {
@@ -303,6 +313,44 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         }
       } catch (e: any) { console.error('receipt mail', rmailM[1], e?.message ?? e); }
       return send(res, 200, 'application/json', '{"ok":true}');   // ALWAYS "sent" — no enumeration
+    }
+    // ---- FS2 · visitor accounts on the produced app: request magic link / verify / logout ----
+    const vreqM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/visitor\/request$/i);
+    if (vreqM && req.method === 'POST') {
+      if (!UUID_RE.test(vreqM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      if (formLimited(clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many requests — try again shortly"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let email = ''; try { email = String(JSON.parse(raw || '{}').email || '').trim(); } catch {}
+      try {
+        const proj = (await pool.query('select params from projects where id=$1', [vreqM[1]])).rows[0];
+        if (proj && ['app', 'store'].includes(String(proj.params?.archetype))) {
+          const r = await requestVisitorMagic(pool, vreqM[1], email);
+          if (r.token) {
+            const link = `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/api/site/${vreqM[1]}/visitor/verify?token=${r.token}`;
+            sendMail(pool, vreqM[1], email, 'Your sign-in link', `Tap to sign in:\n\n${link}\n\nThe link works once and expires in 15 minutes. If you didn't request it, ignore this email.`).catch(() => {});
+          }
+        }
+      } catch (e: any) { console.error('visitor request', vreqM[1], e?.message ?? e); }
+      return send(res, 200, 'application/json', '{"ok":true}');   // ALWAYS "sent" — no enumeration
+    }
+    const vverM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/visitor\/verify$/i);
+    if (vverM && req.method === 'GET') {
+      if (!UUID_RE.test(vverM[1])) return send(res, 404, 'text/plain', 'not found');
+      try {
+        const v = await verifyVisitorMagic(pool, vverM[1], url.searchParams.get('token') || '');
+        if (v) {
+          res.writeHead(302, { 'set-cookie': visitorCookie(vverM[1], v.session), location: `/sites/${vverM[1]}/account.html` });
+          res.end(); return;
+        }
+      } catch (e: any) { console.error('visitor verify', vverM[1], e?.message ?? e); }
+      return send(res, 400, 'text/html; charset=utf-8', '<meta charset="utf-8"><body style="font-family:sans-serif;padding:40px">This sign-in link has expired or was already used. <a href="javascript:history.back()">Request a new one</a>.</body>');
+    }
+    const vlogM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/visitor\/logout$/i);
+    if (vlogM && req.method === 'POST') {
+      if (!UUID_RE.test(vlogM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      await logoutVisitor(pool, vlogM[1], req.headers.cookie).catch(() => {});
+      res.writeHead(200, { 'set-cookie': clearVisitorCookie(vlogM[1]), 'content-type': 'application/json' });
+      res.end('{"ok":true}'); return;
     }
     // ---- PQ2 · CHECKOUT: cart -> one transactional order (server-priced, never client prices) ----
     const orderM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/order$/i);

@@ -171,9 +171,12 @@ export function navBar(brand: string, pages: any[], current: string, ctaText?: s
   <ul class="nav-links">${links}${ctaText ? `<li><a class="btn" href="${esc(ctaHref)}">${esc(ctaText)}</a></li>` : ''}</ul>
 </div></nav>`;
 }
-export function footer(brand: string, pages: any[]) {
+export function footer(brand: string, pages: any[], accountLinks = false) {
+  // FS2: receipt-enabled apps carry the visitor's two standing doors in the footer — identical on
+  // every page (rendered unconditionally per site), so the consistency gates hold by construction.
+  const extras = accountLinks ? `<a href="find.html">Find my booking</a><a href="account.html">My bookings</a>` : '';
   return `<footer class="footer"><div class="container"><div class="footer-inner">
-  <span>© ${esc(brand)}</span><div class="footer-links">${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}</div>
+  <span>© ${esc(brand)}</span><div class="footer-links">${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}${extras}</div>
 </div></div></footer>`;
 }
 
@@ -329,6 +332,36 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <p class="rform-msg" hidden></p>
     </form>
   </div></div></section>`,
+  // FS2 · signin — email in, magic link out. SYSTEM-ONLY; served live at account.html (signed out).
+  signin: (s) => `<section class="section" id="signin"><div class="container"><div class="receipt-box">
+    <span class="eyebrow">${esc(s.eyebrow || 'Your account')}</span>
+    <h1>${esc(s.title || 'Sign in')}</h1>
+    <p class="lead muted">Enter your email — we'll send you a sign-in link. No password, ever.</p>
+    <form class="rform" onsubmit="return relayVisitorRequest(event)">
+      <label>Email<input name="email" type="email" required placeholder="you@example.com"></label>
+      <button class="btn" type="submit">Email me a sign-in link</button>
+      <p class="rform-msg" hidden></p>
+    </form>
+  </div></div></section>`,
+  // FS2 · records — "My bookings": the signed-in visitor's rows across the app's private tables,
+  // each opening its own receipt. SYSTEM-ONLY; rendered server-side from the verified email.
+  records: (s) => {
+    const items: any[] = Array.isArray(s.items) ? s.items : [];
+    const cards = items.map((it: any) => {
+      const row = it.row || {};
+      const title = ['title', 'name', 'customer_name'].map(k => row[k]).find(v => typeof v === 'string' && v.trim()) || ('#' + (row.id ?? ''));
+      const status = typeof row.status === 'string' && row.status.trim() ? `<span class="receipt-status">${esc(row.status)}</span>` : '';
+      const when = row.created_at instanceof Date ? row.created_at.toDateString() : String(row.created_at || '').slice(0, 10);
+      const open = it.ref ? `<a class="btn" href="receipt-${esc(it.table)}-${esc(it.ref)}.html" style="margin-top:.8rem">Open</a>` : '';
+      return `<div class="card"><p class="muted" style="margin-bottom:.3rem">${esc(humanize(String(it.table)))}${when ? ' · ' + esc(when) : ''}</p><h3>${esc(String(title))}</h3>${status}${open}</div>`;
+    }).join('');
+    return `<section class="section" id="records"><div class="container">
+    <span class="eyebrow">Signed in as ${esc(String(s.email || ''))}</span>
+    <h1>${esc(s.title || 'My bookings')}</h1>
+    ${items.length ? `<div class="grid grid-3" style="margin-top:2rem">${cards}</div>` : `<p class="lead muted">Nothing here yet — once you book, it shows up right here.</p>`}
+    <p style="margin-top:2rem"><button type="button" class="btn" onclick="relayVisitorLogout()" style="background:var(--surface);color:var(--text);border:1px solid var(--line)">Sign out</button></p>
+  </div></section>`;
+  },
   features: (s) => `<section class="section"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>
