@@ -151,6 +151,12 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       const used = Object.keys(row || {})
         .map(k => ({ col: colByKey(snake(k)), v: (row as any)[k] }))
         .filter((x): x is { col: NonNullable<ReturnType<typeof colByKey>>; v: any } => !!x.col && (!x.col.ref || Number.isInteger(Number(x.v))));
+      // FS3: seed statuses are coerced into the closed set (the CHECK would reject the model's own
+      // seeds — a build must never die on a seed row saying 'preparing')
+      for (const x of used) if (x.col.name === 'status' && LIFECYCLE_TABLE.test(name)) {
+        const lv = String(x.v ?? '').toLowerCase().trim();
+        x.v = STATUS_SET.includes(lv) ? lv : 'pending';
+      }
       if (!used.length) continue;
       const cols2 = used.map(x => x.col.name);
       const vals = used.map(x => lit(x.col.ref ? Number(x.v) : x.v, x.col.type));

@@ -224,6 +224,14 @@ try {
   ok("migrate resets a legacy auto-confirm default to 'pending'", migS.applied.some((a: string) => /status.*pending/.test(a)), JSON.stringify(migS.applied));
   const defNow = (await pool.query(`select column_default from information_schema.columns where table_schema='${schema}' and table_name='bookings' and column_name='status'`)).rows[0]?.column_default;
   ok("new rows on migrated tables are born 'pending'", /pending/.test(String(defNow)), String(defNow));
+  // seeds with out-of-set statuses are coerced, never a fatal provision (caught on the bakery redemption)
+  const id3 = randomUUID();
+  await appdb.provision(pool, id3, JSON.stringify({ entities: [
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text' }, { name: 'status', type: 'status' }],
+      seed: [{ customer_name: 'Seeded', status: 'preparing' }, { customer_name: 'Seeded2', status: 'Confirmed' }] }] }));
+  const seeded = (await pool.query(`select status from "${appdb.schemaName(id3)}"."orders" order by id`)).rows.map((r: any) => r.status);
+  ok("out-of-set seed statuses coerce to 'pending' (case-insensitive keeps valid ones)", JSON.stringify(seeded) === '["pending","confirmed"]', JSON.stringify(seeded));
+  await pool.query(`drop schema if exists "${appdb.schemaName(id3)}" cascade`).catch(() => {});
   const insN = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Notify N', email: 'notify@example.com' });
   const nid = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='Notify N'`)).rows[0].id);
   const rc = await appdb.rowContact(pool, id, 'bookings', nid);
