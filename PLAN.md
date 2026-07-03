@@ -83,13 +83,18 @@ Now CTAs route to the relevant page / action page / on-page conversion anchor, n
 Gate: dogfood flags circular and all-same-target buttons. Proven on the delivery app that had shipped
 all-index buttons.
 
-## PQ1 · Distinct design per brief
-**You get:** two different businesses no longer look like the same page recolored. Real compositional
-variety — multiple hero treatments, nav styles, section rhythms/layouts chosen from the brief.
-**Phone check:** build a law firm and a skate shop → open both → they look like different studios made
-them, not the same template in different colours.
-**Machine gate:** an automated check that several briefs yield structurally different layouts
-(different hero type, section order, nav) — plus a visual critique pass.
+## PQ1 · Distinct design per brief — CORE SHIPPED 2026-07-03, verdict with the owner
+**Shipped:** a 3-lens agency panel scored the old output 7.3/10 sameness on real screenshots; three
+closed-set axes later the structural space is ~240 combinations: hero funnel un-clustered (+
+distribution gate — no rule can silently collapse variants again), per-theme BUTTON recipes
+(sharp/pill/soft/ghost, AA-gated), and three CARD anatomies (photo stack / magazine horizontal /
+poster overlay) rotated independently of the hero. Proven on the plan's own phone check: law firm /
+skate shop / cafe built zero-touch came out visibly distinct (side-by-side sent to the owner).
+The proof run also hardened the floor: 'bookings' plural was invisible to the archetype classifier
+and the LLM could downgrade an app to a brochure — the classifier is now the floor, gated.
+**Phone check:** the trio side-by-side — owner is the judge.
+**Still ahead:** panel re-score for the number; hero art-direction (photo tint/crop rules); section
+rhythm variants; empty-state design.
 
 ## PQ2 · Ecommerce that actually sells — CORE SHIPPED 2026-07-02, widening
 **Shipped + proven live:** shop grid from the real products table with Add-to-cart · cart page
@@ -108,7 +113,10 @@ Proven zero-touch on a fresh coffee-roaster brief (eb1d46b5): reviewer PASSED 0 
 placed via PDP → cart → checkout. The proof also caught + fixed a seller-killing class: the page cap
 evicted checkout (store couldn't sell, probe silently skipped) — planner now trims brochure pages
 first, site_model requires cart + checkout on every store, a checkout-less store is a loud verdict.
-**Still ahead:** options/variants, stock awareness.
+**Stock awareness shipped 2026-07-03** (first boss/worker delegation): optional stock column honored
+end-to-end — row-locked oversell guard in the checkout transaction ('"Mug" is sold out' / 'only 3
+left'), Sold-out / Only-N-left on grid + product pages live, NULL = untracked. ecom:check 45→53.
+**Still ahead:** options/variants (sizes/colours).
 
 ## PQ · Agency-panel fixes (rolling — driven by "would a productive agency ship this?")
 A 3-lens agency panel (creative director · ecom lead · account director) judges Relay's real output;
@@ -258,6 +266,28 @@ deterministic brief-intent map (track → find-by-reference, portal → my-recor
 Content tab) drops NO core intent silently — a dropped intent is a failing gate.
 
 ---
+
+# THE AGENCY'S FRONT OFFICE (shipped 2026-07-03, owner-directed)
+
+## SCOPE · the honest intake ✅
+Every brief is scoped BEFORE building: a closed capability registry states what will be delivered
+(client-phrased promises), a closed unsupported registry declares what can't be done yet WITH the
+honest alternative (external APIs, native apps, card payments, multilingual), and a deterministic
+difficulty score 1–5. Stored on the project, logged, and spoken to the client. The FedEx-silent-drop
+class is dead — that brief verbatim is a gate test (scope:check, suite #11).
+**Phone check:** text the bot an over-ambitious brief → it answers Building + Scope + Not-included.
+
+## The Telegram front door ✅
+Text a brief to @nao_openclaw_alibaba_bot (owner-allowlisted) → Relay scopes it, builds it, replies
+with the verdict + live link. /status lists the latest builds. Inert without its env; a revoked
+token backs off, never hot-loops.
+
+## Boss/worker production ✅
+Fable is the boss (plans, briefs, line-by-line diff review, ships, proves); Sonnet workers implement
+under a leash as systemd units (no push, no deploy, scoped files, gates green before stopping).
+Five briefs shipped first-pass on day one (stock, front door, buttons, scope, cards). The prod
+deploy gate re-runs all suites inside prod and REVERTS on any failure — it held the bar against the
+boss himself once already.
 
 ## Standing rules (locked — same as GOAL.md)
 1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.
