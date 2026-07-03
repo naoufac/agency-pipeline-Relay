@@ -399,3 +399,12 @@ joins centered-nav pool, DISTRIBUTION gate in layout:check (>=3 heroes + both na
 matrix; 24→26). (2) card anatomy identical everywhere → worker brief B next (closed-set card styles
 per section role). (3) CTA button sameness → worker-03 running (per-theme button recipes via CSS
 vars: sharp/pill/soft/ghost + AA gate in theme-check). Panel screenshots /tmp/pq1-*.png.
+
+## 2026-07-03 — SCOPE shipped (owner-directed: difficulty + precise needs = reliability)
+Commit deployed; 11 suites green (scope:check 29 new). Every brief now gets an HONEST INTAKE at plan
+time: closed capability registry (what we deliver, client-phrased) + closed unsupported registry
+(what we can't yet, each with its alternative) + deterministic difficulty 1-5. params.scope + 'scoped'
+event; the Telegram front door replies Scope / Not-included before the build finishes. The FedEx
+silent-drop class is dead (tested verbatim). Also shipped this stretch: per-theme button shapes
+(PQ1-C, worker 03), layout chooser un-clustered + distribution gate (PQ1-A, boss). Front door LIVE on
+@nao_openclaw_alibaba_bot (owner tested). NEXT: PQ1-B card anatomy closed set (boss design → worker).
