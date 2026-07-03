@@ -468,6 +468,16 @@ export function siteCopySlop(pages: { sections: any[] }[]): string | null {
   if (s) return s;
   const ph = text.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);   // [Bracketed Placeholder]
   if (ph) return `unfilled placeholder "${ph[0]}"`;
+  // PAYMENTS honesty: on pages that SELL (checkout/cart/products sections), copy must never promise
+  // card processing the checkout does not provide ("We accept all major cards and PayPal" shipped on
+  // a real store whose checkout takes payment instructions). A brick-and-mortar page may say it; a
+  // selling page may not — the store's own words must match its own machinery.
+  for (const p of (pages || [])) {
+    if (!(p.sections || []).some((x: any) => ['checkout', 'cart', 'products'].includes(String(x?.type)))) continue;
+    const pt: string[] = []; collectText(p.sections, pt);
+    const lie = pt.join(' ').match(/\b(we )?accepts? [^.!?]{0,40}(credit cards?|debit cards?|major cards?|paypal|visa|mastercard|amex)|pay (securely )?(online )?(by|with) card/i);
+    if (lie) return `selling page promises card processing the checkout does not provide: "${lie[0].trim().slice(0, 60)}" — describe the real flow (order now, pay per the payment instructions)`;
+  }
   return null;
 }
 

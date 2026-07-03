@@ -295,6 +295,11 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
 
 // ---- COPY GATE moved to COMPOSE: slop rejected at the retryable stage; {{brand}} token is NOT slop ----
 {
+  // PAYMENTS honesty: a selling page may not promise card processing the checkout doesn't provide
+  ok('siteCopySlop: card-processing lie on a checkout page caught',
+    !!siteCopySlop([{ sections: [{ type: 'hero', headline: 'Checkout', lead: 'We accept all major cards and PayPal.' }, { type: 'checkout', title: 'Checkout' }] }]));
+  ok('siteCopySlop: the same words on a non-selling page are fine (brick-and-mortar copy)',
+    siteCopySlop([{ sections: [{ type: 'hero', headline: 'Visit us', lead: 'We accept all major cards and PayPal at the counter.' }, { type: 'features', items: [{ title: 'A', body: 'b' }] }] }]) === null);
   ok('siteCopySlop: lorem caught', !!siteCopySlop([{ sections: [{ type: 'hero', headline: 'Hi' }, { type: 'features', items: [{ title: 'A', body: 'Lorem ipsum dolor sit amet' }] }] }]));
   ok('siteCopySlop: [Placeholder] caught', !!siteCopySlop([{ sections: [{ type: 'hero', headline: 'Welcome to [Studio Name]' }] }]));
   ok('siteCopySlop: {{brand}} token is NOT slop', siteCopySlop([{ sections: [{ type: 'hero', headline: 'Welcome to {{brand}}', lead: '{{brand}} ships fast' }] }]) === null);
