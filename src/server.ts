@@ -16,6 +16,7 @@ import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 import { mailReady, notifyLead, sendMail } from './mail.ts';
 import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
+import { startTgDoor } from './tg-door.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -578,3 +579,4 @@ const recoverBlocked = async () => {
   } catch (e: any) { console.error('recoverBlocked', e?.message); }
 };
 setInterval(recoverBlocked, 300000).unref?.();  // every 5 min
+startTgDoor(pool);
