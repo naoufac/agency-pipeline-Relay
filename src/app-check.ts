@@ -34,6 +34,13 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
   ok("LLM 'site' cannot downgrade a bookings brief", archetypeFor('site', 'a neighborhood cafe with weekend brunch bookings') === 'app');
   ok("LLM 'store' honoured on a plain brief", archetypeFor('store', 'a portfolio for a painter') === 'store');
   ok('junk archetype falls back to the classifier', archetypeFor('spaceship', 'an online store for hats') === 'store');
+  // "boutique" is a shop only as a NOUN — as an adjective it forced a law firm into a store whose
+  // empty shop grid failed review (the reviewer's store-broken finding on a real rebuild)
+  ok("'boutique law firm … by appointment' is an app, never a store",
+    archetypeFor(undefined, 'a boutique law firm in Naples — estate and family law, consultations by appointment') === 'app');
+  ok("'a boutique consultancy' is not a store", archetypeFor(undefined, 'a boutique consultancy for family offices') !== 'store');
+  ok("'a fashion boutique' is a store", archetypeFor(undefined, 'a fashion boutique in Milan') === 'store');
+  ok("'a boutique selling …' is a store", archetypeFor(undefined, 'a boutique selling vintage dresses') === 'store');
 }
 
 // ---- SURFACE layer (pure) ----
@@ -124,7 +131,8 @@ const schema = appdb.schemaName(id);
 const MODEL = JSON.stringify({ entities: [
   { name: 'services', public: true, display: 'name', fields: [{ name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }],
     seed: [{ name: 'Cut', price: 30 }, { name: 'Shave', price: 22 }] },
-  { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }, { name: 'service', type: 'ref:services' }, { name: 'at', type: 'datetime' }] },
+  { name: 'reservations', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+  { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }, { name: 'service', type: 'ref:services' }, { name: 'reservation', type: 'ref:reservations', required: true }, { name: 'at', type: 'datetime' }] },
 ] });
 try {
   await appdb.provision(pool, id, MODEL);
@@ -142,6 +150,28 @@ try {
   ok('public form never offers "status"', !pubCols.includes('status'), pubCols.join(','));
   const ownCols = (await appdb.formColumns(pool, id, 'bookings', 'owner')).map(c => c.name);
   ok('the owner form keeps "status"', ownCols.includes('status'), ownCols.join(','));
+
+  // ---- refs into PRIVATE tables (the empty-dropdown class a reviewer caught on a real cafe build):
+  // a public form can never fill options from a sealed read, so the field must not render publicly —
+  // and the compiler must have made the column nullable so the public write path stays valid.
+  ok('public form omits a ref into a private table', !pubCols.includes('reservation_id'), pubCols.join(','));
+  ok('a ref into a PUBLIC table still renders publicly', pubCols.includes('service_id'), pubCols.join(','));
+  ok('the owner form keeps the private ref (Content tab links records)', ownCols.includes('reservation_id'), ownCols.join(','));
+  const rnul = (await pool.query(`select is_nullable from information_schema.columns where table_schema=$1 and table_name='bookings' and column_name='reservation_id'`, [schema])).rows[0];
+  ok('a REQUIRED ref into a private table compiles NULLABLE', rnul?.is_nullable === 'YES', JSON.stringify(rnul));
+  {
+    const { parseModel, compile } = await import('./schema.ts');
+    const m = compile(parseModel(JSON.stringify({ entities: [
+      { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+      { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'qty', type: 'int', required: true }] },
+    ] })));
+    ok('order_items keeps its server-written NOT NULL FK', /"order_id" integer not null references/.test(m.ddl), m.ddl.slice(0, 300));
+    const m2 = compile(parseModel(JSON.stringify({ entities: [
+      { name: 'reservations', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+      { name: 'preorders', fields: [{ name: 'reservation', type: 'ref:reservations', required: true }, { name: 'item', type: 'text', required: true }] },
+    ] })));
+    ok('the nullable demotion is loud (compile warning)', m2.warnings.some((w: string) => /reservation_id.*nullable/.test(w)), JSON.stringify(m2.warnings));
+  }
   await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Mallory', status: 'confirmed' });
   const mal = (await pool.query(`select status from "${schema}"."bookings" where customer_name='Mallory'`)).rows[0];
   ok("a crafted public POST cannot set status — the row is born 'pending'", !!mal && mal.status === 'pending', String(mal?.status));

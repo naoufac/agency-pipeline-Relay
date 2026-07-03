@@ -10,8 +10,10 @@ export const ARCHETYPES: Archetype[] = ['site', 'app', 'store'];
 export const DEFAULT_ARCHETYPE: Archetype = 'site';
 
 // First match wins; `store` before `app` (a shop is a more specific app). `site` is the fallback.
+// "boutique" counts ONLY as a noun-shop ("fashion boutique", "a boutique selling dresses") — as an
+// adjective ("a boutique law firm") it forced a real law brief into a store with an empty shop grid.
 const RULES: [Archetype, RegExp][] = [
-  ['store', /\b(shop|store|e-?commerce|e-?shop|catalog(ue)?|checkout|\bcart\b|boutique|merch|webshop|sell (online|products?)|product (page|catalog))\b/],
+  ['store', /\b(shop|store|e-?commerce|e-?shop|catalog(ue)?|checkout|\bcart\b|(fashion|clothing|apparel|bridal|jewell?e?ry|vintage|flower|dress|gift) boutiques?|boutiques? (selling|of|for)|merch|webshop|sell (online|products?)|product (page|catalog))\b/],
   ['app', /\b(app|application|platform|saas|dashboard|portal|bookings?|reservations?|reserve|delivery|marketplace|directory|listings?|\bcrm\b|\berp\b|tracker|tracking|sign[- ]?up|log[- ]?in|members? area|membership|subscription|orders?|inventory|appointments?|scheduling|on[- ]?demand|ride[- ]?hailing|fleet|jobs? board|classifieds)\b/],
 ];
 

@@ -116,6 +116,12 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     // (an '' default would collide on the unique index and make old rows "findable" by nothing).
     if (PRIVATE_READ.test(name) && !list.some(c => c.name === 'ref_token'))
       list.push({ name: 'ref_token', type: 'text', required: false, unique: false, def: undefined });
+    // A visitor-writable table may not REQUIRE a reference into a private table: public reads of the
+    // target are sealed, so a public form could never offer real options (the empty-dropdown class a
+    // reviewer caught on a real cafe build). The column survives — the owner links records in the
+    // Content tab — it just can't be `not null`. Server-written order_items keeps its NOT NULL FK.
+    if (PRIVATE_READ.test(name) && name !== 'order_items')
+      for (const c of list) if (c.ref && PRIVATE_READ.test(c.ref) && c.required) { c.required = false; warnings.push(`${name}.${c.name}: required ref into private ${c.ref} made nullable (public form can never fill it)`); }
     // FS3 — lifecycle tables carry a SYSTEM-OWNED status: default 'pending' (an LLM default of
     // 'confirmed' would auto-confirm strangers), values bound to the closed set by a CHECK.
     if (LIFECYCLE_TABLE.test(name)) {

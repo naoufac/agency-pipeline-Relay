@@ -582,6 +582,9 @@ export async function formColumns(pool: pg.Pool, projectId: string, table: strin
     if (['id', 'created_at'].includes(c.name) || SENSITIVE.test(c.name)) continue;
     if (audience !== 'owner' && SYSTEM_COLS.test(c.name)) continue;   // FS0: a visitor never fills "Status"
     const ref = fkMap.get(c.name);
+    // a PUBLIC form never shows a dropdown into a private table — its read is sealed, so the options
+    // would always be empty (compile makes these nullable, so omitting the field keeps inserts valid)
+    if (ref && audience !== 'owner' && PRIVATE_READ.test(ref) && c.nullable) continue;
     if (ref) out.push({ ...c, ref, display: await displayColumn(pool, schema, ref) });
     else if (!/_id$/.test(c.name)) out.push(c);
   }
