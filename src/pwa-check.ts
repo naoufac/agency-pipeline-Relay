@@ -23,6 +23,9 @@ const ok = (name: string, cond: boolean, extra = '') => { if (cond) pass++; else
   ok('manifest: 192 + 512 + maskable icons declared', Array.isArray(m.icons) && m.icons.length === 3 && m.icons.some((i: any) => i.purpose === 'maskable'));
   const g = manifestFor({} as any);
   ok('manifest: garbage brand → still complete (never empty)', !!g.name && !!g.short_name && /^#/.test(g.background_color) && /^#/.test(g.theme_color));
+  ok("short_name keeps whole words that fit ('Sal's on Oak' → itself, 12 chars)", manifestFor({ name: "Sal's on Oak" }).short_name === "Sal's on Oak");
+  ok('short_name never ends on a dangling stopword', manifestFor({ name: "Sal's on Oakwood Avenue" }).short_name === "Sal's");
+  ok('long single word still truncates safely', manifestFor({ name: 'Extraordinarily' }).short_name.length <= 12);
 }
 
 // ---- service worker: parses, never touches /api/, pages are network-first ----

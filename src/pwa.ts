@@ -23,9 +23,14 @@ export function manifestFor(brand: PwaBrand): any {
   const name = String(brand?.name || 'Site').trim().slice(0, 45) || 'Site';
   const bg = isHex(brand?.tokens?.bg) ? String(brand!.tokens!.bg).trim() : '#ffffff';
   const primary = isHex(brand?.tokens?.primary) ? String(brand!.tokens!.primary).trim() : '#0b1220';
+  // short_name: as many whole words as fit 12 chars, never ending on a dangling stopword
+  // ("Sal's on Oak" fits whole; a naive 2-word slice shipped "Sal's on" under a real icon)
+  const words = name.split(/\s+/); const kept: string[] = [];
+  for (const w of words) { if ([...kept, w].join(' ').length > 12) break; kept.push(w); }
+  while (kept.length > 1 && /^(on|at|of|the|and|&|in|by|for)$/i.test(kept[kept.length - 1])) kept.pop();
   return {
     name,
-    short_name: (name.split(/\s+/).slice(0, 2).join(' ').slice(0, 12) || name.slice(0, 12)),
+    short_name: (kept.join(' ') || name.slice(0, 12)),
     start_url: './',
     scope: './',
     display: 'standalone',
