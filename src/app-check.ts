@@ -166,6 +166,18 @@ try {
       { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'qty', type: 'int', required: true }] },
     ] })));
     ok('order_items keeps its server-written NOT NULL FK', /"order_id" integer not null references/.test(m.ddl), m.ddl.slice(0, 300));
+    // FS2 floor: a visitor-writable table without an email column gets one injected (nullable) —
+    // the normalized-CRM shape (identity only on `clients`) must never strip the visitor's identity
+    const m3 = compile(parseModel(JSON.stringify({ entities: [
+      { name: 'attorneys', public: true, fields: [{ name: 'full_name', type: 'text', required: true }] },
+      { name: 'appointments', fields: [{ name: 'attorney', type: 'ref:attorneys', required: true }, { name: 'appointment_date', type: 'datetime', required: true }] },
+    ] })));
+    ok('visitor-writable table without email gets one injected', /create table "appointments"[\s\S]*?"email" text/.test(m3.ddl), m3.ddl.slice(0, 400));
+    ok('order_items never gets an injected email', !/create table "order_items"[\s\S]*?"email" text/.test(m.ddl));
+    const m4 = compile(parseModel(JSON.stringify({ entities: [
+      { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email', required: true }] },
+    ] })));
+    ok('a table that already has email is untouched (no duplicate)', (m4.ddl.match(/"email"/g) || []).length === 1, m4.ddl.slice(0, 300));
     const m2 = compile(parseModel(JSON.stringify({ entities: [
       { name: 'reservations', fields: [{ name: 'customer_name', type: 'text', required: true }] },
       { name: 'preorders', fields: [{ name: 'reservation', type: 'ref:reservations', required: true }, { name: 'item', type: 'text', required: true }] },

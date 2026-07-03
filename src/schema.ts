@@ -116,6 +116,14 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     // (an '' default would collide on the unique index and make old rows "findable" by nothing).
     if (PRIVATE_READ.test(name) && !list.some(c => c.name === 'ref_token'))
       list.push({ name: 'ref_token', type: 'text', required: false, unique: false, def: undefined });
+    // FS2 floor — a visitor-writable table must carry the visitor's own contact identity: an LLM
+    // that models a normalized CRM (identity on a separate private `clients` table) strips email
+    // from the action row, and receipts-by-mail / claim-on-verify / My-bookings all die (a real law
+    // build failed its act-probe exactly this way). Nullable, injected only when absent; the
+    // server-written / account-system tables are exempt.
+    if (PRIVATE_READ.test(name) && !/^(order_items|users?|accounts?|sessions?|tokens?|payments?)$/i.test(name)
+        && !list.some(c => /^e[-_]?mail(_address)?$/i.test(c.name)))
+      list.push({ name: 'email', type: 'text', required: false, unique: false, def: undefined });
     // A visitor-writable table may not REQUIRE a reference into a private table: public reads of the
     // target are sealed, so a public form could never offer real options (the empty-dropdown class a
     // reviewer caught on a real cafe build). The column survives — the owner links records in the
