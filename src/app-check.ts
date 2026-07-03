@@ -46,6 +46,15 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
   ok("'a boutique selling …' is a store", archetypeFor(undefined, 'a boutique selling vintage dresses') === 'store');
 }
 
+// ---- primary catalog table (machine tables are furniture) ----
+{
+  const { choosePrimaryTable } = await import('./runner.ts');
+  ok('time_slots with most rows loses to a content table', choosePrimaryTable([{table:'time_slots',rows:40},{table:'practice_areas',rows:4}]) === 'practice_areas');
+  ok('named content beats row count', choosePrimaryTable([{table:'misc',rows:50},{table:'services',rows:3}]) === 'services');
+  ok('ONLY machine tables with rows → no catalog', choosePrimaryTable([{table:'time_slots',rows:40},{table:'schedules',rows:9}]) === '');
+  ok('lookup tables still excluded', choosePrimaryTable([{table:'settings',rows:10},{table:'products',rows:2}]) === 'products');
+}
+
 // ---- SURFACE layer (pure) ----
 {
   // a collection over a private table is DROPPED, never rendered

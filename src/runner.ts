@@ -68,6 +68,17 @@ async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[
   return r.rows;
 }
 
+// The homepage catalog table. Machine/scheduling tables are FURNITURE, never content — a law build
+// once rendered a homepage catalog of time_slots. If only machine tables have rows, there is NO
+// primary catalog ('' → nothing is injected); no catalog is better than machine furniture.
+const MACHINE_TABLE = /^(time_?slots?|slots?|availabilit(y|ies)|schedules?|calendars?|shifts?|opening_?hours?|hours|blackout_dates?|holidays?)$/i;
+export function choosePrimaryTable(tables: { table: string; rows: number }[]): string {
+  const lookup = /contact|setting|config|admin|^users?$|account|auth|session|^tags?$|meta|_info$|^info$/i;
+  const named = /product|listing|item|menu|post|article|service|event|propert|vehicle|\bcar\b|recipe|course|\bjob|maker|plant|book|dish|room|catalog|portfolio|gallery|review|member|deal|offer|spot|class|trip|tour/i;
+  const cand = tables.filter((t) => !lookup.test(t.table) && !MACHINE_TABLE.test(t.table) && t.rows > 0).sort((a, b) => b.rows - a.rows);
+  return (cand.find((t) => named.test(t.table)) || cand[0] || { table: '' }).table;
+}
+
 async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   const proj = await pool.query('select brief, params from projects where id=$1', [task.project_id]);
   const ups = await pool.query(
@@ -108,10 +119,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       const desc = await appdb.describeSchema(pool, task.project_id);
       tables = desc.tables.map((t: any) => t.table);
       for (const t of tables) forms[t] = await appdb.formColumns(pool, task.project_id, t);
-      const lookup = /contact|setting|config|admin|^users?$|account|auth|session|^tags?$|meta|_info$|^info$/i;
-      const named = /product|listing|item|menu|post|article|service|event|propert|vehicle|\bcar\b|recipe|course|\bjob|maker|plant|book|dish|room|catalog|portfolio|gallery|review|member|deal|offer|spot|class|trip|tour/i;
-      const cand = desc.tables.filter((t: any) => !lookup.test(t.table) && t.rows > 0).sort((a: any, b: any) => b.rows - a.rows);
-      primaryTable = (cand.find((t: any) => named.test(t.table)) || cand[0] || desc.tables.filter((t: any) => t.rows > 0).sort((a: any, b: any) => b.rows - a.rows)[0] || { table: '' }).table;
+      primaryTable = choosePrimaryTable(desc.tables);
       // FS1 — the ACTION table: the private visitor-record table the core form must WRITE (a booking
       // app's core action creates an appointment, never a catalog row). Deterministic: private tables
       // with fillable columns, action-named first; system/identity tables never qualify.
