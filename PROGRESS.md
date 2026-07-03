@@ -343,3 +343,16 @@ My bookings lists the probe booking. External proof: book → magic (token from 
 "Signed in as zoro@relay.test" + booking card + Open receipt; signed-out leaks nothing.
 FS track remains: FS3 (real booking semantics: typed slots, capacity UNIQUE, status lifecycle
 owner↔visitor + notify email) → FS4 (redeem the two facade briefs; standing full-loop gate).
+
+## 2026-07-03 — FS3 SHIPPED + PROVEN (real booking semantics)
+Commits e76371b · 40c30c7 deployed (10 suites green, app:check 115). Status lifecycle compiled in
+(pending default + closed-set CHECK on lifecycle tables; LLM 'confirmed' defaults overridden; migrate
+resets legacy defaults — caught live on the migrated barbershop, gated). updateRow enforces the
+closed set even for the owner; content PATCH status flip → visitor email w/ receipt link (verified
+in the mail_sent ledger). insertRow (public): past dates refused, capacity-aware slot guard
+(resource FKs + date/time coords; resource.capacity honored; cancelled/declined free slots; 23505
+races answer friendly); actionable errors ride to the form via the route + relaySubmit. Dogfood
+probe dates now dynamic-future (fixed 2026-01-01 fixture had gone stale). External proof: book →
+born pending → double-book refused → yesterday refused → owner confirm → receipt Confirmed +
+mail_sent event → garbage status refused. REMAINING IN FS TRACK: FS4 — redeem the two facade briefs
+(the owner's delivery-app brief verbatim + the bakery pre-order) with the standing full-loop gate.

@@ -218,7 +218,16 @@ lists yours only; a second address in a private tab sees an empty list.
 probe proves app A's session token is worthless on app B; probes never send real mail (tokens read
 from the scratch DB; the mail path verified once via the sent-mail ledger).
 
-## FS3 · Real booking semantics — truth in the data, not the copy
+## FS3 · Real booking semantics — truth in the data, not the copy ✅ (2026-07-03)
+**Shipped + proven zero-touch** (barbershop rebuild PASSED 0 high; verified externally on the live
+site): bookings are born **pending** — compiled default + CHECK on the closed set (the LLM had been
+auto-confirming strangers with default 'confirmed'; migration also resets legacy defaults, gated);
+the owner flips status in the Content tab through the closed set only (garbage refused) and the
+visitor is emailed with their receipt link (mail_sent ledger: "Your appointment is confirmed");
+the receipt shows the status live. Server-side validation with actionable in-page errors: a past
+date → "that appointment date is in the past"; double-booking the same resource+time → "that slot
+was just taken" (capacity-aware: a resource declaring capacity N books N times; cancelled/declined
+free their slot; different resource, same time books fine). app:check 101→115.
 **You get:** time fields are real date/time types validated server-side; double-booking is impossible
 via a capacity-aware UNIQUE constraint (never an LLM promise); every submission carries a status
 (pending → confirmed/declined/cancelled) the owner flips in the existing Content tab; the visitor's
