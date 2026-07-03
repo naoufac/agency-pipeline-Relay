@@ -521,3 +521,22 @@ LIVE with the site's own chrome via renderLiveChain — works retroactively for 
 seals gated with canary strings (event/issue detail text, emails, tokens can never render).
 Proven live on the pizzeria build (owner sent the mobile shot). Chain pivot: #1 PWA ✅ · #2 chain
 surface ✅ · #3 capability growth NEXT.
+
+## 2026-07-04 — FS5 REAL AVAILABILITY shipped (chain pivot #3, evidence-driven)
+Prod bda8a46, 13 suites (app:check 151→164). The received briefs said it verbatim ('customers pick
+a barber, a service and a TIME SLOT'): appdb.freeSlots computes a day's free slots from the SAME
+coordinates the FS3 slot guard enforces (resource FKs + timestamp; cancelled/declined free slots;
+capacity books N; past hours closed) on a deterministic 09:00–16:00 grid. GET /api/site/:id/slots/
+:table serves aggregate free/busy — never who booked. Slot-table timestamp fields render as date +
+tappable time chips (resource-aware refetch: pick a barber → THEIR availability), hidden input
+carries the real timestamp, unreachable API degrades to the plain date field. Act-probe books
+through the new shape. SCOPE promises 'a real availability picker'. Front door: '/start' (a real
+received message) is never a brief again.
+PROOFS: machine gate proves the full loop on real Postgres (booked 10:00 flips TAKEN, cancellation
+frees it, capacity honored, privacy: aggregate only). Live: cafe rebuild PASSED zero-touch, picker
+on every form page, slots API serving. THE MACHINE TAUGHT US THE NEXT CLASS: the LLM draws THREE
+booking-time shapes — single timestamp (FS5 fully live) · split date+time columns (this cafe:
+picker binds the date, availability day-level) · slot-inventory rows (barbershop build: time_slots
+FK dropdown; machine-table fix correctly kept it off the homepage). NEXT #1: canonical booking-time
+shape forced at the compile floor (ONE timestamp column class), then hour-level availability is
+universal. Also queued: freeSlots for slot-row inventories.

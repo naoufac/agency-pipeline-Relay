@@ -319,10 +319,13 @@ needs the panel number. Remaining PQ1 residuals (register cards, re-score) move 
    built' in its footer: the full trace, live from the production DB, client-readable, leak-sealed
    (chain:check, suite #13). Works retroactively on every site ever built.
    **Phone check (yours):** open any produced site → footer → "How this site was built".
-3. **Capability growth (flexibility for real client needs)** — widen SCOPE's closed capability
-   registry one capability at a time, each with its own gate, driven by real briefs the front door
-   receives (the astrology app, the FedEx ask). The registry is HOW the agency says yes to more
-   without lying about what it can't do yet.
+3. **Capability growth (flexibility for real client needs)** — one capability at a time, each
+   gated, driven by real briefs. ✅ FIRST SHIPPED 2026-07-04: **real availability** — booking forms
+   offer tappable FREE time slots (computed server-side from the same coordinates the double-booking
+   guard enforces; capacity-aware; aggregate-only, never who booked). app:check 164; proven live on
+   a zero-touch cafe rebuild. **Next capability class:** canonical booking-time shape at the compile
+   floor (the LLM draws 3 shapes — single timestamp / split date+time / slot-inventory rows; force
+   ONE so hour-level availability is universal), then store payments (the 6 store briefs' real gap).
 
 ## Standing rules (locked — same as GOAL.md)
 1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.
