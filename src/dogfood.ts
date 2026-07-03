@@ -35,6 +35,8 @@ const LAYOUT = `(()=>{var n=document.querySelector('.nav-inner'),c=document.quer
 const STRUCT = `(function(){var b=document.querySelector('.nav-brand');return{navs:document.querySelectorAll('nav').length,logos:document.querySelectorAll('.nav-brand').length,logo:b?(b.textContent||'').trim():''}})()`;
 const LINKS = `Array.from(document.querySelectorAll('a')).map(function(a){return{text:(a.textContent||'').trim().slice(0,60),href:a.getAttribute('href')||'',btn:a.classList.contains('btn')}})`;
 const COLLS = `Array.from(document.querySelectorAll('.collection[data-table]')).map(el=>({table:el.getAttribute('data-table'),cards:el.querySelectorAll('.card').length}))`;
+// card body copy that is machine residue, not prose: a kebab/snake slug or a bare (possibly #-prefixed) number
+const CARD_NOISE = `(function(){var out=[];Array.prototype.forEach.call(document.querySelectorAll('.card p'),function(p){var t=(p.textContent||'').trim();if(!t)return;if(/^[a-z0-9]+(?:[-_][a-z0-9]+)+$/.test(t))out.push({kind:'slug',text:t.slice(0,60)});else if(/^#?\\d+(\\.\\d+)?$/.test(t))out.push({kind:'number',text:t.slice(0,20)})});return out.slice(0,6)})()`;
 const FORMINFO = `(function(){var f=document.querySelector('form.rform[data-table]')||document.querySelector('form.rform');if(!f)return null;var fields=[];f.querySelectorAll('input,textarea,select').forEach(function(el){if(!el.name)return;fields.push({name:el.name,tag:el.tagName.toLowerCase(),required:!!el.required,ref:el.getAttribute('data-ref')||null,options:el.tagName==='SELECT'?el.options.length:0})});return{table:f.getAttribute('data-table')||'',fields:fields}})()`;
 const SUBMIT = `new Promise(res=>{var f=document.querySelector('form.rform[data-table]')||document.querySelector('form.rform');if(!f)return res({form:false});var tbl=f.getAttribute('data-table')||'';f.querySelectorAll('input,textarea,select').forEach(function(el,i){if(el.tagName==='SELECT'){if(el.options.length>1)el.selectedIndex=1;el.dispatchEvent(new Event('change',{bubbles:true}));return;}var t=(el.type||'').toLowerCase();if(t==='checkbox'){el.checked=true;}else if(t==='number'){el.value=String(10+i);}else if(t==='email'){el.value='qa@example.com';}else if(t==='date'){el.value=new Date(Date.now()+7*86400000).toISOString().slice(0,10);}else if(el.tagName==='TEXTAREA'){el.value='Automated QA check — please ignore.';}else{el.value='QA Test '+i;}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});try{f.requestSubmit?f.requestSubmit():f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}))}catch(e){}setTimeout(function(){var m=f.querySelector('.rform-msg');var t=m?(m.textContent||''):'';res({form:true,table:tbl,msg:t.trim(),ok:/thank|got your|received|success|added/i.test(t)})},3500)})`;
 
@@ -106,6 +108,12 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
             let apiRows = -1;
             if (c.table && /^[a-z_][a-z0-9_]*$/.test(c.table)) { try { const d: any = await (await fetch(`${baseUrl}/api/site/${projectId}/data/${c.table}`)).json(); apiRows = (d.rows || []).length; } catch {} }
             if (!c.cards && apiRows > 0) issues.push({ page: pg.slug, viewport: vp.name, kind: 'collection-not-rendering', detail: `collection "${c.table}" has ${apiRows} rows in the DB but rendered 0 — the page isn't loading its data`, severity: 'high' });
+          }
+          // CARD NOISE: a raw database slug ('elder-law-guardianship') or a bare unlabeled number ('60')
+          // shipped as card body copy is pipeline residue a client would spot instantly (agency-panel #1).
+          for (const n of (((await page.evaluate(CARD_NOISE).catch(() => [])) as any[]) || [])) {
+            if (n.kind === 'slug') issues.push({ page: pg.slug, viewport: vp.name, kind: 'card-noise', detail: `card body copy shows a raw database slug ("${n.text}")`, severity: 'high' });
+            else issues.push({ page: pg.slug, viewport: vp.name, kind: 'card-noise', detail: `card body copy shows a bare unlabeled number ("${n.text}")`, severity: 'medium' });
           }
         }
       }

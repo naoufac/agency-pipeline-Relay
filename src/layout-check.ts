@@ -84,6 +84,10 @@ for (const cv of ['photo', 'horizontal', 'overlay'] as const) {
 }
 ok('DS_CSS contains .l-cards-horizontal rule', DS_CSS.includes('.l-cards-horizontal'));
 ok('DS_CSS contains .l-cards-overlay rule', DS_CSS.includes('.l-cards-overlay'));
+// the DB-card renderer must FILTER machine residue (raw slugs / bare numbers) out of card copy —
+// the agency panel's #1 on a real law rebuild ('elder-law-guardianship' shipped as body text)
+ok('emitted card renderer filters slugs + bare numbers', rendered.image.includes('(?:[-_][a-z0-9]+)+'), 'NOISE filter missing from page script');
+ok('DB-card images take the theme frame (no hardcoded radius)', rendered.image.includes('border-radius:var(--radius)'));
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
