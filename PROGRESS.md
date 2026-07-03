@@ -450,3 +450,25 @@ colliding green palettes (LLM whim). Two panel claims ('no grading anywhere') co
 the structural findings stand. Final trio (law bbb7cdfe / skate 12b8f47e / cafe 0ecfde36) all
 PASSED review zero-touch on the new design. NEXT #1 rewritten: palette distinctness axis +
 register-aware catalog cards, then re-score toward ≤4.
+
+## 2026-07-03 (night) — GROK joins the crew + the law brief's four-class gauntlet
+Grok CLI installed as a second worker (grok-worker.sh: systemd unit, ProtectSystem=strict, push URL
+disabled during runs). FIRST BRIEF FIRST-PASS: 06-catalog-register — 'Browse' was hardcoded on every
+catalog; now closed-set by table (services→'Our services', menu_items→'The menu', humanize fallback);
+surgical 2-file diff, spec:check 131. Grok is FAST — minutes, not tens of minutes.
+The law proof brief then ran a four-class gauntlet, each rebuild exposing + killing a forever-class:
+(1) template literal ATE the card filter's backslashes — emitted /^#?d+/ was dead; gate now asserts
+    the LITERAL emitted regex (layout:check 37); admin-flag booleans (is_active) out of card copy.
+(2) FS2 floor: normalized-CRM models stripped the visitor's email from the action table (identity
+    on private 'clients') → My-bookings died; compile injects nullable email like FS1's ref_token
+    (app:check 138).
+(3) 'consultations' invisible to PRIVATE_READ (the bookings-plural class again): publicly readable
+    visitor records, no floors firing; word list learns consultations/callbacks/intakes/enrollments
+    + ANY *_requests (app:check 147).
+(4) unseeded catalogs behind REQUIRED form dropdowns (empty attorneys/services = form can never
+    submit) → normalizeDataModel rejects into retry with 'seed 3-6 realistic X' feedback
+    (spec:check 134).
+Proof: the same brief PASSED review zero-touch (0a211ce4, 1 medium). Boss-eye classes for next
+session, recorded: raw ISO timestamps in cards (format like receipts) · machine tables (time_slots)
+must never be the injected homepage catalog · brand-palette distinctness axis (law+skate drew twin
+greens) · commerce framing register on service cards.
