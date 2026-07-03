@@ -552,3 +552,14 @@ time_slots rows two builds ago now produces barbers/bookings/services with booki
 FREE for barber 2, receipt token issued, review PASSED. Real availability is now UNIVERSAL on
 booking apps. NEXT (per plan): store payments (the 6 store briefs' true gap) · freeSlots grid from
 an hours table when the model ships one · PQ backlog (register cards, re-score).
+
+## 2026-07-04 — PAYMENTS v1: every store says how to pay; every claim is honest
+Prod 67011ac + copy gate (spec 143). The deterministic half of the 6-store-brief gap, shipped:
+compile injects payment_options into every orders model (safe seed 'Pay on pickup' — the LLM never
+invents an IBAN, gated); owner edits real details in the existing Content tab; checkout renders
+active options live in a 'How you'll pay' box; owner confirms paid via the FS3 status flow. SCOPE
+promises it; the card-payments exclusion tells the new truth. PROOF zero-touch: hot-sauce store
+built with 0 review issues, options served live, box on checkout. The proof's own copy said 'We
+accept all major cards' — a lie over an instructions checkout → copy gate now rejects card claims
+on SELLING pages (brick-and-mortar wording stays legit). Card processing in-checkout (per-client
+Stripe keys, webhooks, key custody) = the owner-decision roadmap item, options documented in chat.
