@@ -3,7 +3,7 @@
 // A gate that can't say NO isn't a gate — several cases assert REJECTION. Exits non-zero on any failure.
 import { normalizeSpec } from './spec.ts';
 import { copySlop, } from './verify.ts';
-import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent, normalizeDataModel, siteCopySlop, normalizeSite } from './spec.ts';
+import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent, normalizeDataModel, siteCopySlop, normalizeSite, catalogTitle } from './spec.ts';
 import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
 
@@ -63,6 +63,17 @@ const hero = (h = 'Welcome') => ({ type: 'hero', headline: h });
   const r = normalizeSpec({ brand: { name: 'X' }, sections: [hero(), { type: 'features', items: [{ title: 'A' }] }] }, { slug: 'shop', tables: ['products'], primaryTable: 'products' });
   ok('collection injected on catalog page', r.spec.sections.some((s: any) => s.type === 'collection' && s.table === 'products'));
   ok('injected after hero (hero stays first)', r.spec.sections[0].type === 'hero');
+}
+// catalogTitle: register-aware catalog titles (law firm practice_areas is not a shop "Browse")
+ok('catalogTitle: services → Our services', catalogTitle('services') === 'Our services');
+ok('catalogTitle: products → Browse', catalogTitle('products') === 'Browse');
+ok('catalogTitle: menu_items → The menu', catalogTitle('menu_items') === 'The menu');
+ok('catalogTitle: practice_areas humanize fallback → Practice areas', catalogTitle('practice_areas') === 'Practice areas');
+// injection end-to-end (mirrors app-check "catalog injection still fires for a public table" but asserts title)
+{
+  const r = normalizeSpec({ brand: { name: 'X' }, sections: [hero(), { type: 'features', items: [{ title: 'A' }] }] }, { slug: 'index', tables: ['services'], primaryTable: 'services' });
+  const col = r.spec.sections.find((s: any) => s.type === 'collection');
+  ok('catalog injection uses register-aware title for services', col && col.title === 'Our services');
 }
 // 10) non-object / null spec → REJECT (not a crash)
 {

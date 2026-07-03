@@ -186,6 +186,27 @@ const str = (v: any): string => (typeof v === 'string' ? v.trim() : v == null ? 
 const nonEmpty = (v: any) => str(v).length > 0;
 const humanTitle = (t: string) => str(t).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
+// Register-aware catalog title: the injected section reads like the business, not like a webshop.
+// Closed set keyed by the primary table; unknown tables humanize (practice_areas -> "Practice areas").
+export function catalogTitle(table: string): string {
+  const t = String(table || '').toLowerCase();
+  const MAP: [RegExp, string][] = [
+    [/^products?$/, 'Browse'],
+    [/^services?$/, 'Our services'],
+    [/^(menu(_items)?|dishes)$/, 'The menu'],
+    [/^classes$/, 'Classes'],
+    [/^rooms?$/, 'Rooms'],
+    [/^(posts?|articles?|news)$/, 'Latest'],
+    [/^listings?$/, 'Listings'],
+    [/^events?$/, 'Upcoming events'],
+    [/^(portfolio|projects?|work)$/, 'Selected work'],
+    [/^(team|staff|barbers|stylists|attorneys|doctors)$/, 'The team'],
+  ];
+  for (const [re, title] of MAP) if (re.test(t)) return title;
+  const h = t.replace(/_/g, ' ').trim();
+  return h ? h.charAt(0).toUpperCase() + h.slice(1) : 'Browse';
+}
+
 // A CTA may arrive as a string OR an object ({text|label|title|cta|name, link|href|url|page}).
 // Normalize to a plain string label on `.cta` (+ optional `.link`) so the renderer never sees [object Object].
 function normCta(s: any): void {
@@ -483,7 +504,7 @@ export function normalizeSpec(raw: any, ctx: SpecCtx = {}): SpecResult {
   // FS0: never inject over a private visitor-record table — no catalog is better than a leak.
   if (nonEmpty(ctx.primaryTable) && !PRIVATE_READ.test(str(ctx.primaryTable)) && CATALOG_PAGE.test(str(ctx.slug))) {
     if (!sections.some((x) => x.type === 'collection' && x.table === ctx.primaryTable)) {
-      sections.splice(Math.min(1, sections.length), 0, { type: 'collection', title: 'Browse', intro: '', table: ctx.primaryTable });
+      sections.splice(Math.min(1, sections.length), 0, { type: 'collection', title: catalogTitle(str(ctx.primaryTable)), intro: '', table: ctx.primaryTable });
       repairs.push(`injected collection on primary table "${ctx.primaryTable}"`);
     }
   }
