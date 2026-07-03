@@ -329,3 +329,17 @@ publicWriteTables(site). External proof: real booking via public API → receipt
 + "Barber: Marcus Johnson" FK resolution → find resolver maps bare code → catalog insert blocked
 ("this site has no such form") → token absent from public reads. NEXT: FS2 visitor accounts
 (magic link, sessions in app schema, claim-on-verify, cross-app token rejection).
+
+## 2026-07-03 — FS2 SHIPPED + PROVEN (user accounts on the produced app — the locked promise)
+Commit f983286 deployed (10 suites green, app:check 101). visitors.ts: _relay_visitors/_relay_
+visitor_tokens in the app's OWN schema (leading underscore = collision-free vs the model compiler);
+magic single-use/15min/per-email cap; sessions 30d validated SERVER-SIDE (per-app cookie
+relay_v_<hex12> is only the courier; cross-app replay structurally dead — gated). Identity = the
+verified email; visitorRecords scopes My bookings across private tables w/ receipt links;
+pre-account rows attach on verify. account.html live (signin/records sections); footer doors
+(find + account) on receipt-enabled apps, consistency-safe. Routes: visitor/request (always
+"sent"), verify (302+cookie), logout. Reviewer probe: signed-out form, minted-token sign-in,
+My bookings lists the probe booking. External proof: book → magic (token from DB) → cookie →
+"Signed in as zoro@relay.test" + booking card + Open receipt; signed-out leaks nothing.
+FS track remains: FS3 (real booking semantics: typed slots, capacity UNIQUE, status lifecycle
+owner↔visitor + notify email) → FS4 (redeem the two facade briefs; standing full-loop gate).

@@ -200,7 +200,15 @@ open Find my booking, paste the code → your booking, only yours; a made-up cod
 appears in any public read; wrong token → 404; ref_token is nullable + partial-unique with random
 server-side backfill (proven under migrate:check — an additive '' backfill would break old rows).
 
-## FS2 · User accounts on the produced app — the locked promise
+## FS2 · User accounts on the produced app — the locked promise ✅ (2026-07-03)
+**Shipped + proven zero-touch** (barbershop rebuild, reviewer PASSED 0 high; verified externally):
+email → magic link (single-use, 15 min, per-email daily cap) → My bookings, scoped to the VERIFIED
+address — pre-account bookings attach the moment the email verifies (nothing to claim). Sessions
+live in the app's OWN schema (_relay_ tables the model compiler can never collide with); validation
+is server-side — a session from app A is structurally worthless on app B (gated). account.html +
+find-my-booking ride the footer of every receipt-enabled app. Signed-out account.html leaks nothing.
+The reviewer signs in with a minted token (probes never send real mail) and proves My bookings lists
+its own probe booking on every app build. app:check 85→101.
 **You get:** end-users sign in on the produced app: email → magic link → "My bookings", scoped to
 them, past and present. Pre-account bookings attach on verified email (claim-on-verify). Sessions
 live in the app's OWN schema; server-side token validation is the boundary (cookies are convenience).
