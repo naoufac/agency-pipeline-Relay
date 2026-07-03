@@ -540,3 +540,15 @@ picker binds the date, availability day-level) · slot-inventory rows (barbersho
 FK dropdown; machine-table fix correctly kept it off the homepage). NEXT #1: canonical booking-time
 shape forced at the compile floor (ONE timestamp column class), then hour-level availability is
 universal. Also queued: freeSlots for slot-row inventories.
+
+## 2026-07-04 — CANONICAL BOOKING-TIME SHAPE: the three LLM shapes collapse to one timestamp
+Prod f62eb7c, 13 suites (app:check 168, spec:check 141). The floor, forced deterministically:
+(1) compile MERGES split date+time columns on booking tables into one timestamptz — fields AND
+seeds ('6 PM' → T18:00:00), loud warning, non-booking tables untouched; (2) normalizeDataModel
+REJECTS slot-inventory tables (time_slots/slots rows + FK) into retry with the canonical-shape
+feedback. PROOF (the definitive one, external, zero-touch): the barbershop brief that drew
+time_slots rows two builds ago now produces barbers/bookings/services with bookings.appointment_at
+— picker live on all 4 pages, availability API: booked 10:00 w/ barber 1 → TAKEN for barber 1,
+FREE for barber 2, receipt token issued, review PASSED. Real availability is now UNIVERSAL on
+booking apps. NEXT (per plan): store payments (the 6 store briefs' true gap) · freeSlots grid from
+an hours table when the model ships one · PQ backlog (register cards, re-score).
