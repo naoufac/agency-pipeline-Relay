@@ -6,7 +6,7 @@
   "description": "Autonomous agency pipeline: brief -> planner -> dependency DAG of AI calls, stage-by-stage, zero-trust verification, Supabase/Postgres board.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s app:check && npm run -s scope:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check && npm run -s pwa:check",
+    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s app:check && npm run -s scope:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check && npm run -s pwa:check && npm run -s chain:check",
     "app:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/app-check.ts",
     "scope:check": "tsx src/scope-check.ts",
     "serve": "set -a; . ./.env 2>/dev/null; set +a; tsx src/server.ts",
@@ -28,7 +28,8 @@
     "stress": "set -a; . ./.env 2>/dev/null; set +a; tsx _stress.ts",
     "eval": "set -a; . ./.env 2>/dev/null; set +a; tsx src/eval.ts",
     "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
-    "pwa:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/pwa-check.ts"
+    "pwa:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/pwa-check.ts",
+    "chain:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/chain-check.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

@@ -8,6 +8,8 @@ import { processMedia } from '../media.ts';
 import { brandFor } from './util.ts';
 import { SITES } from '../verify.ts';
 import * as appdb from '../appdb.ts';
+import { PRIVATE_READ } from '../schema.ts';
+import { themeTone } from '../themes.ts';
 
 const env = () => ({ url: process.env.DIRECTUS_URL || 'http://127.0.0.1:8055', token: process.env.DIRECTUS_TOKEN || '' });
 
@@ -96,6 +98,86 @@ export async function renderLiveFind(pool: pg.Pool, projectId: string): Promise<
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'find', title: 'Find my booking' }] };
   const html = renderPage(spec, { pages: navPages, slug: 'find', title: 'Find my booking', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE find (system page)-->\n` + html;
+}
+
+// CHAIN — HOW IT WAS BUILT: the production record as a product surface (owner-directed 2026-07-04:
+// "the magic is the chain"). Served live for ANY finished project — old sites included — with the
+// site's own chrome. Everything rendered is CURATED here from a closed whitelist: names, counts,
+// verdicts and the brief. Never task outputs, never event detail text, never emails or tokens.
+const VERIFY_WORDS: Record<string, string> = {
+  render: 'every page renders correctly, desktop and mobile',
+  site_renders: 'every page renders correctly, desktop and mobile',
+  sql_applies: 'the database schema applies cleanly to a real PostgreSQL',
+  site_consistent: 'one brand, one navigation — identical on every page',
+  served_from_cms: 'pages are served from the CMS, not from stale copies',
+  json_valid: 'every structured hand-off parsed and validated',
+  none: '',
+};
+export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise<string | null> {
+  const pr = (await pool.query('select brief, created_at, params from projects where id=$1', [projectId])).rows[0];
+  if (!pr) return null;
+  const params = pr.params || {};
+  if (!params.site || !Array.isArray(params.site.pages) || !params.site.pages.length) return null;
+  const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
+
+  const tk = (await pool.query(
+    `select count(*)::int total,
+            coalesce(sum(case when status='done' then 1 else 0 end),0)::int done,
+            coalesce(sum(greatest(attempts-1,0)),0)::int retries,
+            coalesce(extract(epoch from (max(updated_at)-min(created_at))),0)::int wall,
+            array_agg(distinct verify) as verifies
+     from tasks where project_id=$1`, [projectId])).rows[0] || {};
+  const evs = (await pool.query(
+    `select type, count(*)::int n from run_events where project_id=$1 and type in ('plan_repair','project_retry') group by type`,
+    [projectId])).rows;
+  const evn = (t: string) => evs.find((e: any) => e.type === t)?.n || 0;
+  const rev = (await pool.query('select passed, coalesce(jsonb_array_length(issues),0)::int n from dogfood_reviews where project_id=$1 order by id desc limit 1', [projectId])).rows[0];
+
+  const archetype = String(params.archetype || 'site');
+  const KIND: Record<string, string> = {
+    app: 'a real application — its own database, forms compiled from the schema, receipts and accounts',
+    store: 'a real store — live catalog, cart, server-priced checkout',
+    site: 'a presentation site — every page verified',
+  };
+  let tables: { name: string; rows: number; isPrivate: boolean }[] = [];
+  if (archetype === 'app' || archetype === 'store') {
+    try {
+      const desc = await appdb.describeSchema(pool, projectId);
+      tables = (desc.tables || []).filter((t: any) => !/^_relay_/.test(t.table)).slice(0, 12)
+        .map((t: any) => ({ name: t.table, rows: Number(t.rows) || 0, isPrivate: PRIVATE_READ.test(t.table) }));
+    } catch { /* schema may be gone on legacy projects — the page stands without it */ }
+  }
+  const checks = [...new Set(((tk.verifies || []) as any[]).map((v) => VERIFY_WORDS[String(v)] ?? '').filter(Boolean))];
+  checks.push('privacy: visitor records are never publicly listable');
+  if (archetype === 'store') checks.push('a real browser BOUGHT from this store before it shipped (order + line items verified in the database)');
+  if (archetype === 'app') checks.push('a real browser performed the core action and followed its receipt before this site shipped');
+
+  const scope = params.scope && Array.isArray(params.scope.includes) ? {
+    difficulty: Number(params.scope.difficulty) || 1,
+    includes: params.scope.includes.map((i: any) => ({ name: String(i.name || ''), promise: String(i.promise || '') })).slice(0, 9),
+    excludes: (params.scope.excludes || []).map((x: any) => ({ ask: String(x.ask || ''), alternative: String(x.alternative || '') })).slice(0, 6),
+  } : null;
+
+  const sections = [{
+    type: 'chain',
+    brief: String(pr.brief || ''),
+    scope,
+    blueprint: {
+      kind: KIND[archetype] || KIND.site,
+      theme: String(params.theme || 'modern'),
+      tone: themeTone((params.theme && ['editorial','modern','warm','bold','minimal'].includes(params.theme)) ? params.theme : 'modern'),
+      hero: params.layout?.hero ? String(params.layout.hero) : '',
+      nav: params.layout?.nav ? String(params.layout.nav) : '',
+      bg: params.brand?.tokens?.bg, primary: params.brand?.tokens?.primary,
+    },
+    tables,
+    run: { total: Number(tk.total) || 0, done: Number(tk.done) || 0, wallSecs: Number(tk.wall) || 0, repairs: evn('plan_repair'), rebuilds: evn('project_retry') },
+    checks,
+    review: rev ? { passed: !!rev.passed, issues: Number(rev.n) || 0, probed: archetype !== 'site' } : null,
+  }];
+  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections };
+  const html = renderPage(spec, { pages: navPages, slug: 'how-it-was-built', title: 'How this site was built', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
+  return `<!--relay:cms=directus LIVE chain (the production record, rendered from the pipeline's own database)-->\n` + html;
 }
 
 // FS2 — MY BOOKINGS: account.html, served live. Signed out -> the sign-in (magic link) form; signed

@@ -10,7 +10,7 @@ import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { publicWriteTables } from './spec.ts';
 import { LIFECYCLE_TABLE } from './schema.ts';
-import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, renderLiveAccount } from './cms/live.ts';
+import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, renderLiveAccount, renderLiveChain } from './cms/live.ts';
 import { requestVisitorMagic, verifyVisitorMagic, visitorFromCookie, visitorCookie, clearVisitorCookie, logoutVisitor } from './visitors.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
@@ -206,6 +206,13 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
             const fhtml = await renderLiveFind(pool, live[1]);
             if (fhtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(fhtml); return; }
           } catch (e: any) { console.error('live-find', live[1], e?.message ?? e); }
+        }
+        // CHAIN: the production record, served live for ANY project (old sites included).
+        if (live[2] === 'how-it-was-built') {
+          try {
+            const chtml = await renderLiveChain(pool, live[1]);
+            if (chtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(chtml); return; }
+          } catch (e: any) { console.error('live-chain', live[1], e?.message ?? e); }
         }
         // FS2 · MY BOOKINGS: sign-in / the signed-in visitor's records. The session is validated
         // server-side against the app's OWN token table — the cookie is only the courier.

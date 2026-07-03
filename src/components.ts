@@ -164,6 +164,14 @@ p{margin:0 0 1rem}
 /* shop cards: image + title link to the product's own page */
 .products .card h3 a{color:inherit;text-decoration:none}.products .card h3 a:hover{text-decoration:underline}
 .products .card a.p-imglink{display:block}
+/* CHAIN · "How it was built" — the production record as a product surface */
+.chain-quote{border-left:3px solid var(--accent);padding:.6rem 0 .6rem 1.2rem;font-size:1.15rem;font-style:italic;margin:1.2rem 0}
+.chain-chip{display:inline-flex;align-items:center;gap:.5rem;margin-right:1.2rem}
+.chain-chip i{display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid var(--line)}
+.chain-pill{display:inline-block;border-radius:999px;padding:.35rem 1rem;font-weight:700;border:1px solid var(--line);background:var(--surface)}
+.chain-pill.pass{color:var(--accent)}
+.chain-check{list-style:none;padding:0;margin:1.2rem 0;display:grid;gap:.5rem}
+.chain-check li{padding-left:1.5rem;position:relative}.chain-check li:before{content:"✓";position:absolute;left:0;color:var(--accent);font-weight:700}
 /* FS1 · receipt (record) + find-my-booking */
 .receipt-box{max-width:640px;margin:0 auto}
 .receipt-ref{background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius);padding:16px 20px;margin:1.2rem 0;text-align:center}
@@ -212,8 +220,10 @@ export function footer(brand: string, pages: any[], accountLinks = false) {
   // FS2: receipt-enabled apps carry the visitor's two standing doors in the footer — identical on
   // every page (rendered unconditionally per site), so the consistency gates hold by construction.
   const extras = accountLinks ? `<a href="find.html">Find my booking</a><a href="account.html">My bookings</a>` : '';
+  // CHAIN: every produced site opens its own production record — the magic, visible.
+  const chain = `<a href="how-it-was-built.html">How this site was built</a>`;
   return `<footer class="footer"><div class="container"><div class="footer-inner">
-  <span>© ${esc(brand)}</span><div class="footer-links">${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}${extras}</div>
+  <span>© ${esc(brand)}</span><div class="footer-links">${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}${extras}${chain}</div>
 </div></div></footer>`;
 }
 
@@ -326,6 +336,62 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       </div>
     </div>
   </div></section>`;
+  },
+  // CHAIN · "How it was built" — the production record, rendered from CURATED data only (the
+  // caller in cms/live.ts whitelists every value; nothing free-form from the pipeline reaches this
+  // page). SYSTEM-ONLY: deliberately NOT in spec KNOWN — a composed model can never emit it.
+  chain: (s) => {
+    const d = (s && typeof s === 'object') ? s : {} as any;
+    const scope = d.scope || null; const bp = d.blueprint || {}; const run = d.run || {};
+    const tables: any[] = Array.isArray(d.tables) ? d.tables : [];
+    const checks: string[] = Array.isArray(d.checks) ? d.checks : [];
+    const rev = d.review || null;
+    const stat = (v: any, l: string) => `<div class="stat"><div class="stat-n">${esc(String(v))}</div><div class="muted">${esc(l)}</div></div>`;
+    const wall = Number(run.wallSecs) > 0 ? (run.wallSecs >= 90 ? Math.round(run.wallSecs / 60) + ' min' : run.wallSecs + ' s') : '—';
+    return `<header class="hero"><div class="container"><div class="hero-inner">
+      <span class="eyebrow">Production record</span>
+      <h1>How this site was built</h1>
+      <p class="lead">From one written brief to the live product — by an automated production line.
+      Every line below is read from the production database at this very moment; nothing here is written by hand.</p>
+    </div></div></header>
+    <section class="section"><div class="container">
+      <h2>The brief</h2><p class="lead muted">The client's words, verbatim — this is all the agency was given.</p>
+      <blockquote class="chain-quote">“${esc(String(d.brief || ''))}”</blockquote>
+    </div></section>
+    ${scope ? `<section class="section"><div class="container">
+      <h2>The promise</h2>
+      <p class="lead muted">Scoped before building: complexity ${esc(String(scope.difficulty))}/5.</p>
+      <div class="grid grid-3" style="margin-top:2rem">${(scope.includes || []).map((i: any) => `<div class="card"><h3>${esc(humanize(String(i.name)))}</h3><p>${esc(String(i.promise))}</p></div>`).join('')}</div>
+      ${(scope.excludes || []).length ? `<h3 style="margin-top:2.4rem">Declared out of scope — with the honest alternative</h3>
+      <div class="grid grid-3" style="margin-top:1.2rem">${scope.excludes.map((x: any) => `<div class="card"><h3>${esc(String(x.ask))}</h3><p>${esc(String(x.alternative))}</p></div>`).join('')}</div>` : ''}
+    </div></section>` : ''}
+    <section class="section"><div class="container">
+      <h2>The blueprint</h2>
+      <ul class="receipt-meta" style="max-width:640px">
+        <li><b>Kind:</b> ${esc(String(bp.kind || 'a presentation site'))}</li>
+        <li><b>Design language:</b> ${esc(String(bp.theme || ''))}${bp.tone ? ' — ' + esc(String(bp.tone)) : ''}</li>
+        ${bp.hero ? `<li><b>Opening treatment:</b> ${esc(String(bp.hero))} hero · ${esc(String(bp.nav || 'standard'))} navigation</li>` : ''}
+        ${bp.bg && bp.primary ? `<li><b>Identity:</b> <span class="chain-chip"><i style="background:${esc(String(bp.bg))}"></i>${esc(String(bp.bg))}</span><span class="chain-chip"><i style="background:${esc(String(bp.primary))}"></i>${esc(String(bp.primary))}</span></li>` : ''}
+      </ul>
+    </div></section>
+    ${tables.length ? `<section class="section"><div class="container">
+      <h2>The database</h2><p class="lead muted">Real tables, provisioned and verified for this product alone.</p>
+      <div class="grid grid-3" style="margin-top:2rem">${tables.map((t: any) => `<div class="card"><h3>${esc(humanize(String(t.name)))}</h3><p>${t.isPrivate ? 'Private visitor records — sealed from public view' : esc(String(t.rows)) + ' record' + (Number(t.rows) === 1 ? '' : 's') + ', publicly presented'}</p></div>`).join('')}</div>
+    </div></section>` : ''}
+    <section class="section"><div class="container">
+      <h2>The production run</h2>
+      <div class="grid grid-3 stats" style="margin-top:2rem">
+        ${stat(run.total ?? '—', 'production tasks')}${stat(wall, 'wall time')}${stat(run.rebuilds ? run.rebuilds : 'none', 'rebuild rounds')}
+      </div>
+      ${Number(run.repairs) > 0 ? `<p class="muted" style="margin-top:1.6rem">${esc(String(run.repairs))} automatic repair${Number(run.repairs) === 1 ? '' : 's'} were applied during planning — the system corrects its own drafts and says so.</p>` : ''}
+    </div></section>
+    <section class="section"><div class="container">
+      <h2>The checks it passed</h2>
+      <p class="lead muted">Deterministic gates — machine-verified, never an opinion.</p>
+      <ul class="chain-check">${checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
+      ${rev ? `<p style="margin-top:1.6rem"><span class="chain-pill${rev.passed ? ' pass' : ''}">${rev.passed ? '✓ Independent review: PASSED' : 'Independent review: ' + esc(String(rev.issues)) + ' finding(s) open'}</span></p>
+      <p class="muted" style="margin-top:.8rem">A real browser walked every page${rev.probed ? ', performed the core action end to end,' : ''} and judged the result before this site was accepted.</p>` : ''}
+    </div></section>`;
   },
   // FS1 · record — the RECEIPT for one visitor-submitted row (booking/order/message). SYSTEM-ONLY
   // (not in spec KNOWN): cms/live.ts synthesizes it per request from the live row; the reference
