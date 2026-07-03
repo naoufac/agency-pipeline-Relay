@@ -33,8 +33,12 @@ export function chooseLayout(theme: ThemeName, archetype: Archetype, brief: stri
   const candidates = HERO_BY_THEME[theme] || HERO_VARIANTS;
   let hero = candidates[h % candidates.length];
   // a store/app leads with product/app imagery — never a photo-less centered hero for a catalog.
-  if ((archetype === 'store' || archetype === 'app') && hero === 'center') hero = 'split';
-  const nav: NavVariant = (theme === 'editorial' || theme === 'minimal') && (h & 1) ? 'centered' : 'standard';
+  // PQ1: demote to the theme's own next photo-led candidate, NOT a hard 'split' (the hard demotion
+  // funneled every modern-theme store/app into the same split hero — the panel's 7.3/10 sameness).
+  if ((archetype === 'store' || archetype === 'app') && hero === 'center')
+    hero = candidates.find(v => v !== 'center') || 'image';
+  // centered nav reads right on editorial/minimal/warm; the hash keeps it ~half of those.
+  const nav: NavVariant = (theme === 'editorial' || theme === 'minimal' || theme === 'warm') && (h & 1) ? 'centered' : 'standard';
   const band = ((h >> 3) & 1) === 1;   // alternate-surface section rhythm on ~half of sites
   return { hero, nav, band };
 }

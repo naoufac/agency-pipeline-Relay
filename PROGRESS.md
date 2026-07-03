@@ -390,3 +390,12 @@ with NO rebuild), NULL stock = untracked. Live proof: PDP "Sold out" + "Only 3 l
 refusing '"Ethiopian Yirgacheffe" is sold out'. HARNESS LESSON: workers MUST run as systemd
 transient units (systemd-run --unit=zoro-worker-NN --collect) — the boss's sandbox reaps even setsid
 children; two runs died silently before this was root-caused.
+
+## 2026-07-03 — PQ1 OPENED: agency panel verdict on real screenshots (3 lenses, Sonnet)
+Sameness 7.3/10 (7/8/7) on barber+coffee+delivery. Ranked: (1) hero layout sameness — boss diagnosis
+CORRECTED the panel: 4 hero variants already exist but the chooser clustered (hard 'split' demotion
+for data archetypes + centered nav gated to 2 themes) → fixed: theme-respecting demotion, warm
+joins centered-nav pool, DISTRIBUTION gate in layout:check (>=3 heroes + both navs across a fixed
+matrix; 24→26). (2) card anatomy identical everywhere → worker brief B next (closed-set card styles
+per section role). (3) CTA button sameness → worker-03 running (per-theme button recipes via CSS
+vars: sharp/pill/soft/ghost + AA gate in theme-check). Panel screenshots /tmp/pq1-*.png.

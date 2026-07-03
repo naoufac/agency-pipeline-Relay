@@ -61,5 +61,18 @@ ok('center hero drops the photo entirely', !/hero-photo|hero-bg/.test(heroMarkup
 ok('editorial hero uses a wide in-flow photo', /hero-wide/.test(heroMarkup.editorial));
 ok('image hero uses a full-bleed bg photo', /hero-bg/.test(heroMarkup.image));
 
+// PQ1 · DISTRIBUTION: across a fixed brief matrix the chooser must actually SPREAD — at least 3
+// distinct heroes and both navs. Guards against any future rule quietly funneling everything into
+// one variant (the split-funnel class the agency panel caught at 7.3/10 sameness).
+{
+  const { chooseLayout } = await import('./layout.ts');
+  const themes = ['editorial', 'modern', 'warm', 'bold', 'minimal'] as const;
+  const briefs = ['a barbershop booking app', 'an online ceramics store', 'a law firm site', 'a delivery platform', 'a bakery pre-order app', 'a yoga studio'];
+  const heroes = new Set<string>(); const navs = new Set<string>();
+  for (const t of themes) for (const b of briefs) { const l = chooseLayout(t, b.includes('store') ? 'store' : 'app', b); heroes.add(l.hero); navs.add(l.nav); }
+  ok('chooser spreads: >=3 distinct heroes across the matrix', heroes.size >= 3, [...heroes].join(','));
+  ok('chooser spreads: both nav variants appear', navs.size === 2, [...navs].join(','));
+}
+
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
