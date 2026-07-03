@@ -218,6 +218,12 @@ try {
   ok('capacity 2: the second booking is accepted', (await appdb.insertRow(pool, id, 'bookings', { customer_name: 'C2', service_id: 2, at: '2027-01-01T10:00:00Z' })).ok === true);
   const c3 = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'C3', service_id: 2, at: '2027-01-01T10:00:00Z' });
   ok('capacity 2: the third booking is refused as fully booked', c3.ok === false && /full/.test(c3.error || ''), JSON.stringify(c3));
+  // migration resets a legacy auto-confirm default to 'pending' (data untouched)
+  await pool.query(`alter table "${schema}"."bookings" alter column "status" set default 'confirmed'`);
+  const migS = await appdb.migrate(pool, id, MODEL, await appdb.listTables(pool, id));
+  ok("migrate resets a legacy auto-confirm default to 'pending'", migS.applied.some((a: string) => /status.*pending/.test(a)), JSON.stringify(migS.applied));
+  const defNow = (await pool.query(`select column_default from information_schema.columns where table_schema='${schema}' and table_name='bookings' and column_name='status'`)).rows[0]?.column_default;
+  ok("new rows on migrated tables are born 'pending'", /pending/.test(String(defNow)), String(defNow));
   const insN = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Notify N', email: 'notify@example.com' });
   const nid = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='Notify N'`)).rows[0].id);
   const rc = await appdb.rowContact(pool, id, 'bookings', nid);

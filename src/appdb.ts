@@ -123,6 +123,15 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
       continue;
     }
     const have = new Map((await typedColumns(pool, schema, t)).map(c => [c.name, c]));
+    // FS3: a migrated lifecycle table must not keep a legacy auto-confirm default — new rows are
+    // born 'pending' (existing rows untouched; only the default changes).
+    if (LIFECYCLE_TABLE.test(t) && have.has('status')) {
+      const cur = (await pool.query(`select column_default from information_schema.columns where table_schema=$1 and table_name=$2 and column_name='status'`, [schema, t])).rows[0]?.column_default;
+      if (!/pending/.test(String(cur || ''))) {
+        stmts.push(`alter table "${t}" alter column "status" set default 'pending';`);
+        applied.push(`~"${t}"."status" default -> 'pending' (was ${cur || 'none'} — visitors must never be auto-confirmed)`);
+      }
+    }
     for (const c of resolved.cols[t]) {
       const cur = have.get(c.name);
       if (cur) {
