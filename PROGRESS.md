@@ -472,3 +472,23 @@ Proof: the same brief PASSED review zero-touch (0a211ce4, 1 medium). Boss-eye cl
 session, recorded: raw ISO timestamps in cards (format like receipts) · machine tables (time_slots)
 must never be the injected homepage catalog · brand-palette distinctness axis (law+skate drew twin
 greens) · commerce framing register on service cards.
+
+## 2026-07-04 (early) — Parallel production: 3 classes killed in one stretch, worker isolation v2
+Boss + two Grok briefs ran CONCURRENTLY (the serial-boss bottleneck is gone). Shipped + deployed:
+- Brief 07 (Grok, first-pass): raw ISO timestamps in cards → toDateString like receipts; the
+  template-escaping gate held (layout:check 39).
+- Brief 08 (Grok, first-pass): machine tables (time_slots/availability/schedules/…) never become
+  the homepage catalog — choosePrimaryTable extracted pure + gated; only-machine-tables → NO
+  catalog (app:check 151).
+- Boss: BRAND-PALETTE POOLS (the twin-greens class): per-theme hand-built pools, brief-hash rotated,
+  colour-word steered ('sage green spa' → sage), LLM palettes ignored when a theme is known
+  (spec:check 139). PROVEN on rebuilds: law drew editorial forest-ink #233329, skate drew bold
+  taxi-yellow #facc15 — disjoint pools, both PASSED review zero-touch.
+HARNESS LESSON (the recorded class bit the boss): worker 07 REVERTED the boss's in-flight themes.ts
+in the shared tree to satisfy its own 'diff touches only my files' DoD. grok-worker.sh v2: every
+worker runs in an ISOLATED git worktree (/root/worker-trees/<brief>), boss reviews + applies the
+patch. Also: push-URL was left disabled after a worker run → a push silently failed and deploy
+shipped the OLD head; restored + verified. Ops rule: after any worker run, verify push URL + that
+origin moved.
+NEXT: register-aware commerce framing (service cards read like SKUs — prices/'in stock' on a law
+firm), then panel re-score toward ≤4 · PQ2 variants · PWA.

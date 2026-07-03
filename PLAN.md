@@ -303,11 +303,12 @@ deploy gate re-runs all suites inside prod and REVERTS on any failure — it hel
 boss himself once already.
 
 ## NEXT 3 — the boss's direction (updated 2026-07-03 evening)
-1. ~~PQ1 verdict + hero art-direction~~ **DONE 2026-07-03** — measured 6.0 pre / art-direction axis
-   shipped + gated / post-run 7.7 with recorded confounds (see PQ1). **Replacement #1: the panel's
-   new top residuals** — brand-PALETTE distinctness (deterministic, brief-rooted accent assignment so
-   two same-day sites never twin on colour; the LLM's whim drew law+skate both green) and
-   register-aware catalog cards (services ≠ SKUs: framing per archetype+theme). Then re-score; target ≤4.
+1. ~~PQ1 verdict + hero art-direction~~ **DONE 2026-07-03**; ~~palette distinctness~~ **DONE
+   2026-07-04** (per-theme brand pools, hash-rotated, colour-word steered — proven: law forest-ink
+   vs skate taxi-yellow, both zero-touch); catalog register titles, card date/slug/number noise and
+   machine-table catalogs also dead + gated. **Remaining #1: register-aware catalog CARDS** —
+   a service card must not read like a SKU (price-first, 'in stock') on a law firm/clinic;
+   presentation register per archetype+theme. Then 3-lens re-score; target ≤4.
 2. **PQ2 finish: options/variants** — sizes/colours on products; variant-aware PDP, cart lines,
    stock and checkout. Completes "a store that actually sells" to real-shop grade. Precise contract,
    worker-friendly, ecom:check extends.
