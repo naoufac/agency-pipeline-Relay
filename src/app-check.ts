@@ -72,6 +72,10 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
 
 // ---- a TRUNCATED data model salvages its complete entities (the delivery-app killer) ----
 {
+  const { modelHasCore } = await import('./spec.ts');
+  ok('a users+clients-only model is a GUTTED app', !modelHasCore({ entities: [{ name: 'users', fields: [{ name: 'email' }, { name: 'password_hash' }] }, { name: 'clients', fields: [{ name: 'name' }, { name: 'email' }] }] }));
+  ok('a model with a real action entity has its core', modelHasCore({ entities: [{ name: 'users', fields: [{ name: 'email' }, { name: 'x' }] }, { name: 'deliveries', fields: [{ name: 'pickup' }, { name: 'dropoff' }] }] }));
+  ok('a public directory model (listings) has its core', modelHasCore({ entities: [{ name: 'listings', fields: [{ name: 'title' }, { name: 'city' }] }] }));
   const { normalizeDataModel } = await import('./spec.ts');
   const truncated = '{"entities":[{"name":"users","fields":[{"name":"email","type":"email"}]},{"name":"deliveries","fields":[{"name":"pickup_address","type":"text"},{"name":"status","type":"status"}]},{"name":"tracking_events","fields":[{"name":"note","ty';
   const r = normalizeDataModel(truncated);

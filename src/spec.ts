@@ -12,6 +12,15 @@ import { PRIVATE_READ } from './schema.ts';   // FS0: visitor-record tables are 
 
 export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; actionTable?: string };
 
+// FS4 — a data-archetype model must contain the app's CORE: at least one real, fillable entity
+// beyond identity plumbing (users/clients/accounts/sessions). Truncation once ate 'deliveries' and
+// a delivery app shipped as a sign-up shell that passed review — a gutted model rejects into retry.
+export function modelHasCore(model: any): boolean {
+  return ((model && model.entities) || []).some((e: any) =>
+    Array.isArray(e?.fields) && e.fields.length >= 2 &&
+    !/^(_relay_\w+|users?|accounts?|sessions?|tokens?|customers?|clients?|profiles?)$/i.test(String(e?.name || '').trim()));
+}
+
 // FS1 — which tables may the PUBLIC write? Exactly the ones the composed site model targets with a
 // form section, nothing else (a produced app's catalog is the owner's — a visitor must never be able
 // to insert services/products through the raw data API). Pure; the server route enforces it.

@@ -9,7 +9,7 @@ import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { cmsFinalize } from './cms/finalize.ts';
 import { renderPage, formPageSlug, receiptsEnabled } from './render.ts';
-import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
+import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, modelHasCore, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import * as appdb from './appdb.ts';
 import { PRIVATE_READ } from './schema.ts';
@@ -170,6 +170,10 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       if (task.department === 'database') {
         const r = normalizeDataModel(content);
         if (r.ok === false) throw new Error('database rejected: ' + r.errors.join('; ') + ' — the output began: ' + JSON.stringify(String(content || '').trim().slice(0, 160)) + ' — emit ONE JSON object {"entities":[...]} and nothing else');
+        // FS4: a model of identity tables only (users/clients) is a GUTTED app — the core entity was
+        // truncated or forgotten. Reject into retry with exact ordering instructions.
+        if (['app', 'store'].includes(String((ctx as any).archetype)) && !modelHasCore(r.model))
+          throw new Error('database rejected: the model contains only identity tables — the app\'s REAL entities (the thing a visitor DOES: deliveries/bookings/orders/listings, plus its catalog) are missing. Emit the core ACTION entity FIRST with all its fields, catalog entities next, identity tables LAST, seeds small (≤6 rows) — compact JSON on one line.');
         for (const rep of r.repairs) console.error(`[datamodel] ${task.project_id}: ${rep}`);
         content = JSON.stringify(r.model);
       }
