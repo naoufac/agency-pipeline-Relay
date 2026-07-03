@@ -313,6 +313,34 @@ try {
   const nid = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='Notify N'`)).rows[0].id);
   const rc = await appdb.rowContact(pool, id, 'bookings', nid);
   ok('rowContact finds the visitor address + receipt for lifecycle notifications', !!rc && rc!.email === 'notify@example.com' && rc!.ref === insN.ref, JSON.stringify(rc));
+
+  // ---- FS5 · REAL AVAILABILITY: freeSlots is the READ the slot guard always implied ----
+  {
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Slot Taker', service_id: 1, at: tomorrow + 'T10:00:00' });
+    const s1 = await appdb.freeSlots(pool, id, 'bookings', tomorrow, { service_id: 1 });
+    ok('freeSlots: the deterministic business grid (09:00–16:00 hourly)', Array.isArray(s1) && s1!.length === 8 && s1![0].t === '09:00' && s1![7].t === '16:00');
+    ok('freeSlots: a booked hour is not free', s1!.find(s => s.t === '10:00')?.free === false, JSON.stringify(s1));
+    ok('freeSlots: an open hour is free', s1!.find(s => s.t === '11:00')?.free === true);
+    const s2 = await appdb.freeSlots(pool, id, 'bookings', tomorrow, { service_id: 2 });
+    ok('freeSlots: another resource keeps the hour free', s2!.find(s => s.t === '10:00')?.free === true);
+    await pool.query(`update "${schema}"."bookings" set status='cancelled' where customer_name='Slot Taker'`);
+    const s3 = await appdb.freeSlots(pool, id, 'bookings', tomorrow, { service_id: 1 });
+    ok('freeSlots: a cancelled booking frees its slot', s3!.find(s => s.t === '10:00')?.free === true);
+    const past = await appdb.freeSlots(pool, id, 'bookings', '2020-01-01', { service_id: 1 });
+    ok('freeSlots: past days offer nothing', !!past && past.every(s => !s.free));
+    ok('freeSlots: aggregate availability only (no names, no rows)', JSON.stringify(s1).indexOf('Slot Taker') < 0);
+    ok('freeSlots: unknown table → null', (await appdb.freeSlots(pool, id, 'nope', tomorrow, {})) === null);
+    ok('freeSlots: a non-slot table → null', (await appdb.freeSlots(pool, id, 'services', tomorrow, {})) === null);
+    ok('freeSlots: junk date → null', (await appdb.freeSlots(pool, id, 'bookings', 'tuesday-ish', {})) === null);
+    // the renderer side: a timestamp field on a slot table becomes the picker (hidden carries the name)
+    const { SECTIONS } = await import('./components.ts');
+    const fhtml = SECTIONS.form({ table: 'bookings', form: 'bookings' }, { forms: { bookings: [{ name: 'customer_name', type: 'text', nullable: false }, { name: 'at', type: 'timestamp with time zone', nullable: false }] } } as any);
+    ok('slot table form: timestamp renders as date + slot chips', fhtml.includes('data-slotdate="at"') && fhtml.includes('class="slotchips"'), fhtml.slice(0, 200));
+    ok('slot table form: the hidden input carries the real field name', fhtml.includes('name="at" data-slot="at"'));
+    const nhtml = SECTIONS.form({ table: 'services', form: 'services' }, { forms: { services: [{ name: 'name', type: 'text', nullable: false }, { name: 'available_from', type: 'date', nullable: true }] } } as any);
+    ok('non-slot tables keep the plain date input', !nhtml.includes('slotchips'));
+  }
 }
 
   // ---- site_model gate: a facade page on a data archetype is REJECTED ----

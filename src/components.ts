@@ -1,6 +1,7 @@
 // The SKELETON — hand-built, responsive, accessible, token-driven section components.
 // The LLM never writes these; it only chooses sections + copy + brand tokens. Structure can't be wrong.
 import { FONT_FACES } from './fonts.ts';
+import { SLOT_TABLE } from './schema.ts';
 
 export const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c]);
 const q = (query: string, cls = '') => `<img data-q="${esc(query)}" alt="" class="${cls}" loading="lazy">`;
@@ -87,6 +88,11 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* FS5 · slot picker — tappable free times under the date field */
+.slotchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.slotchips button{font:inherit;padding:.45rem .85rem;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer}
+.slotchips button:disabled{opacity:.38;text-decoration:line-through;cursor:not-allowed}
+.slotchips button.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}
 /* pricing */
 .price-amt{font-family:var(--font-display);font-size:2.2rem;font-weight:700;margin:.4rem 0}.price-amt span{font-size:1rem;color:var(--muted);font-weight:500}
 .card.price.feat{border-color:var(--primary);border-width:2px}
@@ -566,6 +572,15 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       if (f.ref) return `<label>${esc(f.label)}<select name="${esc(f.name)}" data-ref="${esc(f.ref)}"${f.display ? ` data-display="${esc(f.display)}"` : ''}${req}><option value="">Choose…</option></select></label>`;
       if (f.type === 'checkbox') return `<label class="rcheck"><input type="checkbox" name="${esc(f.name)}"> ${esc(f.label)}</label>`;
       if (f.type === 'textarea') return `<label>${esc(f.label)}<textarea name="${esc(f.name)}"${req}></textarea></label>`;
+      // FS5 · REAL AVAILABILITY: on a slot table, the timestamp field is a date + tappable free-time
+      // chips (loaded live from /slots — the same coordinates the slot guard enforces). The hidden
+      // input carries the real field; if the API is unreachable the picker falls back to a plain
+      // date input (old behaviour) — progressive, never a dead form.
+      if (f.type === 'date' && dataTable && SLOT_TABLE.test(dataTable) && /timestamp|date/.test(String(f.rawType || ''))) {
+        return `<label>${esc(f.label)}<input type="date" data-slotdate="${esc(f.name)}"${req}>
+          <input type="hidden" name="${esc(f.name)}" data-slot="${esc(f.name)}">
+          <div class="slotchips" data-slots="${esc(dataTable)}" data-field="${esc(f.name)}"><span class="muted">Pick a date to see available times.</span></div></label>`;
+      }
       const step = f.type === 'number' ? (/int/.test(String(f.rawType || '')) ? ' step="1"' : ' step="0.01" min="0"') : '';
       return `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}"${req}${step}></label>`;
     };

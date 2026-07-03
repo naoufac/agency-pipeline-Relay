@@ -268,6 +268,20 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       return send(res, 200, 'application/json', '{"ok":true}');
     }
     // ---- Live per-project DB: read/insert rows from the produced app's OWN isolated schema ----
+    // FS5 — REAL AVAILABILITY: the free slots for a booking day. Aggregate free/busy only — never
+    // who booked. Same rate limit as data reads; unknown table / bad date answer an honest 404.
+    const slotsM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/slots\/([a-zA-Z_][a-zA-Z0-9_]{0,62})$/);
+    if (slotsM && req.method === 'GET') {
+      if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"slots":[],"error":"rate limited"}');
+      const refs: Record<string, string> = {};
+      url.searchParams.forEach((v, k) => { if (k !== 'date' && /^[a-z_][a-z0-9_]{0,62}$/i.test(k)) refs[k] = v; });
+      try {
+        const slots = await appdb.freeSlots(pool, slotsM[1], slotsM[2], String(url.searchParams.get('date') || ''), refs);
+        if (!slots) return send(res, 404, 'application/json', '{"slots":[],"error":"no slots here"}');
+        return send(res, 200, 'application/json', JSON.stringify({ slots }));
+      } catch { return send(res, 200, 'application/json', '{"slots":[]}'); }
+    }
+
     const dataM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/data\/([a-zA-Z_][a-zA-Z0-9_]{0,62})$/);
     if (dataM && !UUID_RE.test(dataM[1])) return send(res, 404, 'application/json', '{"rows":[],"error":"unknown site"}');
     if (dataM && req.method === 'GET') {

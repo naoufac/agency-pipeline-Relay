@@ -88,6 +88,11 @@ async function poll(pool: pg.Pool, offset: number): Promise<number> {
       handleStatus(pool, chatId).catch((e: any) => console.error('tg-door status', e?.message ?? e));
       continue;
     }
+    // a Telegram command is never a brief — '/start' once became a real build attempt
+    if (text.startsWith('/')) {
+      await reply(chatId, 'Text me a brief and I build it (e.g. "a booking site for a barbershop"). Commands: /status — latest builds.');
+      continue;
+    }
     // any other text is a brief
     try {
       const active = await activeCount(pool);

@@ -11,7 +11,7 @@ type Unsup = { detect: RegExp; ask: string; alternative: string };
 // \b on shop/store prevents "barbershop"/"restore" false-positives.
 const CAPABILITIES: Cap[] = [
   { name: 'booking',  detect: /book|reserv|appoint|schedul/,
-    promise: 'online booking with live receipts and status updates' },
+    promise: 'online booking with a real availability picker (choose from actual free times), live receipts and status updates' },
   { name: 'store',    detect: /\bshop\b|\bstore\b|e-?commerce|catalog|\bcart\b|checkout|sell/,
     promise: 'a real store: product pages, cart, server-priced checkout, stock awareness' },
   { name: 'tracking', detect: /track|follow[- ]?up/,

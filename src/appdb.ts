@@ -498,6 +498,60 @@ async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table
   return null;
 }
 
+// FS5 — REAL AVAILABILITY: the free slots for a booking day, computed by the SERVER from the same
+// coordinates the slot guard enforces (resource FKs + the timestamp column; cancelled/declined rows
+// free their slot; a resource's `capacity` books N times). This is the READ the guard always implied:
+// instead of guessing a time and being refused, the visitor picks from what is actually open.
+// Reveals ONLY aggregate availability — never who booked. Deterministic hourly grid 09:00–16:00.
+export async function freeSlots(pool: pg.Pool, projectId: string, table: string, date: string, refs: Record<string, any> = {}): Promise<{ t: string; free: boolean }[] | null> {
+  const schema = schemaName(projectId);
+  if (!SLOT_TABLE.test(table) || !IDENT.test(table) || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return null;
+  if (!(await listTables(pool, projectId)).includes(table)) return null;
+  const cols = await typedColumns(pool, schema, table);
+  const ts = cols.find(c => /^(timestamp|date)/.test(c.type) && c.name !== 'created_at');
+  if (!ts) return null;
+  // resource coordinates: only real non-customer *_id columns, numeric values — anything else ignored
+  const refCols = cols.filter(c => c.name.endsWith('_id') && !/customer|client|user|visitor|member|guest/.test(c.name)).map(c => c.name);
+  const conds: string[] = []; const args: any[] = [];
+  const usedRefs: Record<string, number> = {};
+  for (const [k, v] of Object.entries(refs || {})) {
+    const n = Number(v);
+    if (!refCols.includes(k) || !Number.isInteger(n)) continue;
+    args.push(n); conds.push(`"${k}"=$${args.length}`); usedRefs[k] = n;
+  }
+  const hasStatus = cols.some(c => c.name === 'status');
+  args.push(date);
+  const taken = (await pool.query(
+    `select to_char("${ts.name}", 'HH24:MI') as t, count(*)::int n from "${schema}"."${table}"
+     where "${ts.name}"::date = $${args.length}${conds.length ? ' and ' + conds.join(' and ') : ''}${hasStatus ? ` and coalesce("status",'pending') not in ('declined','cancelled')` : ''}
+     group by 1`, args)).rows;
+  // capacity: the first provided resource whose table declares one (mirrors slotGuard exactly)
+  let capacity = 1;
+  try {
+    const fks = (await pool.query(
+      `select kcu.column_name as col, ccu.table_name as ref
+       from information_schema.table_constraints tc
+       join information_schema.key_column_usage kcu on kcu.constraint_name=tc.constraint_name and kcu.table_schema=tc.table_schema
+       join information_schema.constraint_column_usage ccu on ccu.constraint_name=tc.constraint_name and ccu.table_schema=tc.table_schema
+       where tc.constraint_type='FOREIGN KEY' and tc.table_schema=$1 and tc.table_name=$2`, [schema, table])).rows;
+    for (const fk of fks) {
+      if (!(fk.col in usedRefs) || !IDENT.test(fk.ref)) continue;
+      const refCols2 = (await typedColumns(pool, schema, fk.ref)).map(c => c.name);
+      if (!refCols2.includes('capacity')) continue;
+      const cap = Number((await pool.query(`select "capacity" from "${schema}"."${fk.ref}" where id=$1`, [usedRefs[fk.col]])).rows[0]?.capacity);
+      if (Number.isInteger(cap) && cap > 0) { capacity = cap; break; }
+    }
+  } catch {}
+  const now = Date.now();
+  const out: { t: string; free: boolean }[] = [];
+  for (let h = 9; h <= 16; h++) {
+    const t = String(h).padStart(2, '0') + ':00';
+    const n = Number(taken.find((r: any) => r.t === t)?.n || 0);
+    out.push({ t, free: new Date(`${date}T${t}:00`).getTime() > now && n < capacity });
+  }
+  return out;
+}
+
 // PQ3 — CLIENT CONTENT EDITING. Directus lives in a SEPARATE database and cannot reach the app_<hex>
 // schema (that's where products/menu/posts really live), so the owner edits their content through
 // Relay's own owner-scoped admin over THIS API. The live site already reads these tables live, so an
