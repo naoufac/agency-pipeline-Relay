@@ -302,20 +302,25 @@ Five briefs shipped first-pass on day one (stock, front door, buttons, scope, ca
 deploy gate re-runs all suites inside prod and REVERTS on any failure — it held the bar against the
 boss himself once already.
 
-## NEXT 3 — the boss's direction (updated 2026-07-03 evening)
-1. ~~PQ1 verdict + hero art-direction~~ **DONE 2026-07-03**; ~~palette distinctness~~ **DONE
-   2026-07-04** (per-theme brand pools, hash-rotated, colour-word steered — proven: law forest-ink
-   vs skate taxi-yellow, both zero-touch); catalog register titles, card date/slug/number noise and
-   machine-table catalogs also dead + gated. **Remaining #1: register-aware catalog CARDS** —
-   a service card must not read like a SKU (price-first, 'in stock') on a law firm/clinic;
-   presentation register per archetype+theme. Then 3-lens re-score; target ≤4.
-2. **PQ2 finish: options/variants** — sizes/colours on products; variant-aware PDP, cart lines,
-   stock and checkout. Completes "a store that actually sells" to real-shop grade. Precise contract,
-   worker-friendly, ecom:check extends.
-3. **PWA — every produced site installs as an app** — manifest + brand icon + offline shell +
-   deterministic gate; the honest answer to the Android ask (Add to Home Screen = an app on the
-   phone; the owner texted an "android version" brief today — this is its redemption), and the base
-   for native packaging later. Small closed-set work, huge perceived value.
+## NEXT 3 — owner pivot 2026-07-04: THE CHAIN over the pixels
+The owner called it: the produced website is an artifact; the ASSET is the production chain
+(brief → scope → archetype → data model → real DB → compiled forms → composed pages → gates →
+browser review → live). Design work is PARKED at the current bar — the gates keep everything won
+(art-direction, palettes, card hygiene) from regressing; no more style investment unless a sale
+needs the panel number. Remaining PQ1 residuals (register cards, re-score) move to the backlog.
+
+1. **PWA → Android** — every produced site installs as an app: manifest + brand icon + offline
+   shell + deterministic gate (pwa:check). Phone check: open a produced site on Android → Add to
+   Home Screen → a real app icon, full-screen launch. Then TWA packaging (same site, wrapped as a
+   Play-Store-publishable app) as the follow-up — ONE chain, no second codebase, no parallel system.
+2. **THE CHAIN as a surface** — "How it was built" becomes a first-class product page per site:
+   the full production trace (scope verdict, archetype, data model, gates passed, review verdict,
+   rebuild history) readable by a client, not just the operator. This is the magic made visible —
+   and the owner's debugging window when a build goes sideways.
+3. **Capability growth (flexibility for real client needs)** — widen SCOPE's closed capability
+   registry one capability at a time, each with its own gate, driven by real briefs the front door
+   receives (the astrology app, the FedEx ask). The registry is HOW the agency says yes to more
+   without lying about what it can't do yet.
 
 ## Standing rules (locked — same as GOAL.md)
 1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.
