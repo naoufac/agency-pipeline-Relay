@@ -83,7 +83,7 @@ Now CTAs route to the relevant page / action page / on-page conversion anchor, n
 Gate: dogfood flags circular and all-same-target buttons. Proven on the delivery app that had shipped
 all-index buttons.
 
-## PQ1 · Distinct design per brief — CORE SHIPPED 2026-07-03, verdict with the owner
+## PQ1 · Distinct design per brief — CORE SHIPPED 2026-07-03, art-direction added, measuring honestly
 **Shipped:** a 3-lens agency panel scored the old output 7.3/10 sameness on real screenshots; three
 closed-set axes later the structural space is ~240 combinations: hero funnel un-clustered (+
 distribution gate — no rule can silently collapse variants again), per-theme BUTTON recipes
@@ -92,9 +92,22 @@ poster overlay) rotated independently of the hero. Proven on the plan's own phon
 skate shop / cafe built zero-touch came out visibly distinct (side-by-side sent to the owner).
 The proof run also hardened the floor: 'bookings' plural was invisible to the archetype classifier
 and the LLM could downgrade an app to a brochure — the classifier is now the floor, gated.
+**ART-DIRECTION shipped 2026-07-03 (evening):** every theme owns a photographic voice, forced in
+deterministic CSS (LLM untouched): per-theme GRADE (gravure/clean/golden/punch/mono), brand TINT
+layer from --primary, CROP discipline (split/wide hero aspect + frame radius per theme), and a
+brand-tinted image-hero scrim with the fixed dark floor kept (AA by construction). Product photos
+exempt — never grade what's for sale. theme:check asserts the whole axis (5 distinct grades, ≥3
+crops/frames, tint layers, floor, PDP exemption). Proven visually on all 5 themes + real rebuilds.
+**The honest numbers:** panel re-score on the new trio measured 6.0/10 (from 7.3). The post-art-
+direction panel run measured 7.7 — NOT an improvement, and honestly recorded: the rebuilt law brief
+became an app with an injected services CATALOG (new commerce-card sameness + raw DB slugs shipped
+as card copy — both new classes, both now dead + gated), and law/skate drew colliding green palettes
+that run. Grading/crops are real (verified in pixels + gates); the residual list MOVED, which is the
+panel doing its job. Sameness ≤4 remains open — palette distinctness + register-aware cards are next.
 **Phone check:** the trio side-by-side — owner is the judge.
-**Still ahead:** panel re-score for the number; hero art-direction (photo tint/crop rules); section
-rhythm variants; empty-state design.
+**Still ahead (panel-ranked):** brand-palette distinctness axis (two same-day briefs must never draw
+near-identical accents); register-aware catalog framing (a law firm's services are not SKUs: card
+copy/title register per archetype+theme); section rhythm variants; empty-state design.
 
 ## PQ2 · Ecommerce that actually sells — CORE SHIPPED 2026-07-02, widening
 **Shipped + proven live:** shop grid from the real products table with Add-to-cart · cart page
@@ -289,17 +302,19 @@ Five briefs shipped first-pass on day one (stock, front door, buttons, scope, ca
 deploy gate re-runs all suites inside prod and REVERTS on any failure — it held the bar against the
 boss himself once already.
 
-## NEXT 3 — the boss's direction (set 2026-07-03, for the next session)
-1. **PQ1 verdict + residuals** — re-run the 3-lens panel on the NEW trio for the measured sameness
-   score (old baseline 7.3/10; target ≤4), then build the #1 residual: hero ART-DIRECTION —
-   deterministic photo treatment rules per theme (brand-tinted grade, crop discipline), closed-set.
-   Design quality is the M2DIA differentiator; we changed a lot — measure it, then keep cutting.
+## NEXT 3 — the boss's direction (updated 2026-07-03 evening)
+1. ~~PQ1 verdict + hero art-direction~~ **DONE 2026-07-03** — measured 6.0 pre / art-direction axis
+   shipped + gated / post-run 7.7 with recorded confounds (see PQ1). **Replacement #1: the panel's
+   new top residuals** — brand-PALETTE distinctness (deterministic, brief-rooted accent assignment so
+   two same-day sites never twin on colour; the LLM's whim drew law+skate both green) and
+   register-aware catalog cards (services ≠ SKUs: framing per archetype+theme). Then re-score; target ≤4.
 2. **PQ2 finish: options/variants** — sizes/colours on products; variant-aware PDP, cart lines,
    stock and checkout. Completes "a store that actually sells" to real-shop grade. Precise contract,
    worker-friendly, ecom:check extends.
 3. **PWA — every produced site installs as an app** — manifest + brand icon + offline shell +
    deterministic gate; the honest answer to the Android ask (Add to Home Screen = an app on the
-   phone), and the base for native packaging later. Small closed-set work, huge perceived value.
+   phone; the owner texted an "android version" brief today — this is its redemption), and the base
+   for native packaging later. Small closed-set work, huge perceived value.
 
 ## Standing rules (locked — same as GOAL.md)
 1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.

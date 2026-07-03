@@ -427,3 +427,26 @@ Validated: local == origin/master, 0 uncommitted, prod redeployed to the same HE
 inside prod, board 200. NEXT 3 (in PLAN.md): 1) PQ1 panel re-score + hero art-direction residual,
 2) PQ2 options/variants, 3) PWA installable apps. Boss/worker harness ready (briefs 06+ go to
 /root/worker-briefs; launch ONLY via systemd-run). Front door live on @nao_openclaw_alibaba_bot.
+
+## 2026-07-03 (evening) — PQ1 ART-DIRECTION: measured, shipped, and the panel moved the target
+Panel re-score on the new trio (law/skate/cafe, Sonnet, 3 lenses, fresh desk+mob screenshots):
+**6.0/10 sameness** (6/6/6, from 7.3) — unanimous #1: uniform photography (raw stock, one warm grade,
+same crops) + law/cafe split-hero twins. Built it same session (4e25134): per-theme photo GRADE
+(gravure/clean/golden/punch/mono) + brand TINT layer + CROP discipline (aspect/frame per theme) +
+brand-tinted image-hero scrim over the fixed dark floor (AA by construction); products exempt.
+theme:check gates the whole axis. Verified in pixels on all 5 themes.
+THE MACHINE THEN TAUGHT US THREE MORE, all from zero-touch trio rebuilds (verbatim briefs):
+(1) 'a BOUTIQUE law firm' → STORE ('boutique' bare keyword) → empty shop grid failed review →
+    boutique now noun-shop only, law brief is a gate case (875ec9a);
+(2) cafe's public form drew a reservation_id dropdown into the sealed PRIVATE reservations table
+    (options can never load) → compiler forces such refs nullable + public forms omit them
+    (order_items exempt), app:check 125→135;
+(3) law-as-app grew an injected services catalog that shipped RAW SLUGS ('elder-law-guardianship')
+    and bare numbers ('60') as card copy → __rcards filters machine residue, DB-card images take the
+    theme frame, the reviewer gates the class (card-noise), layout:check 33→35 (d2e6fc7).
+Post-fix panel measured 7.7 — recorded HONESTLY as not-an-improvement with confounds: the trio's
+structure changed under the panel (law site→app catalog = new commerce sameness) and law/skate drew
+colliding green palettes (LLM whim). Two panel claims ('no grading anywhere') contradict the pixels;
+the structural findings stand. Final trio (law bbb7cdfe / skate 12b8f47e / cafe 0ecfde36) all
+PASSED review zero-touch on the new design. NEXT #1 rewritten: palette distinctness axis +
+register-aware catalog cards, then re-score toward ≤4.
