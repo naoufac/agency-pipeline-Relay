@@ -86,7 +86,11 @@ ok('DS_CSS contains .l-cards-horizontal rule', DS_CSS.includes('.l-cards-horizon
 ok('DS_CSS contains .l-cards-overlay rule', DS_CSS.includes('.l-cards-overlay'));
 // the DB-card renderer must FILTER machine residue (raw slugs / bare numbers) out of card copy —
 // the agency panel's #1 on a real law rebuild ('elder-law-guardianship' shipped as body text)
-ok('emitted card renderer filters slugs + bare numbers', rendered.image.includes('(?:[-_][a-z0-9]+)+'), 'NOISE filter missing from page script');
+ok('emitted card renderer filters slugs', rendered.image.includes('(?:[-_][a-z0-9]+)+'), 'slug filter missing from page script');
+// the EMITTED regex must keep its backslashes — a template literal silently eats \d, shipping a
+// dead filter (/^#?d+/) that let a bare '60' reach a real law card. Assert the literal characters.
+ok('emitted number filter survives template escaping', rendered.image.includes('/^#?\\d+(\\.\\d+)?$/'), 'number regex lost its backslashes in the emitted script');
+ok('admin-flag booleans never render as card copy', rendered.image.includes('active|enabled|visible|published'));
 ok('DB-card images take the theme frame (no hardcoded radius)', rendered.image.includes('border-radius:var(--radius)'));
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
