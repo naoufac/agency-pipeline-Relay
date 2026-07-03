@@ -56,10 +56,13 @@ try {
   ok('deleted record is gone', !(await appdb.getRow(pool, id, 'products', vase.id)));
   ok('delete unknown row → false', !(await appdb.deleteRow(pool, id, 'products', 99999)));
 
-  // (5) a site with NO content tables answers honestly (no crash)
+  // (5) a store with only system tables: orders stays hidden, but PAYMENTS v1 means the owner
+  // always has exactly ONE editable collection — their payment instructions (injected at compile)
   const bare = randomUUID();
   await appdb.provision(pool, bare, JSON.stringify({ entities: [{ name: 'orders', fields: [{ name: 'customer_name', type: 'text' }] }] }));
-  ok('a store with only system tables → no editable collections', (await appdb.contentTables(pool, bare)).length === 0);
+  const bareTabs = await appdb.contentTables(pool, bare);
+  ok('orders-only store: payment instructions are the one editable collection', bareTabs.length === 1 && bareTabs[0].table === 'payment_options', JSON.stringify(bareTabs));
+  ok('orders itself stays hidden from the Content tab', !bareTabs.some((t) => t.table === 'orders'));
   await pool.query(`drop schema if exists "${appdb.schemaName(bare)}" cascade`).catch(() => {});
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e);

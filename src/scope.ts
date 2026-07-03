@@ -32,6 +32,7 @@ const ALWAYS_APP: ScopeItem[] = [
 ];
 const ALWAYS_STORE_EXTRA: ScopeItem[] = [
   { name: 'lead-email', promise: 'you are emailed every lead/order instantly' },
+  { name: 'payments', promise: 'checkout shows YOUR payment instructions (bank transfer, cash on pickup, your payment link — you edit them from the board); you confirm each order when paid' },
 ];
 
 // Closed unsupported registry — first matching entry per brief produces one ScopeMiss.
@@ -47,7 +48,7 @@ const UNSUPPORTED: Unsup[] = [
     alternative: 'one language per site today' },
   { detect: /online payment|credit card|pay online/,
     ask: 'online card payments',
-    alternative: 'orders are recorded and confirmed; payment is settled off-platform for now' },
+    alternative: 'checkout shows YOUR payment instructions (bank transfer, cash on pickup, your payment link); card processing in-checkout is on the roadmap' },
 ];
 
 // Exported for scope:check assertions only.

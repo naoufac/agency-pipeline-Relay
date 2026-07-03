@@ -31,6 +31,30 @@ ok('checkout posts to the ORDER endpoint (server-priced)', co.includes("/order'"
 // blocked because site_renders only knew relaySubmit)
 ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="return relay(submit|checkout)/i.test(co));
 
+// ---- PAYMENTS v1: payment instructions at checkout, owner-editable, LLM never invents details ----
+{
+  const { parseModel, compile } = await import('./schema.ts');
+  const store = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'products', public: true, fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }], seed: [{ title: 'Mug', price: 24 }] },
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }] },
+  ] })));
+  ok('payments: a store model gets payment_options injected', store.tables.includes('payment_options'), store.tables.join(','));
+  ok('payments: the one safe seed is pay-on-pickup (never an invented IBAN)', store.ddl.includes('Pay on pickup') && !/iban|bank account \d/i.test(store.ddl));
+  ok('payments: the injection is loud', store.warnings.some((w: string) => /payment_options/.test(w)));
+  const own = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+    { name: 'payment_methods', public: true, fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Bank transfer' }] },
+  ] })));
+  ok("payments: a model's OWN payment table is respected (no duplicate injection)", !own.tables.includes('payment_options'), own.tables.join(','));
+  const plain = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+  ] })));
+  ok('payments: non-store models are untouched', !plain.tables.includes('payment_options'));
+  ok('payments: checkout carries the "How you\'ll pay" box', co.includes('data-payopts') && co.includes("How you'll pay"));
+  ok('payments: the page runtime fills it from payment_options (live read)', co.includes("/data/payment_options'"));
+  ok('payments: the box stays hidden when the store has no options', /<div class="payopts" data-payopts hidden>/.test(co));
+}
+
 // ---- PDP render layer: one real row -> a full product detail page ----
 const pdp = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } }, sections: [
   { type: 'product', row: { id: 3, title: 'Terracotta Mug', price: 24, description: 'Hand-thrown, dishwasher-safe.', material: 'stoneware', weight_grams: 0, _image: '/sites/x/assets/row-abc.jpg' }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart' }] },

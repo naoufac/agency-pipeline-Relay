@@ -88,6 +88,11 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* PAYMENTS v1 · payment instructions at checkout (owner-edited, read live) */
+.payopts{background:var(--surface);border:var(--border-w,1px) solid var(--line);border-radius:var(--radius);padding:18px 22px;margin:1.4rem 0}
+.payopts h3{margin-bottom:.6rem}
+.payopts .payopt{padding:.5rem 0;border-top:1px solid var(--line)}.payopts .payopt:first-of-type{border-top:0}
+.payopts .payopt b{display:block}.payopts .payopt p{color:var(--muted);margin:.2rem 0 0;font-size:.95rem}
 /* FS5 · slot picker — tappable free times under the date field */
 .slotchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .slotchips button{font:inherit;padding:.45rem .85rem;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer}
@@ -292,6 +297,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   checkout: (s) => `<section class="section" id="checkout"><div class="container" style="max-width:640px">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
     <div class="cart-box" data-cart="summary" style="margin:1.4rem 0"><p class="cart-empty">Your cart is empty.</p></div>
+    <div class="payopts" data-payopts hidden><h3>How you'll pay</h3></div>
     <form class="rcheckout rform" onsubmit="return relayCheckout(event)">
       <label>Full name<input name="customer_name" type="text" required></label>
       <label>Email<input name="email" type="email" required></label>

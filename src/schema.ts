@@ -75,6 +75,17 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     if (!IDENT.test(name) || ents.some(e => e.name === name)) { if (raw?.name) warnings.push('dropped entity ' + raw?.name); continue; }
     ents.push({ ...raw, name });
   }
+  // PAYMENTS v1 — every store carries owner-editable PAYMENT INSTRUCTIONS: an injected public
+  // payment_options table (rendered at checkout, edited in the Content tab, read live). The LLM
+  // never invents an IBAN — the one safe seed is "pay on pickup"; the owner types real details.
+  if (ents.some(e => /^orders$/i.test(e.name)) && !ents.some(e => /^payment_\w+$/i.test(e.name))) {
+    ents.push({ name: 'payment_options', public: true, display: 'name', fields: [
+      { name: 'name', type: 'text', required: true },
+      { name: 'details', type: 'text' },
+      { name: 'active', type: 'boolean', default: true },
+    ], seed: [{ name: 'Pay on pickup', details: 'Pay when you collect your order — cash or card at the counter.', active: true }] } as Entity);
+    warnings.push('injected payment_options (owner-editable payment instructions; safe default: pay on pickup)');
+  }
   const names = new Set(ents.map(e => e.name));
 
   // resolve fields per entity (skip reserved/invalid; resolve refs to known entities)
