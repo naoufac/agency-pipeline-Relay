@@ -111,6 +111,21 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
   const resolved: Resolved = { order: [], cols: {}, createSql: {}, indexSql: {}, seedSql: {} };
   for (const name of order) {
     const e = ents.find(x => x.name === name)!; const list = cols.get(name)!;
+    // FS5 floor — ONE canonical booking-time shape. The LLM draws split date+time columns on booking
+    // tables ('reservation_date' date + 'reservation_time' text) — the slot guard and hour-level
+    // availability both need ONE timestamp. Merge: the date column BECOMES the timestamp, the time
+    // column is dropped, and seed rows are merged below (date + 'T' + time). Loud, deterministic.
+    let mergedTime: { dateCol: string; timeCol: string } | null = null;
+    if (SLOT_TABLE.test(name)) {
+      const dcol = list.find(c => !c.ref && /(^|_)(date|day)$/.test(c.name) && /^(date|timestamp)/.test(c.type));
+      const tcol = list.find(c => !c.ref && c !== dcol && /(^|_)time$/.test(c.name));
+      if (dcol && tcol) {
+        dcol.type = 'timestamptz';
+        list.splice(list.indexOf(tcol), 1);
+        mergedTime = { dateCol: dcol.name, timeCol: tcol.name };
+        warnings.push(`${name}: split ${dcol.name}+${tcol.name} merged into one timestamp "${dcol.name}" (canonical booking-time shape)`);
+      }
+    }
     // FS1 — every private (visitor-record) entity carries a nullable receipt token: generated
     // server-side on insert, unique when present. Nullable by design — pre-receipt rows stay null
     // (an '' default would collide on the unique index and make old rows "findable" by nothing).
@@ -161,7 +176,25 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     resolved.seedSql[name] = [];
     // seeds: scalar columns by name; FK columns by the field name OR <field>_id, when given an integer id
     const colByKey = (k: string) => list.find(c => !c.ref && c.name === k) || list.find(c => c.ref && (c.name === k || c.name === k + '_id'));
-    for (const row of (e.seed || []).slice(0, 12)) {
+    // "6 PM" / "18:30" / "18:30:00" → HH:MM for the canonical-shape seed merge; garbage → midday
+    const timeish = (v: any): string => {
+      const m = String(v ?? '').trim().match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm)?$/i);
+      if (!m) return '12:00';
+      let h = Number(m[1]) % 24; const ap = (m[3] || '').toLowerCase();
+      if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0;
+      return String(h).padStart(2, '0') + ':' + (m[2] || '00');
+    };
+    for (const raw0 of (e.seed || []).slice(0, 12)) {
+      let row: any = raw0 || {};
+      // canonical booking-time shape: a seed carrying split date+time keys is merged the same way
+      if (mergedTime) {
+        const dk = Object.keys(row).find(k => snake(k) === mergedTime!.dateCol);
+        const tk = Object.keys(row).find(k => snake(k) === mergedTime!.timeCol);
+        if (dk && tk && /^\d{4}-\d{2}-\d{2}/.test(String(row[dk]))) {
+          row = { ...row, [dk]: String(row[dk]).slice(0, 10) + 'T' + timeish(row[tk]) + ':00' };
+          delete row[tk];
+        }
+      }
       const used = Object.keys(row || {})
         .map(k => ({ col: colByKey(snake(k)), v: (row as any)[k] }))
         .filter((x): x is { col: NonNullable<ReturnType<typeof colByKey>>; v: any } => !!x.col && (!x.col.ref || Number.isInteger(Number(x.v))));

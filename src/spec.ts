@@ -124,14 +124,24 @@ function unseededRequiredRefs(model: any): string[] {
   return errs;
 }
 
+// FS5 floor — booking time is ONE timestamp field, never a slot-inventory table: a barbershop model
+// shipped time_slots rows + an FK, and hour-level availability went blind (the system computes
+// availability itself; a slots table is the LLM re-implementing the system, badly).
+function slotInventoryErrors(model: any): string[] {
+  const sn = (v: any) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const ents: any[] = Array.isArray(model?.entities) ? model.entities : [];
+  return ents.filter((e: any) => /^(time_?slots?|slots)$/.test(sn(e?.name)))
+    .map((e: any) => `entity "${e.name}" is a slot-inventory table — do NOT model available times as rows. Put ONE timestamp field on the booking entity itself (e.g. appointment_at, type datetime); the system computes availability from it`);
+}
+
 export function normalizeDataModel(raw: string): DataModelResult {
   const repairs: string[] = []; const errors: string[] = [];
   if (!raw) { errors.push('empty database output'); return { ok: false, errors }; }
-  // every recovery path funnels here: clamp seeds, then reject unbuildable required-ref shapes
+  // every recovery path funnels here: clamp seeds, then reject unbuildable shapes into retry
   const finish = (m: any): DataModelResult => {
     const model = clampSeedPks(m, repairs);
-    const seedErrs = unseededRequiredRefs(model);
-    return seedErrs.length ? { ok: false, errors: seedErrs } : { ok: true, model, repairs };
+    const errs = [...unseededRequiredRefs(model), ...slotInventoryErrors(model)];
+    return errs.length ? { ok: false, errors: errs } : { ok: true, model, repairs };
   };
   // first pass: the FIRST complete, balanced JSON object (string-aware; survives fences + a trailing block).
   const first = extractFirstJson(raw);

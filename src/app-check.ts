@@ -195,6 +195,22 @@ try {
       { name: 'preorders', fields: [{ name: 'reservation', type: 'ref:reservations', required: true }, { name: 'item', type: 'text', required: true }] },
     ] })));
     ok('the nullable demotion is loud (compile warning)', m2.warnings.some((w: string) => /reservation_id.*nullable/.test(w)), JSON.stringify(m2.warnings));
+    // FS5 floor: split date+time on a booking table merges into ONE timestamp (fields AND seeds)
+    const m5 = compile(parseModel(JSON.stringify({ entities: [
+      { name: 'reservations', fields: [
+        { name: 'customer_name', type: 'text', required: true },
+        { name: 'reservation_date', type: 'date', required: true },
+        { name: 'reservation_time', type: 'text', required: true },
+        { name: 'party_size', type: 'int' }],
+        seed: [{ customer_name: 'Seed Guest', reservation_date: '2030-05-04', reservation_time: '6 PM', party_size: 2 }] },
+    ] })));
+    ok('split date+time merges into one timestamp column', /"reservation_date" timestamptz/.test(m5.ddl) && !/"reservation_time"/.test(m5.ddl), m5.ddl.slice(0, 400));
+    ok('the merged seed carries the real time (6 PM → 18:00)', m5.ddl.includes("2030-05-04T18:00:00"), m5.ddl.slice(-300));
+    ok('the merge is loud (compile warning)', m5.warnings.some((w: string) => /canonical booking-time/.test(w)), JSON.stringify(m5.warnings));
+    const m6 = compile(parseModel(JSON.stringify({ entities: [
+      { name: 'posts', fields: [{ name: 'title', type: 'text', required: true }, { name: 'published_date', type: 'date' }, { name: 'read_time', type: 'text' }] },
+    ] })));
+    ok('non-booking tables keep their date+time columns untouched', /"published_date" date/.test(m6.ddl) && /"read_time" text/.test(m6.ddl), m6.ddl.slice(0, 300));
   }
   await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Mallory', status: 'confirmed' });
   const mal = (await pool.query(`select status from "${schema}"."bookings" where customer_name='Mallory'`)).rows[0];

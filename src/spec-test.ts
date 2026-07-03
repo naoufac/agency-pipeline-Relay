@@ -283,6 +283,15 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   const nullable = '{"entities":[{"name":"attorneys","fields":[{"name":"full_name","type":"text"}]},{"name":"consultations","fields":[{"name":"attorney","type":"ref:attorneys"}]}]}';
   ok('normDataModel: NULLABLE ref into unseeded catalog stays ok (does not block the action)', normalizeDataModel(nullable).ok === true);
 }
+// 7) a slot-inventory table (time_slots rows + FK) → rejected into retry with the canonical-shape
+// feedback (a real barbershop build modelled available times as rows and availability went blind)
+{
+  const slotsy = '{"entities":[{"name":"barbers","fields":[{"name":"full_name","type":"text","required":true}],"seed":[{"full_name":"Marcus"}]},{"name":"time_slots","fields":[{"name":"starts_at","type":"datetime","required":true}],"seed":[{"starts_at":"2030-05-04T10:00:00"}]},{"name":"bookings","fields":[{"name":"customer_name","type":"text","required":true},{"name":"time_slot","type":"ref:time_slots","required":true}]}]}';
+  const r = normalizeDataModel(slotsy);
+  ok('normDataModel: slot-inventory table → rejected', r.ok === false && r.errors.some(x => /timestamp field/i.test(x) && /time_slots/.test(x)), JSON.stringify(r.ok === false ? r.errors : []));
+  const canonical = '{"entities":[{"name":"barbers","fields":[{"name":"full_name","type":"text","required":true}],"seed":[{"full_name":"Marcus"}]},{"name":"bookings","fields":[{"name":"customer_name","type":"text","required":true},{"name":"barber","type":"ref:barbers","required":true},{"name":"appointment_at","type":"datetime","required":true}]}]}';
+  ok('normDataModel: the canonical shape passes', normalizeDataModel(canonical).ok === true);
+}
 
 // ---- COPY GATE moved to COMPOSE: slop rejected at the retryable stage; {{brand}} token is NOT slop ----
 {
