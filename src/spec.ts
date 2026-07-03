@@ -98,17 +98,48 @@ export function normalizeContent(raw: string): ContentResult {
 // a concatenated-blocks fallback) and CLAMPS oversized seed integers into INT4 range, or REJECTS the
 // unfixable (truncated) into the existing retry-with-feedback loop. Same shape as normalizeContent (R3).
 export type DataModelResult = { ok: true; model: any; repairs: string[] } | { ok: false; errors: string[] };
+
+// A REQUIRED ref from a visitor-writable entity into a PUBLIC catalog entity with NO seed rows is
+// unbuildable: the form renders a required dropdown with nothing to offer and the core action can
+// never submit (a real law build shipped empty `attorneys`/`services` and failed its own form).
+// Rejecting here feeds the existing retry-with-feedback loop, where the model adds real seeds.
+// (Refs into PRIVATE targets are separately forced nullable + hidden by the schema compiler.)
+function unseededRequiredRefs(model: any): string[] {
+  const errs: string[] = [];
+  const sn = (v: any) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const ents: any[] = Array.isArray(model?.entities) ? model.entities : [];
+  const byName = new Map(ents.map((e: any) => [sn(e?.name), e]));
+  for (const e of ents) {
+    if (!PRIVATE_READ.test(sn(e?.name))) continue;
+    for (const f of (e?.fields || [])) {
+      const refSpec = f?.ref || (typeof f?.type === 'string' && /^ref:/i.test(f.type) ? f.type.slice(4) : null);
+      if (!refSpec || !f?.required) continue;
+      const target = byName.get(sn(refSpec));
+      if (!target || PRIVATE_READ.test(sn(target?.name))) continue;
+      if (!Array.isArray(target.seed) || target.seed.length === 0)
+        errs.push(`"${target.name}" has NO seed rows but the visitor form requires it ("${e.name}.${f.name}") — the dropdown would have nothing to offer; seed 3-6 realistic ${target.name}`);
+    }
+  }
+  return errs;
+}
+
 export function normalizeDataModel(raw: string): DataModelResult {
   const repairs: string[] = []; const errors: string[] = [];
   if (!raw) { errors.push('empty database output'); return { ok: false, errors }; }
+  // every recovery path funnels here: clamp seeds, then reject unbuildable required-ref shapes
+  const finish = (m: any): DataModelResult => {
+    const model = clampSeedPks(m, repairs);
+    const seedErrs = unseededRequiredRefs(model);
+    return seedErrs.length ? { ok: false, errors: seedErrs } : { ok: true, model, repairs };
+  };
   // first pass: the FIRST complete, balanced JSON object (string-aware; survives fences + a trailing block).
   const first = extractFirstJson(raw);
-  if (first && Array.isArray(first.entities)) return { ok: true, model: clampSeedPks(first, repairs), repairs };
+  if (first && Array.isArray(first.entities)) return finish(first);
   // first pass (coercion): the model used `tables:[...]` instead of `entities:[...]` — extractFirstJson
   // parses nested objects the regex fallback below cannot, so coerce here too.
   if (first && Array.isArray(first.tables)) {
     repairs.push('coerced: tables → entities');
-    return { ok: true, model: clampSeedPks({ ...first, entities: first.tables }, repairs), repairs };
+    return finish({ ...first, entities: first.tables });
   }
   // second pass: scan top-level blocks and take the first that carries a real model (concatenated output).
   const blocks: any[] = [];
@@ -117,13 +148,13 @@ export function normalizeDataModel(raw: string): DataModelResult {
   const withEntities = blocks.find(b => b && Array.isArray(b.entities));
   if (withEntities) {
     repairs.push('merged: extracted entities from concatenated blocks');
-    return { ok: true, model: clampSeedPks(withEntities, repairs), repairs };
+    return finish(withEntities);
   }
   // third pass: a concatenated block that used `tables:[...]` instead of `entities:[...]`.
   const withTables = blocks.find(b => b && Array.isArray(b.tables));
   if (withTables) {
     repairs.push('coerced: tables → entities');
-    return { ok: true, model: clampSeedPks({ ...withTables, entities: withTables.tables }, repairs), repairs };
+    return finish({ ...withTables, entities: withTables.tables });
   }
   // fourth pass (TRUNCATION recovery): a max_tokens cut mid-model leaves one unbalanced object whose
   // LEADING entities are complete (seen live: a big delivery model — users/deliveries/shipments/
@@ -151,7 +182,7 @@ export function normalizeDataModel(raw: string): DataModelResult {
     }
     if (ents.length) {
       repairs.push(`recovered ${ents.length} complete entities from a truncated model`);
-      return { ok: true, model: clampSeedPks({ entities: ents } as any, repairs), repairs };
+      return finish({ entities: ents } as any);
     }
   }
   errors.push('database output has no entities[] or coercible tables[]');

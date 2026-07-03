@@ -253,6 +253,17 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('normDataModel: int4 overflow clamped', r.ok === true && r.model.entities[0].seed[0].bounty <= 2147483647);
   ok('normDataModel: clamp recorded as repair', r.ok === true && r.repairs.some(x => /clamp/i.test(x)));
 }
+// 6) a visitor form REQUIRING a ref into an UNSEEDED public catalog → rejected into retry (a real law
+// build shipped empty attorneys/services; the required dropdown had nothing to offer, the form died)
+{
+  const unseeded = '{"entities":[{"name":"attorneys","fields":[{"name":"full_name","type":"text","required":true}]},{"name":"consultations","fields":[{"name":"attorney","type":"ref:attorneys","required":true},{"name":"date","type":"datetime","required":true}]}]}';
+  const r = normalizeDataModel(unseeded);
+  ok('normDataModel: required ref into unseeded catalog → rejected', r.ok === false && r.errors.some(x => /seed/i.test(x) && /attorneys/.test(x)));
+  const seeded = '{"entities":[{"name":"attorneys","fields":[{"name":"full_name","type":"text","required":true}],"seed":[{"full_name":"M. Castellano"}]},{"name":"consultations","fields":[{"name":"attorney","type":"ref:attorneys","required":true}]}]}';
+  ok('normDataModel: same shape with seeds → ok', normalizeDataModel(seeded).ok === true);
+  const nullable = '{"entities":[{"name":"attorneys","fields":[{"name":"full_name","type":"text"}]},{"name":"consultations","fields":[{"name":"attorney","type":"ref:attorneys"}]}]}';
+  ok('normDataModel: NULLABLE ref into unseeded catalog stays ok (does not block the action)', normalizeDataModel(nullable).ok === true);
+}
 
 // ---- COPY GATE moved to COMPOSE: slop rejected at the retryable stage; {{brand}} token is NOT slop ----
 {
