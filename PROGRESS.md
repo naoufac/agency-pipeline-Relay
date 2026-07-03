@@ -509,3 +509,15 @@ warm/clay from the palette pool): PASSED review 0 high; externally verified live
 catch: short_name truncated mid-phrase ("Sal's on") → whole-words-that-fit + no dangling stopword,
 gated. NEXT: chain-trace surface ("How it was built" as a product page) · TWA packaging on the
 roadmap · capability growth from real front-door briefs.
+
+## 2026-07-04 — THE CHAIN MADE VISIBLE: 'How it was built' shipped (chain pivot #2)
+Prod 3c3518e, 13 suites (chain:check 22 is #13). Every produced site now opens its own PRODUCTION
+RECORD at how-it-was-built.html (footer door on every page): brief verbatim → scoped promise
+(complexity, delivered capabilities, honest exclusions) → blueprint (kind, design language, palette
+chips) → the real database (private tables marked sealed) → the run (tasks, wall time, self-repairs
+stated honestly, rebuild rounds) → deterministic checks in client words → review verdict. Rendered
+LIVE with the site's own chrome via renderLiveChain — works retroactively for EVERY site ever built
+(verified on the pre-feature skate build: 200). Everything curated from a closed whitelist; leak
+seals gated with canary strings (event/issue detail text, emails, tokens can never render).
+Proven live on the pizzeria build (owner sent the mobile shot). Chain pivot: #1 PWA ✅ · #2 chain
+surface ✅ · #3 capability growth NEXT.

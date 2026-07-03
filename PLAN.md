@@ -315,10 +315,10 @@ needs the panel number. Remaining PQ1 residuals (register cards, re-score) move 
    SCOPE answers the android ask with a YES. Proven zero-touch on a fresh pizzeria brief.
    **Phone check (yours):** open any new site on your phone → browser menu → Add to Home Screen →
    a real app icon with the brand initial, full-screen launch. TWA (Play-Store packaging) = roadmap.
-2. **THE CHAIN as a surface** — "How it was built" becomes a first-class product page per site:
-   the full production trace (scope verdict, archetype, data model, gates passed, review verdict,
-   rebuild history) readable by a client, not just the operator. This is the magic made visible —
-   and the owner's debugging window when a build goes sideways.
+2. ~~THE CHAIN as a surface~~ ✅ **SHIPPED 2026-07-04** — every site carries 'How this site was
+   built' in its footer: the full trace, live from the production DB, client-readable, leak-sealed
+   (chain:check, suite #13). Works retroactively on every site ever built.
+   **Phone check (yours):** open any produced site → footer → "How this site was built".
 3. **Capability growth (flexibility for real client needs)** — widen SCOPE's closed capability
    registry one capability at a time, each with its own gate, driven by real briefs the front door
    receives (the astrology app, the FedEx ask). The registry is HOW the agency says yes to more
