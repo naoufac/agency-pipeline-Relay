@@ -90,6 +90,8 @@ ok('emitted card renderer filters slugs', rendered.image.includes('(?:[-_][a-z0-
 // the EMITTED regex must keep its backslashes — a template literal silently eats \d, shipping a
 // dead filter (/^#?d+/) that let a bare '60' reach a real law card. Assert the literal characters.
 ok('emitted number filter survives template escaping', rendered.image.includes('/^#?\\d+(\\.\\d+)?$/'), 'number regex lost its backslashes in the emitted script');
+ok('emitted card renderer filters ISO timestamps (backslashes intact)', rendered.image.includes('/^\\d{4}-\\d{2}-\\d{2}T/'), 'ISO regex missing or lost backslashes');
+ok('emitted card renderer uses toDateString for dates', rendered.image.includes('toDateString'));
 ok('admin-flag booleans never render as card copy', rendered.image.includes('active|enabled|visible|published'));
 ok('DB-card images take the theme frame (no hardcoded radius)', rendered.image.includes('border-radius:var(--radius)'));
 
