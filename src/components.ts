@@ -161,6 +161,31 @@ p{margin:0 0 1rem}
 .receipt-meta{list-style:none;padding:0;margin:1.2rem 0;display:grid;gap:.5rem}
 .receipt-meta b{font-weight:600}
 .receipt-status{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.3rem .9rem;font-weight:600;margin:.2rem 0 .8rem}
+/* ============================================================================
+   CARD ANATOMY VARIANTS (PQ1-B) — body.l-cards-<variant>. Applied via CSS-only to
+   .collection .card, .products .card, .feed .card (DOM unchanged, only has-img class added).
+   photo: 3-col grid, current look — no new rules needed.
+   ============================================================================ */
+/* horizontal — 2-col outer grid; card.has-img = side-by-side image + text */
+body.l-cards-horizontal .collection,body.l-cards-horizontal .products,body.l-cards-horizontal .feed{grid-template-columns:1fr 1fr}
+@media(max-width:760px){body.l-cards-horizontal .collection,body.l-cards-horizontal .products,body.l-cards-horizontal .feed{grid-template-columns:1fr}}
+body.l-cards-horizontal .collection .card.has-img,body.l-cards-horizontal .products .card.has-img,body.l-cards-horizontal .feed .card.has-img{display:grid;grid-template-columns:42% 1fr;column-gap:16px;align-items:start;padding:0}
+body.l-cards-horizontal .collection .card.has-img>img,body.l-cards-horizontal .feed .card.has-img>img,body.l-cards-horizontal .products .card.has-img>a.p-imglink{grid-row:1/span 9;height:100%!important;aspect-ratio:auto!important;object-fit:cover;margin:0!important;border-radius:var(--radius) 0 0 var(--radius)!important;width:100%}
+body.l-cards-horizontal .products .card.has-img>a.p-imglink img{height:100%!important;aspect-ratio:auto!important;object-fit:cover;margin:0!important;border-radius:var(--radius) 0 0 var(--radius)!important;width:100%}
+body.l-cards-horizontal .collection .card.has-img>:not(img):not(a.p-imglink),body.l-cards-horizontal .products .card.has-img>:not(img):not(a.p-imglink),body.l-cards-horizontal .feed .card.has-img>:not(img):not(a.p-imglink){padding:16px 16px 0}
+body.l-cards-horizontal .collection .card.has-img>:not(img):not(a.p-imglink):last-child,body.l-cards-horizontal .products .card.has-img>:not(img):not(a.p-imglink):last-child,body.l-cards-horizontal .feed .card.has-img>:not(img):not(a.p-imglink):last-child{padding-bottom:16px}
+@media(max-width:560px){body.l-cards-horizontal .collection .card.has-img,body.l-cards-horizontal .products .card.has-img,body.l-cards-horizontal .feed .card.has-img{grid-template-columns:1fr}body.l-cards-horizontal .collection .card.has-img>img,body.l-cards-horizontal .feed .card.has-img>img,body.l-cards-horizontal .products .card.has-img>a.p-imglink{grid-row:auto;height:auto!important;aspect-ratio:16/9!important;border-radius:var(--radius) var(--radius) 0 0!important}}
+/* overlay — card.has-img is a poster; text is WHITE on a dark scrim (AA by construction, not theme-derived) */
+body.l-cards-overlay .collection .card.has-img,body.l-cards-overlay .products .card.has-img,body.l-cards-overlay .feed .card.has-img{position:relative;aspect-ratio:4/5;overflow:hidden;padding:0;display:flex;flex-direction:column;justify-content:flex-end}
+body.l-cards-overlay .collection .card.has-img>img,body.l-cards-overlay .feed .card.has-img>img{position:absolute;inset:0;width:100%!important;height:100%!important;object-fit:cover;margin:0!important;border-radius:0!important}
+body.l-cards-overlay .products .card.has-img>a.p-imglink{position:absolute;inset:0;display:block}
+body.l-cards-overlay .products .card.has-img>a.p-imglink img{width:100%!important;height:100%!important;object-fit:cover;margin:0!important;border-radius:0!important}
+body.l-cards-overlay .collection .card.has-img::after,body.l-cards-overlay .products .card.has-img::after,body.l-cards-overlay .feed .card.has-img::after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(11,18,32,.82),transparent 65%);z-index:1;pointer-events:none}
+body.l-cards-overlay .collection .card.has-img>:not(img):not(a.p-imglink),body.l-cards-overlay .products .card.has-img>:not(img):not(a.p-imglink),body.l-cards-overlay .feed .card.has-img>:not(img):not(a.p-imglink){position:relative;z-index:2;color:#fff;padding:0 16px}
+body.l-cards-overlay .collection .card.has-img>:not(img):not(a.p-imglink):last-child,body.l-cards-overlay .products .card.has-img>:not(img):not(a.p-imglink):last-child,body.l-cards-overlay .feed .card.has-img>:not(img):not(a.p-imglink):last-child{padding-bottom:16px}
+body.l-cards-overlay .collection .card.has-img .muted,body.l-cards-overlay .products .card.has-img .muted,body.l-cards-overlay .feed .card.has-img .muted{color:rgba(255,255,255,.85)}
+body.l-cards-overlay .collection .card.has-img .btn,body.l-cards-overlay .products .card.has-img .btn,body.l-cards-overlay .feed .card.has-img .btn{position:relative;z-index:3}
+body.l-cards-overlay .collection .card.has-img p,body.l-cards-overlay .products .card.has-img p,body.l-cards-overlay .feed .card.has-img p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 `;
 
 export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard') {

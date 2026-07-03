@@ -6,6 +6,7 @@
 // Deterministic, no server needed. Exit 1 on any failure. Run: npm run layout:check.
 import { chooseLayout, HERO_VARIANTS } from './layout.ts';
 import { renderPage } from './render.ts';
+import { DS_CSS } from './components.ts';
 import { archetypeFor } from './archetype.ts';
 import { themeFor } from './themes.ts';
 
@@ -44,7 +45,7 @@ const markers: Record<string, RegExp> = {
 };
 const rendered: Record<string, string> = {};
 for (const v of HERO_VARIANTS) {
-  const html = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: v, nav: 'standard', band: false } });
+  const html = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: v, nav: 'standard', band: false, cards: 'photo' } });
   rendered[v] = html;
   ok(`hero "${v}" renders its own structure`, markers[v].test(html), 'marker missing');
   ok(`hero "${v}" carries a body layout class`, html.includes(`l-hero-${v}`));
@@ -68,11 +69,21 @@ ok('image hero uses a full-bleed bg photo', /hero-bg/.test(heroMarkup.image));
   const { chooseLayout } = await import('./layout.ts');
   const themes = ['editorial', 'modern', 'warm', 'bold', 'minimal'] as const;
   const briefs = ['a barbershop booking app', 'an online ceramics store', 'a law firm site', 'a delivery platform', 'a bakery pre-order app', 'a yoga studio'];
-  const heroes = new Set<string>(); const navs = new Set<string>();
-  for (const t of themes) for (const b of briefs) { const l = chooseLayout(t, b.includes('store') ? 'store' : 'app', b); heroes.add(l.hero); navs.add(l.nav); }
+  const heroes = new Set<string>(); const navs = new Set<string>(); const cardVars = new Set<string>(); const combos = new Set<string>();
+  for (const t of themes) for (const b of briefs) { const l = chooseLayout(t, b.includes('store') ? 'store' : 'app', b); heroes.add(l.hero); navs.add(l.nav); if (l.cards) cardVars.add(l.cards); combos.add(`${l.hero}-${l.cards}`); }
   ok('chooser spreads: >=3 distinct heroes across the matrix', heroes.size >= 3, [...heroes].join(','));
   ok('chooser spreads: both nav variants appear', navs.size === 2, [...navs].join(','));
+  ok('chooser spreads: >=2 distinct card variants across the matrix', cardVars.size >= 2, [...cardVars].join(','));
+  ok('cards/hero combos are not all identical across the matrix', combos.size > 1);
 }
+
+// (PQ1-B) each l-cards-* body class lands on <body> and DS_CSS contains the variant rules
+for (const cv of ['photo', 'horizontal', 'overlay'] as const) {
+  const html = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false, cards: cv } });
+  ok(`l-cards-${cv} body class lands on <body>`, html.includes(`l-cards-${cv}`));
+}
+ok('DS_CSS contains .l-cards-horizontal rule', DS_CSS.includes('.l-cards-horizontal'));
+ok('DS_CSS contains .l-cards-overlay rule', DS_CSS.includes('.l-cards-overlay'));
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

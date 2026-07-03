@@ -11,9 +11,13 @@ import type { Archetype } from './archetype.ts';
 export type HeroVariant = 'image' | 'split' | 'center' | 'editorial';
 // nav: standard = brand left / links right; centered = brand centered above links.
 export type NavVariant = 'standard' | 'centered';
-export interface Layout { hero: HeroVariant; nav: NavVariant; band: boolean; }
+// cards: how the card wall reads. photo = current top-image stack; horizontal = image-beside-text;
+// overlay = full-bleed image with bottom-pinned text on a dark scrim.
+export type CardVariant = 'photo' | 'horizontal' | 'overlay';
+export interface Layout { hero: HeroVariant; nav: NavVariant; band: boolean; cards?: CardVariant; }
 
 export const HERO_VARIANTS: HeroVariant[] = ['image', 'split', 'center', 'editorial'];
+export const CARD_VARIANTS: CardVariant[] = ['photo', 'horizontal', 'overlay'];
 
 // FNV-1a — stable, dependency-free. Same brief → same layout, forever.
 function hash(s: string): number { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; }
@@ -28,6 +32,15 @@ const HERO_BY_THEME: Record<ThemeName, HeroVariant[]> = {
   minimal:   ['center', 'editorial', 'split'],
 };
 
+// Different bit-shift from hero (h >> 5 vs h % candidates.length) so cards and hero don't correlate.
+const CARDS_BY_THEME: Record<ThemeName, CardVariant[]> = {
+  editorial: ['horizontal', 'overlay', 'photo'],
+  modern:    ['photo', 'overlay', 'horizontal'],
+  warm:      ['photo', 'horizontal', 'overlay'],
+  bold:      ['overlay', 'photo', 'horizontal'],
+  minimal:   ['horizontal', 'photo', 'overlay'],
+};
+
 export function chooseLayout(theme: ThemeName, archetype: Archetype, brief: string): Layout {
   const h = hash(String(brief || ''));
   const candidates = HERO_BY_THEME[theme] || HERO_VARIANTS;
@@ -40,8 +53,11 @@ export function chooseLayout(theme: ThemeName, archetype: Archetype, brief: stri
   // centered nav reads right on editorial/minimal/warm; the hash keeps it ~half of those.
   const nav: NavVariant = (theme === 'editorial' || theme === 'minimal' || theme === 'warm') && (h & 1) ? 'centered' : 'standard';
   const band = ((h >> 3) & 1) === 1;   // alternate-surface section rhythm on ~half of sites
-  return { hero, nav, band };
+  const cardCandidates = CARDS_BY_THEME[theme] || CARD_VARIANTS;
+  const cards: CardVariant = cardCandidates[(h >> 5) % cardCandidates.length];
+  return { hero, nav, band, cards };
 }
 
 export function isHeroVariant(x: any): x is HeroVariant { return typeof x === 'string' && (HERO_VARIANTS as string[]).includes(x); }
-export const DEFAULT_LAYOUT: Layout = { hero: 'image', nav: 'standard', band: false };
+export function isCardVariant(x: any): x is CardVariant { return typeof x === 'string' && (CARD_VARIANTS as string[]).includes(x); }
+export const DEFAULT_LAYOUT: Layout = { hero: 'image', nav: 'standard', band: false, cards: 'photo' };
