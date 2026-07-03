@@ -28,6 +28,14 @@ for (const s of ['dashboard', 'admin', 'portal', 'client-portal', 'my-account', 
 for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu', 'checkout', 'cart'])
   ok(`honest page: ${s}`, !FACADE_PAGE.test(s));
 
+// the classifier is the FLOOR: an LLM-declared 'site' can never strip a bookings brief of its app
+{
+  const { archetypeFor } = await import('./archetype.ts');
+  ok("LLM 'site' cannot downgrade a bookings brief", archetypeFor('site', 'a neighborhood cafe with weekend brunch bookings') === 'app');
+  ok("LLM 'store' honoured on a plain brief", archetypeFor('store', 'a portfolio for a painter') === 'store');
+  ok('junk archetype falls back to the classifier', archetypeFor('spaceship', 'an online store for hats') === 'store');
+}
+
 // ---- SURFACE layer (pure) ----
 {
   // a collection over a private table is DROPPED, never rendered

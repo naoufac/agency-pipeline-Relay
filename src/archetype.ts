@@ -23,9 +23,14 @@ export function classifyArchetype(brief: string): Archetype {
   return DEFAULT_ARCHETYPE;
 }
 
-// Trust an LLM-named archetype only if it's in the closed set; else classify the brief deterministically.
+// The deterministic classifier is the FLOOR: when the brief clearly asks for an app/store (a cafe
+// with "brunch bookings" once shipped as a brochure because the LLM said 'site' and was trusted),
+// the classifier wins. The LLM's archetype is honoured only where the classifier sees a plain site —
+// it may upgrade toward app/store, never downgrade away from one.
 export function archetypeFor(named: any, brief: string): Archetype {
-  return isArchetype(named) ? named : classifyArchetype(brief);
+  const classified = classifyArchetype(brief);
+  if (classified !== 'site') return classified;
+  return isArchetype(named) ? named : classified;
 }
 
 // Does this archetype require a real data model (a verified database department)?
