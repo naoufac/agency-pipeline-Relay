@@ -4,6 +4,7 @@ import { themeFor, type ThemeName } from './themes.ts';
 import { archetypeFor, needsData, FACADE_PAGE, type Archetype } from './archetype.ts';
 import { shapeFor, type Shape } from './landing.ts';
 import { chooseLayout } from './layout.ts';
+import { evaluateScope } from './scope.ts';
 
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
@@ -177,12 +178,14 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   // 5-CMS selector is deleted; `npm run cms:check` asserts this invariant holds.
   const cms = 'directus';
   const layout = chooseLayout(theme, archetype, brief);   // STRUCTURE, brief-rooted, once per project
-  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms };
+  const scope = evaluateScope(brief, archetype);
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
   await writeDag(pool, projectId, tasks);
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
+  await pool.query("insert into run_events(project_id, type, detail) values ($1,'scoped',$2)", [projectId, `D${scope.difficulty} · includes: ${scope.includes.map(i => i.name).join(', ')} · not included: ${scope.excludes.map(e => e.ask).join(', ')}`.slice(0, 400)]);
   for (const n of (result.notes || [])) await pool.query("insert into run_events(project_id, type, detail) values ($1,'plan_repair',$2)", [projectId, n]).catch(() => {});
   return projectId;
 }
@@ -195,16 +198,18 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
   const prev = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
   const { plan: result, usedLLM } = await buildPlan(brief);
   const { tasks, pages, theme, archetype, shape } = result;
+  const scope = evaluateScope(brief, archetype);
   const params: any = {
     planner: usedLLM ? 'llm' : 'template', pages, archetype, shape, cms: 'directus',
     theme: prev.theme || theme, brand: prev.brand,           // identity continuity across rebuilds
     layout: prev.layout || chooseLayout(prev.theme || theme, archetype, brief),  // keep the site's structure across rebuilds
-    rebuilds: Number(prev.rebuilds || 0) + 1,
+    rebuilds: Number(prev.rebuilds || 0) + 1, scope,
   };
   await pool.query('delete from tasks where project_id=$1', [projectId]);
   await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);
   await writeDag(pool, projectId, tasks);
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'replanned',$2)", [projectId, `rebuild #${params.rebuilds} · ${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · data preserved via migration`]);
+  await pool.query("insert into run_events(project_id, type, detail) values ($1,'scoped',$2)", [projectId, `D${scope.difficulty} · includes: ${scope.includes.map(i => i.name).join(', ')} · not included: ${scope.excludes.map(e => e.ask).join(', ')}`.slice(0, 400)]);
   for (const n of (result.notes || [])) await pool.query("insert into run_events(project_id, type, detail) values ($1,'plan_repair',$2)", [projectId, n]).catch(() => {});
 }
 

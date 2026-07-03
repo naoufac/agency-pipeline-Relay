@@ -96,6 +96,13 @@ async function poll(pool: pg.Pool, offset: number): Promise<number> {
       if (process.env.RELAY_BUILD !== '0')
         runLoop(pool, id, { cap: 4, review: true }).catch(() => {});
       await reply(chatId, `Building: ${text} · id ${short(id)}`);
+      const pr = await pool.query('select params from projects where id=$1', [id]);
+      const sc = pr.rows[0]?.params?.scope as { includes?: {promise:string}[]; excludes?: {ask:string;alternative:string}[] } | undefined;
+      if (sc?.includes?.length) {
+        await reply(chatId, `Scope: ${sc.includes.map(i => i.promise).join(' · ')}`);
+        if (sc.excludes?.length)
+          await reply(chatId, `Not included: ${sc.excludes.map(e => `${e.ask} — ${e.alternative}`).join('; ')}`);
+      }
       watchUntilDone(pool, chatId, id, text).catch((e: any) => console.error('tg-door watch', e?.message ?? e));
     } catch (e: any) {
       console.error('tg-door build', e?.message ?? e);
