@@ -188,6 +188,25 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   // NAV BUTTON is one per site too: deterministic by archetype, and applyBrand forces it (no per-page label)
   ok('navCtaFor: store/app/site deterministic', navCtaFor('store') === 'Shop now' && navCtaFor('app') === 'Get started' && navCtaFor('site') === 'Get in touch' && navCtaFor(undefined) === 'Get in touch');
   ok('resolveBrand: nav cta from archetype', resolveBrand('{"name":"N","palette":{"bg":"#fff","primary":"#111"}}', undefined, 'store').cta === 'Shop now');
+
+  // PALETTE DISTINCTNESS (PQ1): with a theme, identity colours come from the theme's brand POOL —
+  // the LLM's invented palette is ignored (law + skate drew twin greens the same day; never again).
+  const llmGreen = '{"name":"N","palette":{"bg":"#f0fdf4","primary":"#16a34a"}}';
+  const withTheme = resolveBrand(llmGreen, undefined, 'app', 'editorial', 'a boutique law firm in Naples');
+  ok('resolveBrand: theme pool overrides the LLM palette', withTheme.tokens.primary !== '#16a34a' && /^#[0-9a-f]{6}$/i.test(withTheme.tokens.primary));
+  ok('resolveBrand: deterministic (same theme+brief → same palette)',
+    JSON.stringify(resolveBrand(llmGreen, undefined, 'app', 'editorial', 'a boutique law firm in Naples').tokens)
+    === JSON.stringify(withTheme.tokens));
+  ok('resolveBrand: no theme → legacy LLM-palette path unchanged', resolveBrand(llmGreen).tokens.primary === '#16a34a');
+  // different briefs on the SAME theme must spread across the pool (the twin-accent class)
+  {
+    const briefs = ['a barbershop booking app', 'an online ceramics store', 'a law firm site', 'a delivery platform', 'a bakery pre-order app', 'a yoga studio'];
+    const prims = new Set(briefs.map(b => resolveBrand('no json', undefined, 'site', 'warm', b).tokens.primary));
+    ok('paletteFor: 6 briefs on one theme use >=3 distinct primaries', prims.size >= 3, [...prims].join(','));
+  }
+  // a colour word in the brief nudges to the nearest pool hue — deterministically, still closed-set
+  const sage = resolveBrand('no json', undefined, 'site', 'warm', 'a sage green wellness spa');
+  ok('paletteFor: colour word steers within the pool (green → sage/olive family)', ['#6b6b23', '#4e6151'].includes(sage.tokens.primary), sage.tokens.primary);
   const pageOwnCta: any = { brand: { name: 'Z', cta: 'Enter the World', ctaLink: 'gallery', tokens: { bg: '#fff', primary: '#111' } }, sections: [hero()] };
   applyBrand(pageOwnCta, { name: 'Z', cta: 'Get in touch', tokens: { bg: '#fff', primary: '#111' } });
   ok('applyBrand: per-page nav button label overwritten', pageOwnCta.brand.cta === 'Get in touch');

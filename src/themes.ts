@@ -116,6 +116,77 @@ const T: Record<ThemeName, Theme> = {
   },
 };
 
+// BRAND PALETTES — the distinctness axis. The LLM's invented palettes CLUSTER (a law firm and a
+// skate shop drew near-identical greens the same day — the agency panel's finding). Identity is
+// STRUCTURE, so it is composed: each theme owns a hand-built pool (every pair bg+primary passes the
+// renderer's WCAG derivation); the brief hash rotates within it, and a colour word in the brief
+// ("a sage green spa") nudges to the nearest pool hue. Deterministic: same brief → same palette.
+export type BrandPalette = { bg: string; primary: string };
+const BRAND_POOLS: Record<ThemeName, BrandPalette[]> = {
+  editorial: [
+    { bg: '#fbfaf7', primary: '#1c2a3a' },   // ink navy on cream
+    { bg: '#faf7f2', primary: '#5a2328' },   // oxblood on ivory
+    { bg: '#f7f6f3', primary: '#233329' },   // deep forest on stone
+    { bg: '#fbfaf7', primary: '#2d2a26' },   // charcoal on cream
+    { bg: '#f6f4ef', primary: '#3a3357' },   // aubergine on parchment
+  ],
+  modern: [
+    { bg: '#ffffff', primary: '#4f46e5' },   // indigo
+    { bg: '#ffffff', primary: '#0f766e' },   // teal
+    { bg: '#fafafa', primary: '#1d4ed8' },   // blue
+    { bg: '#ffffff', primary: '#7c3aed' },   // violet
+    { bg: '#fafbfc', primary: '#0f172a' },   // slate ink
+  ],
+  warm: [
+    { bg: '#fff8f1', primary: '#b5532a' },   // terracotta
+    { bg: '#faf6ee', primary: '#6b6b23' },   // olive
+    { bg: '#fdf6ec', primary: '#8a4f2d' },   // clay
+    { bg: '#fbf3ee', primary: '#7a3b3f' },   // brick rose
+    { bg: '#f9f5ec', primary: '#4e6151' },   // sage
+  ],
+  bold: [
+    { bg: '#0c0c0d', primary: '#ff4d2e' },   // signal orange on black
+    { bg: '#0b0b10', primary: '#e11d48' },   // punch red
+    { bg: '#0a0f0d', primary: '#22c55e' },   // acid green
+    { bg: '#0b1020', primary: '#38bdf8' },   // electric blue
+    { bg: '#111111', primary: '#facc15' },   // taxi yellow
+  ],
+  minimal: [
+    { bg: '#ffffff', primary: '#111111' },
+    { bg: '#fcfcfc', primary: '#1f2937' },   // gunmetal
+    { bg: '#fbfbfa', primary: '#26251f' },   // warm black
+    { bg: '#ffffff', primary: '#0a0a0a' },
+  ],
+};
+
+const hue = (hex: string): number => {
+  let h = hex.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const n = parseInt(h.slice(0, 6), 16), r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx === mn) return -1;   // achromatic
+  const d = mx - mn;
+  const x = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return x * 60;
+};
+const hueDist = (a: number, b: number) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+// colour words a client actually writes in a brief → target hue (achromatic words are left to the hash)
+const COLOR_WORDS: [RegExp, number][] = [
+  [/\b(red|crimson|scarlet)\b/, 0], [/\b(orange|terracotta|rust|amber)\b/, 25],
+  [/\b(yellow|gold(en)?|mustard)\b/, 50], [/\b(green|olive|sage|forest|emerald)\b/, 130],
+  [/\b(teal|turquoise|aqua|cyan)\b/, 180], [/\b(blue|navy|azure|cobalt)\b/, 225],
+  [/\b(purple|violet|lavender|aubergine|plum)\b/, 280], [/\b(pink|rose|magenta|fuchsia)\b/, 330],
+];
+const hash32 = (s: string): number => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+
+export function paletteFor(theme: ThemeName, brief: string): BrandPalette {
+  const pool = BRAND_POOLS[theme] || BRAND_POOLS[DEFAULT_THEME];
+  const b = deburr(String(brief || '').toLowerCase());
+  for (const [re, target] of COLOR_WORDS) if (re.test(b)) {
+    const chromatic = pool.filter(p => hue(p.primary) >= 0);
+    if (chromatic.length) return chromatic.reduce((best, p) => hueDist(hue(p.primary), target) < hueDist(hue(best.primary), target) ? p : best);
+  }
+  return pool[(hash32(b) >>> 7) % pool.length];   // different bits than hero/cards — axes stay uncorrelated
+}
+
 export function isTheme(x: any): x is ThemeName { return typeof x === 'string' && (THEME_NAMES as string[]).includes(x); }
 export function themeFonts(name: ThemeName) { return { display: T[name].fontDisplay, body: T[name].fontBody }; }
 export function themeVars(name: ThemeName): string { return Object.entries(T[name].vars).map(([k, v]) => `${k}:${v}`).join(';'); }

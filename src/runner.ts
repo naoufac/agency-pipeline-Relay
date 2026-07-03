@@ -91,7 +91,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
   let brand = params.brand;
   if (!brand && (task.department === 'build' || task.department === 'compose')) {
     const bj = ups.rows.find((u: any) => u.department === 'branding');
-    if (bj) brand = resolveBrand(bj.content, undefined, params.archetype);
+    if (bj) brand = resolveBrand(bj.content, undefined, params.archetype, params.theme, proj.rows[0].brief);
   }
   const self = (task.department === 'build' && task.artifact) ? { title: task.title, slug: task.artifact.replace(/\.html$/, '') } : undefined;
   const site = params.site;   // the composed CMS (set by the compose task); a render projects its page from it
@@ -231,8 +231,8 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       // every page. This is the single source of truth; no page can ever drift.
       if (task.department === 'branding') {
         try {
-          const ar = await pool.query("select params->>'archetype' as a from projects where id=$1", [task.project_id]);
-          const b = resolveBrand(content, (ctx as any)?.brand?.name, ar.rows[0]?.a);
+          const ar = await pool.query("select params->>'archetype' as a, params->>'theme' as t, brief from projects where id=$1", [task.project_id]);
+          const b = resolveBrand(content, (ctx as any)?.brand?.name, ar.rows[0]?.a, ar.rows[0]?.t, ar.rows[0]?.brief);
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(b)]);
         } catch (e: any) { console.error('brand lock', e?.message ?? e); }
       }

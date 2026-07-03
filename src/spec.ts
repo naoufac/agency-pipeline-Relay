@@ -9,6 +9,7 @@
 // Pure, synchronous, side-effect-free -> trivially unit-testable (see spec-test.ts / `npm run spec:check`).
 
 import { PRIVATE_READ } from './schema.ts';   // FS0: visitor-record tables are never publicly rendered
+import { isTheme, paletteFor } from './themes.ts';   // PQ1: brand palettes come from the theme pool, never LLM whim
 
 export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; actionTable?: string };
 
@@ -396,16 +397,26 @@ export function navCtaFor(archetype?: string): string {
 // THE single deterministic site identity, derived ONLY from the Branding department's output (the one
 // upstream source every page build shares). ALWAYS returns a COMPLETE palette (bg + primary at minimum) so
 // applyBrand() can force it onto every page. No LLM trust, no per-page fallback. Pure + unit-tested.
-export function resolveBrand(brandingContent: string, fallbackName = 'Studio', archetype?: string): Brand {
+// PALETTE DISTINCTNESS (PQ1): when the caller passes the project's theme + brief, bg/primary come from
+// the theme's hand-built BRAND POOL (brief-hash rotated, colour-word aware) — LLM-invented palettes
+// CLUSTER (a law firm and a skate shop drew twin greens the same day). The LLM still names the brand
+// and may propose an accent (the renderer AA-validates it); it never owns the identity colours.
+export function resolveBrand(brandingContent: string, fallbackName = 'Studio', archetype?: string, theme?: string, brief?: string): Brand {
   let o: any = null;
   try { o = extractFirstJson(brandingContent); } catch {}
   const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
   const p = (o && (o.palette || o)) || {};
   const name = (o && typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : (fallbackName || 'Studio');
-  const bg = isHex(p.bg) ? p.bg.trim() : DEFAULT_TOKENS.bg;
-  const primary = isHex(p.primary) ? p.primary.trim()
-    : isHex(p.accent) ? p.accent.trim()
-    : isHex(p.text) ? p.text.trim() : DEFAULT_TOKENS.primary;
+  let bg: string, primary: string;
+  if (isTheme(theme)) {
+    const pal = paletteFor(theme, String(brief || ''));
+    bg = pal.bg; primary = pal.primary;
+  } else {
+    bg = isHex(p.bg) ? p.bg.trim() : DEFAULT_TOKENS.bg;
+    primary = isHex(p.primary) ? p.primary.trim()
+      : isHex(p.accent) ? p.accent.trim()
+      : isHex(p.text) ? p.text.trim() : DEFAULT_TOKENS.primary;
+  }
   const tokens: any = { bg, primary };
   if (isHex(p.accent)) tokens.accent = p.accent.trim();
   return { name, cta: navCtaFor(archetype), tokens };
