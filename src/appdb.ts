@@ -5,7 +5,7 @@
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
-import { parseModel, compile, lit, PRIVATE_READ } from './schema.ts';
+import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE } from './schema.ts';
 import { localRowImage } from './rowmedia.ts';
 
 // FS0 — who is reading? 'public' = the produced site's anonymous data API (private visitor-record
@@ -127,6 +127,13 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
       const cur = have.get(c.name);
       if (cur) {
         if (typeFamily(cur.type) !== typeFamily(c.type)) skipped.push(`~"${t}"."${c.name}": kept ${cur.type} (model wants ${c.type} — retype would risk data)`);
+        continue;
+      }
+      if (c.name === 'status') {
+        // FS3: status joins populated lifecycle tables with default 'pending' and NO CHECK (existing
+        // rows may carry legacy values a constraint would reject — the closed set is enforced on write)
+        stmts.push(`alter table "${t}" add column "status" text not null default 'pending';`);
+        applied.push(`+"${t}"."status" (lifecycle, default 'pending')`);
         continue;
       }
       if (c.name === 'ref_token') {
@@ -340,6 +347,20 @@ export async function findByToken(pool: pg.Pool, projectId: string, token: strin
   return null;
 }
 
+// FS3 — internal: a row's contact address + receipt token, for lifecycle notifications ("your
+// booking is confirmed"). Never exposed through any public API.
+export async function rowContact(pool: pg.Pool, projectId: string, table: string, id: number): Promise<{ email: string; ref: string | null } | null> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || !Number.isInteger(id)) return null;
+  if (!(await listTables(pool, projectId)).includes(table)) return null;
+  const cols = (await typedColumns(pool, schema, table)).map(c => c.name);
+  const emailCol = ['email', 'customer_email', 'visitor_email', 'contact_email'].find(c => cols.includes(c));
+  if (!emailCol) return null;
+  const r = (await pool.query(`select "${emailCol}" as email${cols.includes('ref_token') ? ', "ref_token"' : ''} from "${schema}"."${table}" where id=$1`, [id])).rows[0];
+  if (!r || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(r.email || ''))) return null;
+  return { email: String(r.email), ref: (r as any).ref_token || null };
+}
+
 // FS1 — the MAILED lookup: every receipt link for an email address across private tables. Server-
 // internal ONLY: the route mails the result and always answers "sent" — the API never returns it,
 // so there is no public enumeration path.
@@ -378,21 +399,76 @@ const SYSTEM_COLS = /^(status|state|approved|confirmed|verified)$/i;
 // FS1: on a private (visitor-record) table with a ref_token column, a 128-bit receipt token is
 // generated HERE (never client-supplied — SENSITIVE already blocks it from `data`) and returned so
 // the visitor can be shown their receipt. Returns { ok, ref? }.
-export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>, audience: ReadAudience = 'public'): Promise<{ ok: boolean; ref?: string }> {
+export async function insertRow(pool: pg.Pool, projectId: string, table: string, data: Record<string, any>, audience: ReadAudience = 'public'): Promise<{ ok: boolean; ref?: string; error?: string }> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table)) return { ok: false };
   if (!(await listTables(pool, projectId)).includes(table)) return { ok: false };
   const cols = await typedColumns(pool, schema, table);
   const use = cols.filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name) && (audience === 'owner' || !SYSTEM_COLS.test(c.name)));
   if (!use.length) return { ok: false };
+  // FS3 — booking semantics validated SERVER-side, with errors a visitor can act on (never a silent
+  // lie in the copy): a date in the past is refused; a full slot is refused (capacity-aware).
+  if (audience !== 'owner' && PRIVATE_READ.test(table)) {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const c of use) {
+      if (!/^(date|timestamp)/.test(c.type)) continue;
+      const m = String(data[c.name] ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
+      if (m && m[1] < today) return { ok: false, error: `that ${c.name.replace(/_/g, ' ')} is in the past — pick an upcoming date` };
+    }
+    if (SLOT_TABLE.test(table)) {
+      const slotErr = await slotGuard(pool, projectId, schema, table, cols, data);
+      if (slotErr) return { ok: false, error: slotErr };
+    }
+  }
   const names = use.map(c => `"${c.name}"`); const vals: any[] = use.map(c => coerce(data[c.name], c.type));
   let ref: string | undefined;
   if (PRIVATE_READ.test(table) && cols.some(c => c.name === 'ref_token')) {
     ref = randomBytes(16).toString('hex');
     names.push('"ref_token"'); vals.push(ref);
   }
-  await pool.query(`insert into "${schema}"."${table}" (${names.join(',')}) values (${vals.map((_, i) => '$' + (i + 1)).join(',')})`, vals);
+  try {
+    await pool.query(`insert into "${schema}"."${table}" (${names.join(',')}) values (${vals.map((_, i) => '$' + (i + 1)).join(',')})`, vals);
+  } catch (e: any) {
+    if (e?.code === '23505') return { ok: false, error: 'that slot was just taken — pick another time' };   // unique race
+    throw e;
+  }
   return { ok: true, ref };
+}
+
+// FS3 — the SLOT GUARD: double-booking is refused by the SERVER, never promised by copy. The slot's
+// coordinates are the booked resource FKs (never the customer-ish ones) plus the date/time columns
+// actually submitted; a slot holds ONE booking unless the booked resource row declares a `capacity`
+// (a class with 12 spots books 12 times). Cancelled/declined rows free their slot.
+async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table: string, cols: { name: string; type: string }[], data: Record<string, any>): Promise<string | null> {
+  const coord = cols.filter(c =>
+    (c.name.endsWith('_id') && !/customer|client|user|visitor|member|guest/.test(c.name)) ||
+    (/^(date|timestamp|time)/.test(c.type) && c.name !== 'created_at'));
+  const used = coord.filter(c => data[c.name] !== undefined && data[c.name] !== null && data[c.name] !== '');
+  if (used.length < 2 || !used.some(c => /^(date|timestamp|time)/.test(c.type))) return null;   // not slot-shaped — never wrongly forced
+  const hasStatus = cols.some(c => c.name === 'status');
+  const where = used.map((c, i) => `"${c.name}"=$${i + 1}`).join(' and ');
+  const taken = Number((await pool.query(
+    `select count(*)::int n from "${schema}"."${table}" where ${where}${hasStatus ? ` and coalesce("status",'pending') not in ('declined','cancelled')` : ''}`,
+    used.map(c => coerce(data[c.name], c.type)))).rows[0].n);
+  // capacity: the first booked-resource row that declares one
+  let capacity = 1;
+  try {
+    const fks = (await pool.query(
+      `select kcu.column_name as col, ccu.table_name as ref
+       from information_schema.table_constraints tc
+       join information_schema.key_column_usage kcu on kcu.constraint_name=tc.constraint_name and kcu.table_schema=tc.table_schema
+       join information_schema.constraint_column_usage ccu on ccu.constraint_name=tc.constraint_name and ccu.table_schema=tc.table_schema
+       where tc.constraint_type='FOREIGN KEY' and tc.table_schema=$1 and tc.table_name=$2`, [schema, table])).rows;
+    for (const fk of fks) {
+      if (!used.some(c => c.name === fk.col) || !IDENT.test(fk.ref)) continue;
+      const refCols = (await typedColumns(pool, schema, fk.ref)).map(c => c.name);
+      if (!refCols.includes('capacity')) continue;
+      const cap = Number((await pool.query(`select "capacity" from "${schema}"."${fk.ref}" where id=$1`, [coerce(data[fk.col], 'integer')])).rows[0]?.capacity);
+      if (Number.isInteger(cap) && cap > 0) { capacity = cap; break; }
+    }
+  } catch {}
+  if (taken >= capacity) return capacity > 1 ? 'that time is fully booked — pick another slot' : 'that slot was just taken — pick another time';
+  return null;
 }
 
 // PQ3 — CLIENT CONTENT EDITING. Directus lives in a SEPARATE database and cannot reach the app_<hex>
@@ -435,6 +511,12 @@ export async function getRow(pool: pg.Pool, projectId: string, table: string, id
 export async function updateRow(pool: pg.Pool, projectId: string, table: string, id: number, data: Record<string, any>): Promise<boolean> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table) || !Number.isInteger(id) || !(await listTables(pool, projectId)).includes(table)) return false;
+  // FS3: the lifecycle status only ever moves within the closed set — even for the owner
+  if (data && 'status' in data && LIFECYCLE_TABLE.test(table)) {
+    const v = String(data.status ?? '').toLowerCase().trim();
+    if (!STATUS_SET.includes(v)) return false;
+    data = { ...data, status: v };
+  }
   const use = (await typedColumns(pool, schema, table)).filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name));
   if (!use.length) return false;
   const set = use.map((c, i) => `"${c.name}"=$${i + 1}`).join(',');

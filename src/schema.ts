@@ -18,6 +18,17 @@ const snake = (s: any) => String(s ?? '').toLowerCase().trim().replace(/[^a-z0-9
 // server deploys; FS1 replaces it with a classification declared per-entity in the data model.
 export const PRIVATE_READ = /^(_relay_\w+|orders?|order_items|bookings?|appointments?|reservations?|reservation_requests?|submissions?|messages?|enquir(?:y|ies)|inquir(?:y|ies)|leads?|registrations?|signups?|sign_ups?|rsvps?|applications?|waitlists?|waivers?|customers?|clients?|members?|patients?|guests?|attendees?|preorders?|pre_orders?|deliveries|shipments?|tracking_events?|users?|accounts?|sessions?|tokens?|payments?|invoices?|subscriptions?|donations?)$/i;
 
+// FS3 — the ACTION tables that carry a real visitor-facing LIFECYCLE, and its closed status set.
+// pending → confirmed/declined/cancelled is the owner↔visitor loop; 'new'/'completed' keep the store
+// contract (placeOrder writes 'new') inside the same CHECK. The status is system-owned: forced to
+// default 'pending' in the compiler (an LLM default of 'confirmed' auto-confirms strangers — a lie),
+// hidden from public forms (SYSTEM_COLS), flipped only by the owner through the closed set.
+export const LIFECYCLE_TABLE = /^(bookings?|appointments?|reservations?|reservation_requests?|orders?|rsvps?|requests?|applications?|registrations?|preorders?|pre_orders?|deliveries|enquir(?:y|ies)|inquir(?:y|ies))$/i;
+export const STATUS_SET = ['pending', 'confirmed', 'declined', 'cancelled', 'new', 'completed'];
+// slot-shaped tables where double-booking semantics apply (strict set — never forced onto tables
+// that legitimately allow duplicates, like orders)
+export const SLOT_TABLE = /^(bookings?|appointments?|reservations?)$/i;
+
 // closed type vocabulary -> Postgres column type (everything the model can ask for)
 const TYPE: Record<string, string> = {
   text: 'text', string: 'text', longtext: 'text', richtext: 'text', email: 'text', url: 'text', phone: 'text',
@@ -105,6 +116,13 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     // (an '' default would collide on the unique index and make old rows "findable" by nothing).
     if (PRIVATE_READ.test(name) && !list.some(c => c.name === 'ref_token'))
       list.push({ name: 'ref_token', type: 'text', required: false, unique: false, def: undefined });
+    // FS3 — lifecycle tables carry a SYSTEM-OWNED status: default 'pending' (an LLM default of
+    // 'confirmed' would auto-confirm strangers), values bound to the closed set by a CHECK.
+    if (LIFECYCLE_TABLE.test(name)) {
+      const st = list.find(c => c.name === 'status');
+      if (st) { st.type = 'text'; st.def = 'pending'; st.required = true; }
+      else list.push({ name: 'status', type: 'text', required: true, unique: false, def: 'pending' });
+    }
     const perTableIndexes: string[] = [];
     const lines = ['  id serial primary key'];
     for (const c of list) {
@@ -116,6 +134,7 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       if (c.ref && refOk) { line += ` references "${c.ref}"(id) on delete set null`; indexes.push(`create index "${name}_${c.name}_idx" on "${name}" ("${c.name}");`); perTableIndexes.push(indexes[indexes.length - 1]); }
       else if (c.ref) warnings.push(`${name}.${c.name}: FK to ${c.ref} demoted (cycle/forward-ref)`);
       if (c.name === 'ref_token') { indexes.push(`create unique index "${name}_ref_token_uq" on "${name}" ("ref_token") where "ref_token" is not null;`); perTableIndexes.push(indexes[indexes.length - 1]); }
+      if (c.name === 'status' && LIFECYCLE_TABLE.test(name)) line += ` check ("status" in (${STATUS_SET.map(s => `'${s}'`).join(',')}))`;
       lines.push(line);
     }
     lines.push('  created_at timestamptz not null default now()');

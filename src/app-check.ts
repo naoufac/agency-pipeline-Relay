@@ -114,14 +114,14 @@ try {
   ok('store orders are covered by the same guard', (await appdb.readRows(pool, id, 'orders')).length === 0 && PRIVATE_READ.test('orders'));
 
   // ---- SYSTEM-OWNED columns: lifecycle state is never the visitor's to set ----
-  await pool.query(`alter table "${schema}"."bookings" add column status text default 'new'`);
+  // (FS3: the compiler itself now injects status on lifecycle tables — default 'pending', CHECK-bound)
   const pubCols = (await appdb.formColumns(pool, id, 'bookings')).map(c => c.name);
   ok('public form never offers "status"', !pubCols.includes('status'), pubCols.join(','));
   const ownCols = (await appdb.formColumns(pool, id, 'bookings', 'owner')).map(c => c.name);
   ok('the owner form keeps "status"', ownCols.includes('status'), ownCols.join(','));
   await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Mallory', status: 'confirmed' });
   const mal = (await pool.query(`select status from "${schema}"."bookings" where customer_name='Mallory'`)).rows[0];
-  ok('a crafted public POST cannot set status', mal && mal.status !== 'confirmed', String(mal?.status));
+  ok("a crafted public POST cannot set status — the row is born 'pending'", !!mal && mal.status === 'pending', String(mal?.status));
 
   // ---- FS1: the receipt loop, end to end on the real scratch schema ----
   const mk = (slugs: string[], formTable = 'bookings') => ({
@@ -192,6 +192,36 @@ try {
   ok('receipt-enabled sites carry the account doors in the footer', !!inp && inp!.includes('href="account.html"') && inp!.includes('href="find.html"'));
   ok('_relay_ tables hidden from the owner content tab', !(await appdb.contentTables(pool, id)).some(t => t.table.startsWith('_relay_')));
   ok('_relay_ tables invisible to the public read API', (await appdb.readRows(pool, id, '_relay_visitors')).length === 0);
+}
+
+  // ---- FS3: real booking semantics — truth in the data, not the copy ----
+{
+  const stat = (await pool.query(`select column_default, is_nullable from information_schema.columns where table_schema='${schema}' and table_name='bookings' and column_name='status'`)).rows[0];
+  ok("status compiled in: default 'pending', not null", !!stat && /pending/.test(String(stat.column_default)) && stat.is_nullable === 'NO', JSON.stringify(stat));
+  ok('a value outside the closed set cannot even be STORED (CHECK)', !(await pool.query(`insert into "${schema}"."bookings" (customer_name, status) values ('X','sneaky')`).then(() => true).catch(() => false)));
+  const rexId = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='Rex Receipt'`)).rows[0].id);
+  ok('the owner confirms a booking through the closed set', await appdb.updateRow(pool, id, 'bookings', rexId, { status: 'confirmed' }));
+  ok('the owner cannot set a status outside the closed set', !(await appdb.updateRow(pool, id, 'bookings', rexId, { status: 'yolo' })));
+  const past = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Past P', at: '2020-01-01T10:00:00Z' });
+  ok('a booking in the past is refused with an actionable message', past.ok === false && /past/.test(past.error || ''), JSON.stringify(past));
+  const f1 = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'S1', service_id: 1, at: '2027-01-01T10:00:00Z' });
+  ok('first booking of a slot succeeds', f1.ok === true, JSON.stringify(f1));
+  const f2 = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'S2', service_id: 1, at: '2027-01-01T10:00:00Z' });
+  ok('double-booking the same slot is REFUSED by the server', f2.ok === false && /taken|booked/.test(f2.error || ''), JSON.stringify(f2));
+  const f3 = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'S3', service_id: 2, at: '2027-01-01T10:00:00Z' });
+  ok('a different resource at the same time books fine', f3.ok === true, JSON.stringify(f3));
+  const s1id = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='S1'`)).rows[0].id);
+  await appdb.updateRow(pool, id, 'bookings', s1id, { status: 'cancelled' });
+  ok('a cancelled booking frees its slot', (await appdb.insertRow(pool, id, 'bookings', { customer_name: 'S4', service_id: 1, at: '2027-01-01T10:00:00Z' })).ok === true);
+  await pool.query(`alter table "${schema}"."services" add column capacity integer`);
+  await pool.query(`update "${schema}"."services" set capacity=2 where id=2`);
+  ok('capacity 2: the second booking is accepted', (await appdb.insertRow(pool, id, 'bookings', { customer_name: 'C2', service_id: 2, at: '2027-01-01T10:00:00Z' })).ok === true);
+  const c3 = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'C3', service_id: 2, at: '2027-01-01T10:00:00Z' });
+  ok('capacity 2: the third booking is refused as fully booked', c3.ok === false && /full/.test(c3.error || ''), JSON.stringify(c3));
+  const insN = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Notify N', email: 'notify@example.com' });
+  const nid = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='Notify N'`)).rows[0].id);
+  const rc = await appdb.rowContact(pool, id, 'bookings', nid);
+  ok('rowContact finds the visitor address + receipt for lifecycle notifications', !!rc && rc!.email === 'notify@example.com' && rc!.ref === insN.ref, JSON.stringify(rc));
 }
 
   // ---- site_model gate: a facade page on a data archetype is REJECTED ----

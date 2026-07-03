@@ -9,6 +9,7 @@ import { runLoop } from './runner.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { publicWriteTables } from './spec.ts';
+import { LIFECYCLE_TABLE } from './schema.ts';
 import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, renderLiveAccount } from './cms/live.ts';
 import { requestVisitorMagic, verifyVisitorMagic, visitorFromCookie, visitorCookie, clearVisitorCookie, logoutVisitor } from './visitors.ts';
 import { reviewSite, qaRunning } from './qa.ts';
@@ -283,7 +284,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           if (proj) notifyLead(pool, dataM[1], proj.brief, dataM[2], data);   // typed rows are leads too
         }
         // FS1: the receipt ref rides back so the form can land the visitor on their receipt page
-        return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r.ref ? { ok: r.ok, ref: r.ref, table: dataM[2] } : { ok: r.ok }));
+        return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r.ref ? { ok: r.ok, ref: r.ref, table: dataM[2] } : { ok: r.ok, ...(r.error ? { error: r.error } : {}) }));
       }
       catch (e: any) { console.error('site data insert', dataM[1], dataM[2], e?.message ?? e); return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'could not save — please check the form and try again' })); }
     }
@@ -406,6 +407,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         let raw = ''; for await (const c of req) raw += c;
         let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
         const ok = await appdb.updateRow(pool, sid, table, rid, (b && b.data) || {});
+        // FS3 · the loop closes: when the OWNER flips a lifecycle status, the VISITOR hears about it
+        // by email (with their receipt link) — recorded in the sent-mail ledger, never self-reported.
+        if (ok && b?.data && typeof b.data.status === 'string' && LIFECYCLE_TABLE.test(table)) {
+          try {
+            const c2 = await appdb.rowContact(pool, sid, table, rid);
+            if (c2) {
+              const label = table.replace(/_/g, ' ').replace(/ies$/, 'y').replace(/s$/, '');
+              const link = c2.ref ? `\n\nSee it here: ${(process.env.PUBLIC_URL || 'https://board.naples.agency')}/sites/${sid}/receipt-${table}-${c2.ref}.html` : '';
+              sendMail(pool, sid, c2.email, `Your ${label} is ${String(b.data.status).toLowerCase()}`, `Update on your ${label}: it is now ${String(b.data.status).toUpperCase()}.${link}`).catch(() => {});
+            }
+          } catch (e: any) { console.error('status notify', sid, table, rid, e?.message ?? e); }
+        }
         return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
       }
       // delete one record
