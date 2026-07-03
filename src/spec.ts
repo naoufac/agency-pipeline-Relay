@@ -116,6 +116,35 @@ export function normalizeDataModel(raw: string): DataModelResult {
     repairs.push('coerced: tables → entities');
     return { ok: true, model: clampSeedPks({ ...withTables, entities: withTables.tables }, repairs), repairs };
   }
+  // fourth pass (TRUNCATION recovery): a max_tokens cut mid-model leaves one unbalanced object whose
+  // LEADING entities are complete (seen live: a big delivery model — users/deliveries/shipments/
+  // tracking — arrived valid but unterminated and was rejected wholesale). Salvage every balanced
+  // entity object and build with those; the missing tail is recoverable by M3 migration on a rebuild.
+  const entKey = raw.indexOf('"entities"');
+  const arrStart = entKey >= 0 ? raw.indexOf('[', entKey) : -1;
+  if (arrStart > 0) {
+    const ents: any[] = [];
+    let i = arrStart + 1;
+    while (i < raw.length) {
+      const objStart = raw.indexOf('{', i);
+      if (objStart < 0) break;
+      let depth = 0, j = objStart, inStr = false, escd = false;
+      for (; j < raw.length; j++) {
+        const ch = raw[j];
+        if (inStr) { if (escd) escd = false; else if (ch === '\\') escd = true; else if (ch === '"') inStr = false; continue; }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}') { depth--; if (depth === 0) break; }
+      }
+      if (depth !== 0) break;   // cut mid-object — keep only the complete ones before it
+      try { const o = JSON.parse(raw.slice(objStart, j + 1)); if (o && o.name && Array.isArray(o.fields)) ents.push(o); } catch {}
+      i = j + 1;
+    }
+    if (ents.length) {
+      repairs.push(`recovered ${ents.length} complete entities from a truncated model`);
+      return { ok: true, model: clampSeedPks({ entities: ents } as any, repairs), repairs };
+    }
+  }
   errors.push('database output has no entities[] or coercible tables[]');
   return { ok: false, errors };
 }

@@ -70,6 +70,17 @@ for (const s of ['index', 'shop', 'book', 'services', 'about', 'contact', 'menu'
   ok('publicWriteTables = exactly the form targets', JSON.stringify(publicWriteTables({ pages: [{ sections: [{ type: 'form', table: 'bookings' }, { type: 'collection', table: 'services' }] }] })) === '["bookings"]');
 }
 
+// ---- a TRUNCATED data model salvages its complete entities (the delivery-app killer) ----
+{
+  const { normalizeDataModel } = await import('./spec.ts');
+  const truncated = '{"entities":[{"name":"users","fields":[{"name":"email","type":"email"}]},{"name":"deliveries","fields":[{"name":"pickup_address","type":"text"},{"name":"status","type":"status"}]},{"name":"tracking_events","fields":[{"name":"note","ty';
+  const r = normalizeDataModel(truncated);
+  ok('truncated model: complete entities recovered', (r as any).ok === true && (r as any).model.entities.length === 2, JSON.stringify((r as any).errors || (r as any).repairs));
+  ok('truncated model: the cut-off entity is dropped, not guessed', (r as any).ok === true && !(r as any).model.entities.some((e: any) => e.name === 'tracking_events'));
+  const hopeless = normalizeDataModel('Sorry, I cannot produce a data model.');
+  ok('prose is still rejected honestly', (hopeless as any).ok === false);
+}
+
 // ---- CTA -> the form itself (the "everything collapses to home" class) ----
 {
   const { renderPage, formPageSlug } = await import('./render.ts');
