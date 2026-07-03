@@ -211,9 +211,13 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
   if (!name || name.length > 120) return { ok: false, error: 'your name is required' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return { ok: false, error: 'a real email is required' };
   // server-side pricing — the client\'s numbers are never used
-  const priceCols = (await typedColumns(pool, schema, 'products')).filter(c => /numeric|int|real|double|decimal/.test(c.type) && /^(price|amount|cost)$/.test(c.name));
+  const allProdCols = await typedColumns(pool, schema, 'products');
+  const priceCols = allProdCols.filter(c => /numeric|int|real|double|decimal/.test(c.type) && /^(price|amount|cost)$/.test(c.name));
   if (!priceCols.length) return { ok: false, error: 'products table has no price column' };
   const pcol = priceCols[0].name;
+  // PQ2 — stock awareness: which products carry a finite inventory (nullable int column)?
+  const hasStock = allProdCols.some(c => c.name === 'stock');
+  const ttlCol = ['title', 'name', 'label'].find(n => allProdCols.some(c => c.name === n));
   const prod = await pool.query(`select id, "${pcol}"::numeric as price from "${schema}"."products" where id = any($1)`, [lines.map(l => l.id)]);
   const priceById = new Map<number, number>(prod.rows.map((r: any) => [Number(r.id), Number(r.price)]));
   for (const l of lines) if (!priceById.has(l.id)) return { ok: false, error: 'a product in your cart no longer exists' };
@@ -231,6 +235,17 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
   try {
     await c.query('begin');
     await c.query("set local statement_timeout = '10s'");
+    // lock each tracked row and validate before any write — the whole order rolls back atomically on reject
+    if (hasStock) {
+      for (const l of lines) {
+        const srow = (await c.query(`select ${ttlCol ? `"${ttlCol}" as title, ` : ''}stock from "${schema}"."products" where id=$1 for update`, [l.id])).rows[0];
+        if (srow && srow.stock != null) {
+          const stk = Number(srow.stock);
+          const ttl = ttlCol ? String(srow.title ?? ('#' + l.id)) : ('#' + l.id);
+          if (l.qty > stk) { await c.query('rollback'); return { ok: false, error: stk === 0 ? `"${ttl}" is sold out` : `only ${stk} of "${ttl}" left — reduce the quantity` }; }
+        }
+      }
+    }
     const cols: string[] = [nameCol]; const vals: any[] = [name];
     if (oCols.has('email')) { cols.push('email'); vals.push(email); }
     if (oCols.has('phone') && buyer?.phone) { cols.push('phone'); vals.push(String(buyer.phone).slice(0, 40)); }
@@ -243,6 +258,9 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
       const ic: string[] = [orderCol, prodCol, qtyCol]; const iv: any[] = [orderId, l.id, l.qty];
       if (unitCol) { ic.push(unitCol); iv.push(priceById.get(l.id)); }
       await c.query(`insert into "${schema}"."order_items" (${ic.map(x => `"${x}"`).join(',')}) values (${ic.map((_, i) => '$' + (i + 1)).join(',')})`, iv);
+    }
+    if (hasStock) {
+      for (const l of lines) await c.query(`update "${schema}"."products" set stock = stock - $1 where id=$2 and stock is not null`, [l.qty, l.id]);
     }
     await c.query('commit');
     return { ok: true, order: orderId, total };

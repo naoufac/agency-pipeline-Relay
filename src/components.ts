@@ -130,6 +130,7 @@ p{margin:0 0 1rem}
    ============================================================================ */
 .p-price{font-family:var(--font-display);font-weight:700;font-size:1.15rem;margin:.3rem 0 .8rem}
 .p-add{width:100%;justify-content:center}
+.p-soldout{opacity:.5;cursor:not-allowed}
 .cart-box{background:var(--surface);border:var(--border-w,1px) solid var(--line);border-radius:var(--radius);padding:22px}
 .cart-line{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
 .cart-line:last-of-type{border-bottom:0}
@@ -264,6 +265,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const img = (safeUrl(row._image) ? row._image : '') || (imgKey ? String(row[imgKey]) : '');
     const priceKey = keys.find(k => /^(price|amount|cost)$/.test(k) && isFinite(parseFloat(row[k])));
     const price = priceKey ? Math.round(parseFloat(row[priceKey]) * 100) / 100 : NaN;
+    const stock = row.stock != null ? Number(row.stock) : null;
     const meta = keys.filter(k => k !== titleKey && k !== descKey && k !== imgKey && k !== priceKey).slice(0, 6).map(k => {
       const v = row[k];
       if (typeof v === 'boolean') return v ? `<li>✓ ${esc(humanize(k))}</li>` : '';
@@ -283,7 +285,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
         ${isFinite(price) ? `<div class="p-price">$${price.toFixed(2)}</div>` : ''}
         ${descKey ? `<p class="lead muted">${esc(String(row[descKey]))}</p>` : ''}
         ${meta ? `<ul class="pdp-meta">${meta}</ul>` : ''}
-        ${isFinite(price) && row.id != null ? `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">Add to cart</button>` : ''}
+        ${isFinite(price) && row.id != null ? (() => { if (stock === 0) return `<button type="button" class="btn p-add p-soldout" disabled>Sold out</button>`; const note = stock != null && stock >= 1 && stock <= 5 ? `<p class="muted">Only ${stock} left</p>` : ''; return note + `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">Add to cart</button>`; })() : ''}
         ${s.cartSlug ? `<p class="pdp-cartlink"><a href="${esc(String(s.cartSlug))}.html">View cart →</a></p>` : ''}
       </div>
     </div>

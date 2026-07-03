@@ -46,6 +46,16 @@ ok('pdp hides zero-valued numeric meta (spec noise)', !pdp.includes('Weight Gram
 const pdpNoImg = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [{ type: 'product', row: { id: 4, title: 'Vase', price: 64 } }] }, { pages, slug: 'product-4', title: 'Vase' });
 ok('pdp without a photo shows the branded panel, never a void', pdpNoImg.includes('pdp-noimg'));
 ok('shop grid links each card to its product page (products table only)', shop.includes("'product-'+o.id+'.html'") && shop.includes("tbl==='products'"));
+// PQ2 stock — render-layer checks (d/e/f)
+const pdpSoldOut = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } }, sections: [
+  { type: 'product', row: { id: 3, title: 'Vase', price: 64, stock: 0 }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart' }] },
+  { pages, slug: 'product-3', title: 'Vase' });
+ok('pdp stock-0 renders disabled Sold out button (no add-to-cart onclick)', pdpSoldOut.includes('Sold out') && pdpSoldOut.includes('p-soldout') && !pdpSoldOut.includes('onclick="relayCartAdd'));
+const pdpLowStock = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff', primary: '#7a1f1f' } }, sections: [
+  { type: 'product', row: { id: 1, title: 'Mug', price: 24, stock: 3 }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart' }] },
+  { pages, slug: 'product-1', title: 'Mug' });
+ok('pdp stock 1..5 renders low-stock note', pdpLowStock.includes('Only 3 left'));
+ok('shop-grid JS has the sold-out branch', shop.includes('p-soldout') && shop.includes('Sold out'));
 
 // store guarantee: a composed model that FORGOT the store sections gets them injected
 {
@@ -65,8 +75,8 @@ const pool = makePool();
 const id = randomUUID();
 const schema = appdb.schemaName(id);
 const MODEL = JSON.stringify({ entities: [
-  { name: 'products', public: true, display: 'title', fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }],
-    seed: [{ title: 'Mug', price: 24 }, { title: 'Bowl', price: 38.5 }, { title: 'Vase', price: 64 }] },
+  { name: 'products', public: true, display: 'title', fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'stock', type: 'int' }],
+    seed: [{ title: 'Mug', price: 24, stock: 3 }, { title: 'Bowl', price: 38.5 }, { title: 'Vase', price: 64, stock: 0 }] },
   { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }, { name: 'phone', type: 'text' }, { name: 'notes', type: 'longtext' }, { name: 'status', type: 'status' }, { name: 'total', type: 'money' }] },
   { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'product', type: 'ref:products', required: true }, { name: 'qty', type: 'int', required: true }, { name: 'unit_price', type: 'money' }] },
 ] });
@@ -75,6 +85,8 @@ try {
   // the happy path: 2× Mug + 1× Bowl = 2*24 + 38.5 = 86.5 — computed SERVER-side
   const r = await appdb.placeOrder(pool, id, { customer_name: 'Ada Buyer', email: 'ada@example.com', phone: '123', notes: 'gift wrap' }, [{ id: 1, qty: 2 }, { id: 2, qty: 1 }]);
   ok('order placed', r.ok === true, JSON.stringify(r));
+  const mugStk = (await pool.query(`select stock from "${schema}"."products" where id=1`)).rows[0];
+  ok('successful order decrements stock', Number(mugStk.stock) === 1, String(mugStk.stock));
   ok('total computed server-side (86.5)', r.total === 86.5, String(r.total));
   const orow = (await pool.query(`select customer_name, email, status, total::numeric from "${schema}"."orders" where id=$1`, [r.order])).rows[0];
   ok('order row real (name/email/status/total)', orow && orow.customer_name === 'Ada Buyer' && orow.email === 'ada@example.com' && orow.status === 'new' && Number(orow.total) === 86.5, JSON.stringify(orow));
@@ -87,6 +99,18 @@ try {
   ok('rejects missing name', !(await appdb.placeOrder(pool, id, { email: 'a@b.co' }, [{ id: 1, qty: 1 }])).ok);
   ok('rejects bad email', !(await appdb.placeOrder(pool, id, { customer_name: 'A', email: 'nope' }, [{ id: 1, qty: 1 }])).ok);
   ok('nothing partially written on rejects', Number((await pool.query(`select count(*)::int n from "${schema}"."orders"`)).rows[0].n) === 1);
+  // (b) over-stock: Mug now has stock=1, ordering 5 must be rejected with a friendly message
+  const rOver = await appdb.placeOrder(pool, id, { customer_name: 'B', email: 'b@b.co' }, [{ id: 1, qty: 5 }]);
+  ok('over-stock order rejected with friendly message', rOver.ok === false && /only \d+ of/.test(rOver.error || ''), rOver.error);
+  ok('over-stock writes nothing (count and stock unchanged)',
+    Number((await pool.query(`select count(*)::int n from "${schema}"."orders"`)).rows[0].n) === 1 &&
+    Number((await pool.query(`select stock from "${schema}"."products" where id=1`)).rows[0].stock) === 1);
+  // (c) stock-0: Vase is sold out
+  const rSold = await appdb.placeOrder(pool, id, { customer_name: 'B', email: 'b@b.co' }, [{ id: 3, qty: 1 }]);
+  ok('stock-0 order rejected as sold out', rSold.ok === false && /is sold out/.test(rSold.error || ''), rSold.error);
+  // (g) null-stock: Bowl (id=2) has no stock column — must behave exactly as before (unlimited)
+  const rNull = await appdb.placeOrder(pool, id, { customer_name: 'B', email: 'b@b.co' }, [{ id: 2, qty: 5 }]);
+  ok('product without stock is unlimited (null = untracked)', rNull.ok === true, JSON.stringify(rNull));
   // a non-store schema answers honestly
   const other = randomUUID();
   await appdb.provision(pool, other, JSON.stringify({ entities: [{ name: 'notes', fields: [{ name: 'body', type: 'text' }] }] }));
