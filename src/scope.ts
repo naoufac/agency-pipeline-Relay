@@ -20,6 +20,8 @@ const CAPABILITIES: Cap[] = [
     promise: 'sign-in on the site: email magic link + a personal records page' },
   { name: 'landing',  detect: /landing/,
     promise: 'one focused conversion page' },
+  { name: 'variants', detect: /\b(sizes|colou?rs|flavou?rs|variants)\b/,
+    promise: 'products with options (sizes, colours, flavours) — option-aware cart, stock and checkout' },
   { name: 'installable', detect: /native app|android|\bios\b|iphone|mobile app|add to home/,
     promise: 'installs as an app on any phone (Add to Home Screen — icon, full screen, offline shell)' },
 ];

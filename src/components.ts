@@ -88,6 +88,11 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* PQ2 · variant pills on the product page */
+.varpick{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 1rem}
+.varpick .varpill{font:inherit;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer}
+.varpick .varpill:disabled{opacity:.38;text-decoration:line-through;cursor:not-allowed}
+.varpick .varpill.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}
 /* PAYMENTS v1 · payment instructions at checkout (owner-edited, read live) */
 .payopts{background:var(--surface);border:var(--border-w,1px) solid var(--line);border-radius:var(--radius);padding:18px 22px;margin:1.4rem 0}
 .payopts h3{margin-bottom:.6rem}
@@ -343,7 +348,19 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
         ${isFinite(price) ? `<div class="p-price">$${price.toFixed(2)}</div>` : ''}
         ${descKey ? `<p class="lead muted">${esc(String(row[descKey]))}</p>` : ''}
         ${meta ? `<ul class="pdp-meta">${meta}</ul>` : ''}
-        ${isFinite(price) && row.id != null ? (() => { if (stock === 0) return `<button type="button" class="btn p-add p-soldout" disabled>Sold out</button>`; const note = stock != null && stock >= 1 && stock <= 5 ? `<p class="muted">Only ${stock} left</p>` : ''; return note + `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">Add to cart</button>`; })() : ''}
+        ${isFinite(price) && row.id != null ? (() => {
+          // PQ2 · VARIANTS: with options, the shopper picks a pill first — Add-to-cart carries the
+          // chosen variant (server re-validates ownership, price and stock; the client is display-only)
+          const vars: any[] = Array.isArray(s.variants) ? s.variants : [];
+          if (vars.length) {
+            const pills = vars.slice(0, 24).map((v: any) => `<button type="button" class="varpill" data-vid="${esc(String(v.id))}" data-vname="${esc(String(v.name))}" data-vprice="${v.price != null ? esc(String(v.price)) : ''}"${v.stock === 0 ? ' disabled' : ''} onclick="relayVarPick(this)">${esc(String(v.name))}${v.price != null ? ` · $${Number(v.price).toFixed(2)}` : ''}${v.stock === 0 ? ' — sold out' : ''}</button>`).join('');
+            return `<div class="varpick">${pills}</div><p class="muted varmsg" hidden></p>
+            <button type="button" class="btn p-add" onclick="relayCartAddVariant(this,${esc(JSON.stringify({ id: row.id, title, price }))})">Add to cart</button>`;
+          }
+          if (stock === 0) return `<button type="button" class="btn p-add p-soldout" disabled>Sold out</button>`;
+          const note = stock != null && stock >= 1 && stock <= 5 ? `<p class="muted">Only ${stock} left</p>` : '';
+          return note + `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">Add to cart</button>`;
+        })() : ''}
         ${s.cartSlug ? `<p class="pdp-cartlink"><a href="${esc(String(s.cartSlug))}.html">View cart →</a></p>` : ''}
       </div>
     </div>

@@ -100,9 +100,12 @@ const id = randomUUID();
 const schema = appdb.schemaName(id);
 const MODEL = JSON.stringify({ entities: [
   { name: 'products', public: true, display: 'title', fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'stock', type: 'int' }],
-    seed: [{ title: 'Mug', price: 24, stock: 3 }, { title: 'Bowl', price: 38.5 }, { title: 'Vase', price: 64, stock: 0 }] },
+    seed: [{ title: 'Mug', price: 24, stock: 3 }, { title: 'Bowl', price: 38.5 }, { title: 'Vase', price: 64, stock: 0 }, { title: 'Tee', price: 20 }] },
   { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }, { name: 'phone', type: 'text' }, { name: 'notes', type: 'longtext' }, { name: 'status', type: 'status' }, { name: 'total', type: 'money' }] },
   { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'product', type: 'ref:products', required: true }, { name: 'qty', type: 'int', required: true }, { name: 'unit_price', type: 'money' }] },
+  // PQ2 · variants (note the non-canonical name — compile must normalize it to product_variants)
+  { name: 'variants', fields: [{ name: 'product', type: 'ref:products', required: true }, { name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }, { name: 'stock', type: 'int' }],
+    seed: [{ product: 4, name: 'S' }, { product: 4, name: 'XL', price: 26, stock: 1 }, { product: 4, name: 'M', stock: 0 }] },
 ] });
 try {
   await appdb.provision(pool, id, MODEL);
@@ -135,6 +138,41 @@ try {
   // (g) null-stock: Bowl (id=2) has no stock column — must behave exactly as before (unlimited)
   const rNull = await appdb.placeOrder(pool, id, { customer_name: 'B', email: 'b@b.co' }, [{ id: 2, qty: 5 }]);
   ok('product without stock is unlimited (null = untracked)', rNull.ok === true, JSON.stringify(rNull));
+  // ---- PQ2 · VARIANTS: option-aware pricing, stock, snapshots — the whole money path ----
+  ok('compile normalized "variants" → product_variants', (await appdb.listTables(pool, id)).includes('product_variants'));
+  const vrows = await appdb.productVariants(pool, id, 4);
+  ok('productVariants lists the Tee options in order', vrows.length === 3 && vrows[0].name === 'S' && vrows[1].price === 26, JSON.stringify(vrows));
+  // a product WITH options cannot be bought without choosing one
+  const rNoV = await appdb.placeOrder(pool, id, { customer_name: 'V', email: 'v@b.co' }, [{ id: 4, qty: 1 }]);
+  ok('variant product without a chosen option is refused, friendly', rNoV.ok === false && /comes in options/.test(rNoV.error || ''), rNoV.error);
+  // priced variant overrides; snapshot lands on the line
+  const rXL = await appdb.placeOrder(pool, id, { customer_name: 'V', email: 'v@b.co' }, [{ id: 4, qty: 1, variant: 2 }]);
+  ok('variant order placed at the VARIANT price (26, not 20)', rXL.ok === true && rXL.total === 26, JSON.stringify(rXL));
+  const vline = (await pool.query(`select variant_id, variant_name, unit_price::numeric from "${schema}"."order_items" where order_id=$1`, [rXL.order])).rows[0];
+  ok('line item snapshots the variant (id + name + unit price)', vline && Number(vline.variant_id) === 2 && vline.variant_name === 'XL' && Number(vline.unit_price) === 26, JSON.stringify(vline));
+  const vstk = (await pool.query(`select stock from "${schema}"."product_variants" where id=2`)).rows[0];
+  ok('variant stock decremented (1 → 0)', Number(vstk.stock) === 0, String(vstk?.stock));
+  // per-variant oversell + sold-out
+  const rXL2 = await appdb.placeOrder(pool, id, { customer_name: 'V', email: 'v@b.co' }, [{ id: 4, qty: 1, variant: 2 }]);
+  ok('the now-empty variant refuses as sold out', rXL2.ok === false && /sold out/.test(rXL2.error || ''), rXL2.error);
+  const rM = await appdb.placeOrder(pool, id, { customer_name: 'V', email: 'v@b.co' }, [{ id: 4, qty: 1, variant: 3 }]);
+  ok('a seeded stock-0 variant refuses as sold out', rM.ok === false && /sold out/.test(rM.error || ''), rM.error);
+  // null-price + null-stock variant inherits product price and is unlimited
+  const rS = await appdb.placeOrder(pool, id, { customer_name: 'V', email: 'v@b.co' }, [{ id: 4, qty: 2, variant: 1 }]);
+  ok('null-price variant inherits the product price (2×20=40), untracked stock', rS.ok === true && rS.total === 40, JSON.stringify(rS));
+  // a variant may only be bought on ITS product
+  const rWrong = await appdb.placeOrder(pool, id, { customer_name: 'V', email: 'v@b.co' }, [{ id: 1, qty: 1, variant: 1 }]);
+  ok("someone else's variant id is refused", rWrong.ok === false, JSON.stringify(rWrong));
+  // PDP render: options become pills; Add requires a pick; a sold-out option is disabled
+  const vpdp = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [
+    { type: 'product', row: { id: 4, title: 'Tee', price: 20, description: 'Soft cotton.' }, back: { slug: 'shop', title: 'Shop' }, cartSlug: 'cart',
+      variants: [{ id: 1, name: 'S', price: null, stock: null }, { id: 2, name: 'XL', price: 26, stock: 1 }, { id: 3, name: 'M', price: null, stock: 0 }] }] },
+    { pages, slug: 'product-4', title: 'Tee' });
+  ok('pdp renders variant pills', vpdp.includes('class="varpill"') && vpdp.includes('relayVarPick'), 'pills missing');
+  ok('pdp add-to-cart goes through the variant path', vpdp.includes('relayCartAddVariant'));
+  ok('a sold-out option is disabled and says so', /data-vname="M"[^>]*disabled/.test(vpdp) && vpdp.includes('sold out'));
+  ok('priced option shows its price on the pill', vpdp.includes('XL · $26.00'));
+
   // a non-store schema answers honestly
   const other = randomUUID();
   await appdb.provision(pool, other, JSON.stringify({ entities: [{ name: 'notes', fields: [{ name: 'body', type: 'text' }] }] }));

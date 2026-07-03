@@ -28,6 +28,9 @@ export const STATUS_SET = ['pending', 'confirmed', 'declined', 'cancelled', 'new
 // slot-shaped tables where double-booking semantics apply (strict set — never forced onto tables
 // that legitimately allow duplicates, like orders)
 export const SLOT_TABLE = /^(bookings?|appointments?|reservations?)$/i;
+// PQ2 · VARIANTS — the canonical options table: product_variants(product ref, name, price?, stock?).
+// price null = inherits the product's; stock null = untracked. 'variants' normalizes to this name.
+export const VARIANT_TABLE = /^(product_)?variants$/i;
 
 // closed type vocabulary -> Postgres column type (everything the model can ask for)
 const TYPE: Record<string, string> = {
@@ -74,6 +77,21 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     const name = snake(raw?.name);
     if (!IDENT.test(name) || ents.some(e => e.name === name)) { if (raw?.name) warnings.push('dropped entity ' + raw?.name); continue; }
     ents.push({ ...raw, name });
+  }
+  // PQ2 · VARIANTS — normalize the options table to its canonical name, and give order_items the
+  // variant SNAPSHOT columns (name + id, like unit_price) so a receipt line reads "Tee — XL" forever
+  // even if the variant is later renamed or deleted.
+  if (!ents.some(x => x.name === 'product_variants')) {
+    const va = ents.find(e2 => VARIANT_TABLE.test(e2.name));
+    if (va) { warnings.push(`renamed entity ${va.name} → product_variants (canonical options table)`); va.name = 'product_variants'; }
+  }
+  if (ents.some(e2 => e2.name === 'product_variants')) {
+    const oi = ents.find(e2 => e2.name === 'order_items');
+    if (oi) {
+      oi.fields = oi.fields || [];
+      if (!oi.fields.some(f => snake(f?.name) === 'variant_name')) oi.fields.push({ name: 'variant_name', type: 'text' });
+      if (!oi.fields.some(f => snake(f?.name) === 'variant_id')) oi.fields.push({ name: 'variant_id', type: 'int' });
+    }
   }
   // PAYMENTS v1 — every store carries owner-editable PAYMENT INSTRUCTIONS: an injected public
   // payment_options table (rendered at checkout, edited in the Content tab, read live). The LLM

@@ -193,18 +193,22 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
 // products / orders / order_items (enforced by the app_db gate for store briefs). ZERO TRUST in the
 // client: prices come from the products table, the total is computed HERE, unit prices are
 // snapshotted onto the line items, and the whole write is one transaction.
-export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record<string, any>, items: { id: any; qty: any }[]): Promise<{ ok: boolean; order?: number; total?: number; error?: string }> {
+export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record<string, any>, items: { id: any; qty: any; variant?: any }[]): Promise<{ ok: boolean; order?: number; total?: number; error?: string }> {
   const schema = schemaName(projectId);
   const tables = await listTables(pool, projectId);
   for (const t of ['products', 'orders', 'order_items']) if (!tables.includes(t)) return { ok: false, error: 'this site has no store (missing ' + t + ')' };
-  // validate items: 1..30 lines, integer ids, qty 1..99, no duplicates
+  const hasVariants = tables.includes('product_variants');   // PQ2 · options — activates the variant path
+  // validate items: 1..30 lines, integer ids, qty 1..99, no duplicate product+variant pairs
   if (!Array.isArray(items) || !items.length || items.length > 30) return { ok: false, error: 'cart is empty or too large' };
-  const seen = new Set<number>();
-  const lines: { id: number; qty: number }[] = [];
+  const seen = new Set<string>();
+  const lines: { id: number; qty: number; variant: number | null }[] = [];
   for (const it of items) {
     const id = Number(it?.id), qty = Number(it?.qty);
-    if (!Number.isInteger(id) || id < 1 || !Number.isInteger(qty) || qty < 1 || qty > 99 || seen.has(id)) return { ok: false, error: 'invalid cart line' };
-    seen.add(id); lines.push({ id, qty });
+    const variant = (hasVariants && it?.variant != null && it?.variant !== '') ? Number(it.variant) : null;
+    if (variant !== null && (!Number.isInteger(variant) || variant < 1)) return { ok: false, error: 'invalid cart line' };
+    const key = id + ':' + (variant ?? '');
+    if (!Number.isInteger(id) || id < 1 || !Number.isInteger(qty) || qty < 1 || qty > 99 || seen.has(key)) return { ok: false, error: 'invalid cart line' };
+    seen.add(key); lines.push({ id, qty, variant });
   }
   const name = String(buyer?.customer_name ?? buyer?.name ?? '').trim();
   const email = String(buyer?.email ?? '').trim();
@@ -218,10 +222,10 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
   // PQ2 — stock awareness: which products carry a finite inventory (nullable int column)?
   const hasStock = allProdCols.some(c => c.name === 'stock');
   const ttlCol = ['title', 'name', 'label'].find(n => allProdCols.some(c => c.name === n));
-  const prod = await pool.query(`select id, "${pcol}"::numeric as price from "${schema}"."products" where id = any($1)`, [lines.map(l => l.id)]);
+  const prod = await pool.query(`select id, "${pcol}"::numeric as price${ttlCol ? `, "${ttlCol}" as title` : ''} from "${schema}"."products" where id = any($1)`, [lines.map(l => l.id)]);
   const priceById = new Map<number, number>(prod.rows.map((r: any) => [Number(r.id), Number(r.price)]));
+  const titleById = new Map<number, string>(prod.rows.map((r: any) => [Number(r.id), String(r.title ?? ('#' + r.id))]));
   for (const l of lines) if (!priceById.has(l.id)) return { ok: false, error: 'a product in your cart no longer exists' };
-  const total = Math.round(lines.reduce((s2, l) => s2 + priceById.get(l.id)! * l.qty, 0) * 100) / 100;
   // column-flexible write (the model may name columns slightly differently), one transaction
   const oCols = new Set((await typedColumns(pool, schema, 'orders')).map(c => c.name));
   const iCols = new Set((await typedColumns(pool, schema, 'order_items')).map(c => c.name));
@@ -231,13 +235,43 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
   const prodCol = ['product_id'].find(c => iCols.has(c));
   const orderCol = ['order_id'].find(c => iCols.has(c));
   if (!nameCol || !qtyCol || !prodCol || !orderCol) return { ok: false, error: 'store schema is missing standard order columns' };
+  const vCols = hasVariants ? (await typedColumns(pool, schema, 'product_variants')).map(x => x.name) : [];
+  const vHasPrice = vCols.includes('price'), vHasStock = vCols.includes('stock'), vHasName = vCols.includes('name');
   const c = await pool.connect();
   try {
     await c.query('begin');
     await c.query("set local statement_timeout = '10s'");
+    // PQ2 · VARIANTS: resolve each line's variant INSIDE the transaction (locked) — the variant must
+    // belong to the product; its price (when set) overrides; its stock (when tracked) is the guard.
+    // A product that HAS options may not be bought without choosing one — same rule as a real shop.
+    const effPrice = new Map<string, number>();
+    const vnameByKey = new Map<string, string>();
+    for (const l of lines) {
+      const key = l.id + ':' + (l.variant ?? '');
+      const ttl = titleById.get(l.id) || ('#' + l.id);
+      if (l.variant !== null) {
+        const vr = (await c.query(`select ${vHasName ? '"name", ' : ''}${vHasPrice ? '"price"::numeric as price, ' : ''}${vHasStock ? '"stock", ' : ''}"product_id" from "${schema}"."product_variants" where id=$1 for update`, [l.variant])).rows[0];
+        if (!vr || Number(vr.product_id) !== l.id) { await c.query('rollback'); return { ok: false, error: 'that option no longer exists — refresh and pick again' }; }
+        const vname = vHasName ? String(vr.name ?? '') : '';
+        if (vHasStock && vr.stock != null) {
+          const stk = Number(vr.stock);
+          if (l.qty > stk) { await c.query('rollback'); return { ok: false, error: stk === 0 ? `"${ttl} — ${vname}" is sold out` : `only ${stk} of "${ttl} — ${vname}" left — reduce the quantity` }; }
+        }
+        effPrice.set(key, vHasPrice && vr.price != null ? Number(vr.price) : priceById.get(l.id)!);
+        vnameByKey.set(key, vname);
+      } else {
+        if (hasVariants) {
+          const n = Number((await c.query(`select count(*)::int n from "${schema}"."product_variants" where product_id=$1`, [l.id])).rows[0].n);
+          if (n > 0) { await c.query('rollback'); return { ok: false, error: `"${ttl}" comes in options — choose one on its product page, then add it to the cart` }; }
+        }
+        effPrice.set(key, priceById.get(l.id)!);
+      }
+    }
+    const total = Math.round(lines.reduce((s2, l) => s2 + effPrice.get(l.id + ':' + (l.variant ?? ''))! * l.qty, 0) * 100) / 100;
     // lock each tracked row and validate before any write — the whole order rolls back atomically on reject
     if (hasStock) {
       for (const l of lines) {
+        if (l.variant !== null) continue;   // variant lines guard stock on the VARIANT row above
         const srow = (await c.query(`select ${ttlCol ? `"${ttlCol}" as title, ` : ''}stock from "${schema}"."products" where id=$1 for update`, [l.id])).rows[0];
         if (srow && srow.stock != null) {
           const stk = Number(srow.stock);
@@ -255,12 +289,19 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
     const o = await c.query(`insert into "${schema}"."orders" (${cols.map(x => `"${x}"`).join(',')}) values (${cols.map((_, i) => '$' + (i + 1)).join(',')}) returning id`, vals);
     const orderId = Number(o.rows[0].id);
     for (const l of lines) {
+      const key = l.id + ':' + (l.variant ?? '');
       const ic: string[] = [orderCol, prodCol, qtyCol]; const iv: any[] = [orderId, l.id, l.qty];
-      if (unitCol) { ic.push(unitCol); iv.push(priceById.get(l.id)); }
+      if (unitCol) { ic.push(unitCol); iv.push(effPrice.get(key)); }
+      // variant SNAPSHOT on the line — the receipt reads "Tee — XL" even if the option changes later
+      if (l.variant !== null && iCols.has('variant_id')) { ic.push('variant_id'); iv.push(l.variant); }
+      if (l.variant !== null && iCols.has('variant_name') && vnameByKey.get(key)) { ic.push('variant_name'); iv.push(vnameByKey.get(key)); }
       await c.query(`insert into "${schema}"."order_items" (${ic.map(x => `"${x}"`).join(',')}) values (${ic.map((_, i) => '$' + (i + 1)).join(',')})`, iv);
     }
     if (hasStock) {
-      for (const l of lines) await c.query(`update "${schema}"."products" set stock = stock - $1 where id=$2 and stock is not null`, [l.qty, l.id]);
+      for (const l of lines) { if (l.variant === null) await c.query(`update "${schema}"."products" set stock = stock - $1 where id=$2 and stock is not null`, [l.qty, l.id]); }
+    }
+    if (vHasStock) {
+      for (const l of lines) { if (l.variant !== null) await c.query(`update "${schema}"."product_variants" set stock = stock - $1 where id=$2 and stock is not null`, [l.qty, l.variant]); }
     }
     await c.query('commit');
     return { ok: true, order: orderId, total };
@@ -269,6 +310,17 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
     console.error('placeOrder', projectId, e?.message ?? e);
     return { ok: false, error: 'could not place the order — please try again' };
   } finally { c.release(); }
+}
+
+// PQ2 · VARIANTS — one product's options for the PDP picker (public data: name, price, stock).
+export async function productVariants(pool: pg.Pool, projectId: string, productId: number): Promise<{ id: number; name: string; price: number | null; stock: number | null }[]> {
+  const schema = schemaName(projectId);
+  if (!Number.isInteger(productId) || !(await listTables(pool, projectId)).includes('product_variants')) return [];
+  const cols = (await typedColumns(pool, schema, 'product_variants')).map(c => c.name);
+  if (!cols.includes('product_id')) return [];
+  const sel = ['id', cols.includes('name') ? '"name"' : `'Option ' || id as name`, cols.includes('price') ? '"price"::numeric as price' : 'null as price', cols.includes('stock') ? '"stock"' : 'null as stock'];
+  const r = await pool.query(`select ${sel.join(', ')} from "${schema}"."product_variants" where product_id=$1 order by id limit 24`, [productId]);
+  return r.rows.map((v: any) => ({ id: Number(v.id), name: String(v.name ?? ''), price: v.price != null ? Number(v.price) : null, stock: v.stock != null ? Number(v.stock) : null }));
 }
 
 export async function listTables(pool: pg.Pool, projectId: string): Promise<string[]> {

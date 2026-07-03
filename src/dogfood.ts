@@ -200,7 +200,7 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
             const pd: any = await page.evaluate(`(function(){var t=document.querySelector('.pdp h1'),b=document.querySelector('.pdp .p-add');return{title:t?(t.textContent||'').trim():'',add:!!b}})()`).catch(() => null);
             if (!pd || !pd.title || !pd.add)
               issues.push({ page: pdpHref.replace(/\.html$/, ''), viewport: 'desktop', kind: 'store-broken', detail: `the product detail page (${pdpHref}) is missing its ${!pd || !pd.title ? 'product name' : 'Add-to-cart button'}`, severity: 'high' });
-            else await page.evaluate(`document.querySelector('.pdp .p-add').click()`).catch(() => {});   // buy FROM the detail page
+            else await page.evaluate(`(function(){var vp=document.querySelector('.pdp .varpick .varpill:not([disabled])');if(vp)vp.click();document.querySelector('.pdp .p-add').click()})()`).catch(() => {});   // buy FROM the detail page (picking an option first when the product has them)
             await page.waitForTimeout(300);
             await goto(page, url(shopPage.slug));
             await page.waitForFunction(`document.querySelectorAll('.p-add').length > 0`, { timeout: 8000 }).catch(() => {});

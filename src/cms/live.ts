@@ -59,7 +59,8 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const back = withProducts ? { slug: withProducts.slug, title: withProducts.title } : navPages[0];
   const cartPage = navPages.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
   const title = String(row.title || row.name || 'Product #' + productId);
-  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: cartPage?.slug }] };
+  const variants = await appdb.productVariants(pool, projectId, productId);   // PQ2 · options picker
+  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: cartPage?.slug, variants }] };
   const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE pdp=${productId} (rendered from the live product row on request)-->\n` + html;
 }

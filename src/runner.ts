@@ -186,6 +186,11 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
         // truncated or forgotten. Reject into retry with exact ordering instructions.
         if (['app', 'store'].includes(String((ctx as any).archetype)) && !modelHasCore(r.model))
           throw new Error('database rejected: the model contains only identity tables — the app\'s REAL entities (the thing a visitor DOES: deliveries/bookings/orders/listings, plus its catalog) are missing. Emit the core ACTION entity FIRST with all its fields, catalog entities next, identity tables LAST, seeds small (≤6 rows) — compact JSON on one line.');
+        // PQ2 · VARIANTS: a store brief that speaks of sizes/colours/flavours must MODEL them — the
+        // variant machinery (option-aware cart/stock/checkout) only activates when the table exists.
+        if (String((ctx as any).archetype) === 'store' && /\b(sizes|colou?rs|flavou?rs|variants)\b/i.test(String((ctx as any).brief || ''))
+            && !(r.model.entities || []).some((e2: any) => /^(product_)?variants$/i.test(String(e2?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'))))
+          throw new Error('database rejected: the brief asks for product OPTIONS (sizes/colours/flavours) but the model has no variants table — add entity "product_variants" with fields: product (ref:products, required), name (text, required), price (money, optional — null inherits the product price), stock (int, optional), and seed 2-3 options per varied product.');
         for (const rep of r.repairs) console.error(`[datamodel] ${task.project_id}: ${rep}`);
         content = JSON.stringify(r.model);
       }
