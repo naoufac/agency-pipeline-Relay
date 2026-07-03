@@ -356,3 +356,18 @@ probe dates now dynamic-future (fixed 2026-01-01 fixture had gone stale). Extern
 born pending → double-book refused → yesterday refused → owner confirm → receipt Confirmed +
 mail_sent event → garbage status refused. REMAINING IN FS TRACK: FS4 — redeem the two facade briefs
 (the owner's delivery-app brief verbatim + the bakery pre-order) with the standing full-loop gate.
+
+## 2026-07-03 — FS4 SHIPPED: the facade briefs redeemed — FULL-STACK TRACK COMPLETE (FS0–FS4)
+Commits 04ea6d6 · c0afeff · a23f155 deployed (prod a23f155, 10 suites green, app:check 122).
+Both original facade briefs re-ran VERBATIM zero-touch: bakery pre-order PASSED clean; delivery app
+PASSED 0 high with a real core (orders action table; facades dropped at plan). The runs exposed +
+killed three classes: (1) out-of-set seed statuses ('preparing') killed provision → coerced at
+compile; (2) truncated data models (max_tokens mid-JSON) rejected wholesale → salvage complete
+entities, string-aware; (3) the salvage/model shipping identity-tables-only (users+clients = gutted
+app that passed review as a sign-up shell) → modelHasCore rejects into retry with action-first
+ordering; DB prompt orders action entity first, compact JSON; rejections carry an output sample.
+END-TO-END EXTERNAL PROOF on the redeemed delivery app: order ZR-2026-001 → pending → tracking page
+→ find-by-code → owner completed → mail_sent → My Orders (signed in) → public API {"rows":[]}.
+THE FS TRACK IS COMPLETE. Next frontiers (owner's call): PQ1 distinct design per brief · hero
+art-direction panel pick · store options/variants/stock · FS-later: DB-level slot unique, richer
+lifecycle emails, owner Telegram alerts on new bookings.

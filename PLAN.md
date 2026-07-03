@@ -238,7 +238,16 @@ reference page shows it live and a confirmation email lands when the owner confi
 browser probe proves past-date + duplicate-slot rejections render in-page; status transitions are a
 closed set; each visitor notification writes a verified sent-mail record.
 
-## FS4 · The facade briefs redeemed — the standing full-loop gate
+## FS4 · The facade briefs redeemed — the standing full-loop gate ✅ (2026-07-03)
+**Shipped + proven:** both facade briefs re-ran VERBATIM, zero-touch, and PASSED 0 high. The
+delivery app (5d3f7ab0): create a delivery order → born pending → live tracking page (receipt) →
+track by code → owner marks completed → visitor emailed (ledger) → signed-in My Orders shows it →
+public orders API sealed. The bakery pre-order (33e7a2a3): clean first pass. The redemption runs
+themselves killed two more classes, now gated: seed statuses outside the closed set coerce instead
+of dying ('preparing' once killed the provision), truncated data models salvage their complete
+entities AND a model of identity tables only (users/clients — the gutted-app shell that once passed
+review) rejects into retry with action-entity-first ordering. app:check 122. The act-probe suite
+(honest pages · receipts · accounts · semantics) stands on every app build from here on.
 **You get:** the two briefs that produced facades (the delivery app with accounts, the bakery
 pre-order) re-run zero-touch and come out as real apps — the full loop (act → receipt → sign-in →
 status) proven by the standing act-probe on every app build from then on.
