@@ -289,6 +289,18 @@ Five briefs shipped first-pass on day one (stock, front door, buttons, scope, ca
 deploy gate re-runs all suites inside prod and REVERTS on any failure — it held the bar against the
 boss himself once already.
 
+## NEXT 3 — the boss's direction (set 2026-07-03, for the next session)
+1. **PQ1 verdict + residuals** — re-run the 3-lens panel on the NEW trio for the measured sameness
+   score (old baseline 7.3/10; target ≤4), then build the #1 residual: hero ART-DIRECTION —
+   deterministic photo treatment rules per theme (brand-tinted grade, crop discipline), closed-set.
+   Design quality is the M2DIA differentiator; we changed a lot — measure it, then keep cutting.
+2. **PQ2 finish: options/variants** — sizes/colours on products; variant-aware PDP, cart lines,
+   stock and checkout. Completes "a store that actually sells" to real-shop grade. Precise contract,
+   worker-friendly, ecom:check extends.
+3. **PWA — every produced site installs as an app** — manifest + brand icon + offline shell +
+   deterministic gate; the honest answer to the Android ask (Add to Home Screen = an app on the
+   phone), and the base for native packaging later. Small closed-set work, huge perceived value.
+
 ## Standing rules (locked — same as GOAL.md)
 1. **One pipeline, one CMS (Directus).** `npm run cms:check` fails the build on any second system.
 2. **Work only on Relay, never on a produced site.** Fix the generator, rebuild the output.

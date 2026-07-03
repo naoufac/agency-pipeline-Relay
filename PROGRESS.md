@@ -420,3 +420,10 @@ deploy gate REVERTED a push of mine that carried 1 failing assertion — the mac
 against the boss. Owner sent the side-by-side. Workers 01-05 all shipped first-pass (stock, tg-door,
 buttons, scope, cards) under boss review. Lesson recorded: background waiters must be systemd's, not
 the boss process's.
+
+## 2026-07-03 — SESSION CLOSE: roadmap review + GitHub validated + NEXT 3 set
+PLAN.md brought fully to reality (PQ1 core · PQ2 stock · SCOPE/front-door/boss-worker recorded).
+Validated: local == origin/master, 0 uncommitted, prod redeployed to the same HEAD, 11 suites green
+inside prod, board 200. NEXT 3 (in PLAN.md): 1) PQ1 panel re-score + hero art-direction residual,
+2) PQ2 options/variants, 3) PWA installable apps. Boss/worker harness ready (briefs 06+ go to
+/root/worker-briefs; launch ONLY via systemd-run). Front door live on @nao_openclaw_alibaba_bot.
