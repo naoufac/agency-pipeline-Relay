@@ -371,3 +371,12 @@ END-TO-END EXTERNAL PROOF on the redeemed delivery app: order ZR-2026-001 → pe
 THE FS TRACK IS COMPLETE. Next frontiers (owner's call): PQ1 distinct design per brief · hero
 art-direction panel pick · store options/variants/stock · FS-later: DB-level slot unique, richer
 lifecycle emails, owner Telegram alerts on new bookings.
+
+## 2026-07-03 — BOSS/WORKER mode (owner-directed: Fable at 84% weekly cap)
+Fable stays boss 100%: plans, writes briefs, reviews every diff, commits, deploys, runs proofs.
+Mechanical coding delegated to headless Sonnet workers: /root/zoro-worker.sh <brief> <log>, briefs
+in /root/worker-briefs/. Leash: allowlisted tools (no push/deploy), explicit file scope, gates green
+before stopping, full diff printed for review. Quality bar UNCHANGED: 10 suites + boss review +
+zero-touch proof; two failed reviews on a task = boss does it himself (owner: quality over savings).
+First delegated task running: 01-stock-awareness (PQ2 — stock column honored: transactional
+decrement w/ FOR UPDATE oversell guard, Sold out / Only-N-left on grid + PDP, ecom:check extensions).
