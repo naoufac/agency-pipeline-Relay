@@ -380,3 +380,13 @@ before stopping, full diff printed for review. Quality bar UNCHANGED: 10 suites 
 zero-touch proof; two failed reviews on a task = boss does it himself (owner: quality over savings).
 First delegated task running: 01-stock-awareness (PQ2 — stock column honored: transactional
 decrement w/ FOR UPDATE oversell guard, Sold out / Only-N-left on grid + PDP, ecom:check extensions).
+
+## 2026-07-03 — PQ2 STOCK shipped via BOSS/WORKER (first successful delegation)
+Commit ddf49bc deployed (10 suites green, ecom:check 53). Worker (Sonnet, systemd unit
+zoro-worker-01) implemented brief 01-stock-awareness in a clean 49-line diff — boss-reviewed line by
+line, APPROVED first pass: FOR-UPDATE oversell guard in the placeOrder transaction, per-product
+friendly errors, Sold out / Only-N-left on grid + PDP (live projections — showed on the coffee store
+with NO rebuild), NULL stock = untracked. Live proof: PDP "Sold out" + "Only 3 left" + checkout
+refusing '"Ethiopian Yirgacheffe" is sold out'. HARNESS LESSON: workers MUST run as systemd
+transient units (systemd-run --unit=zoro-worker-NN --collect) — the boss's sandbox reaps even setsid
+children; two runs died silently before this was root-caused.
