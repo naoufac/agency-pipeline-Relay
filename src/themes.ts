@@ -6,7 +6,8 @@
 // Zero-trust intact: this is STRUCTURE, so it is composed, not authored. The LLM may at most NAME an
 // archetype (validated against this closed set, with a deterministic brief-derived fallback). It never
 // writes CSS. The renderer still derives the WCAG-safe palette from bg+primary; a theme only changes
-// typography, spacing rhythm and shape — none of which can break contrast.
+// typography, spacing rhythm, shape and photo ART-DIRECTION (grade/tint/crop — the image-hero overlay
+// keeps its fixed dark floor, so no treatment can break contrast).
 
 export type ThemeName = 'editorial' | 'modern' | 'warm' | 'bold' | 'minimal';
 export const THEME_NAMES: ThemeName[] = ['editorial', 'modern', 'warm', 'bold', 'minimal'];
@@ -34,6 +35,10 @@ const T: Record<ThemeName, Theme> = {
       '--btn-border': '1px solid currentColor',
       '--border-w': '1px', '--container': '1080px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.16em', '--eyebrow-weight': '600',
+      // art-direction · gravure: desaturated, ink-tinted, sharp gallery frames, portrait crops
+      '--photo-filter': 'saturate(.58) contrast(1.06)', '--photo-tint': '.12', '--photo-tint-blend': 'multiply',
+      '--photo-radius': '0px', '--crop-hero-split': '4/5', '--crop-hero-wide': '21/9', '--crop-split': '4/5',
+      '--hero-tint-mix': '20%',
     },
     tone: 'measured, authoritative, refined — full sentences, zero hype',
   },
@@ -47,6 +52,10 @@ const T: Record<ThemeName, Theme> = {
       '--section-y': 'clamp(52px,8vw,108px)', '--radius': '14px', '--btn-radius': '999px',
       '--border-w': '1px', '--container': '1140px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.1em', '--eyebrow-weight': '700',
+      // art-direction · clean: true colour, crisp, softly rounded, wide product-led crops
+      '--photo-filter': 'saturate(1.05) contrast(1.04)', '--photo-tint': '.08', '--photo-tint-blend': 'multiply',
+      '--photo-radius': '16px', '--crop-hero-split': '16/11', '--crop-hero-wide': '2.2/1', '--crop-split': '3/2',
+      '--hero-tint-mix': '28%',
     },
     tone: 'crisp, confident, product-led — short, concrete lines',
   },
@@ -60,6 +69,10 @@ const T: Record<ThemeName, Theme> = {
       '--section-y': 'clamp(56px,8vw,104px)', '--radius': '22px', '--btn-radius': '10px',
       '--border-w': '1px', '--container': '1120px',
       '--eyebrow-transform': 'none', '--eyebrow-tracking': '.02em', '--eyebrow-weight': '600',
+      // art-direction · golden: sun-warmed grade, soft-light brand cast, generous corners, cosy crops
+      '--photo-filter': 'sepia(.16) saturate(1.14) brightness(1.03)', '--photo-tint': '.22', '--photo-tint-blend': 'soft-light',
+      '--photo-radius': '26px', '--crop-hero-split': '5/4', '--crop-hero-wide': '16/7', '--crop-split': '4/3',
+      '--hero-tint-mix': '34%',
     },
     tone: 'warm, inviting, human — sensory and welcoming',
   },
@@ -74,6 +87,10 @@ const T: Record<ThemeName, Theme> = {
       '--btn-weight': '800',
       '--border-w': '2px', '--container': '1180px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.14em', '--eyebrow-weight': '700',
+      // art-direction · punch: deep blacks, saturated, hard edges, cinematic + square crops
+      '--photo-filter': 'contrast(1.16) saturate(1.2)', '--photo-tint': '.16', '--photo-tint-blend': 'multiply',
+      '--photo-radius': '0px', '--crop-hero-split': '4/5', '--crop-hero-wide': '2.4/1', '--crop-split': '1/1',
+      '--hero-tint-mix': '44%',
     },
     tone: 'punchy, high-energy, declarative — short, bold statements',
   },
@@ -90,6 +107,10 @@ const T: Record<ThemeName, Theme> = {
       '--btn-hover-bg': 'var(--primary)', '--btn-hover-color': 'var(--on-primary)',
       '--border-w': '1px', '--container': '1000px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.18em', '--eyebrow-weight': '500',
+      // art-direction · mono: full grayscale, no tint, near-sharp corners, portrait crops
+      '--photo-filter': 'grayscale(1) contrast(1.05)', '--photo-tint': '0', '--photo-tint-blend': 'multiply',
+      '--photo-radius': '2px', '--crop-hero-split': '4/5', '--crop-hero-wide': '3/1', '--crop-split': '4/5',
+      '--hero-tint-mix': '0%',
     },
     tone: 'spare, calm, understated — few words, lots of restraint',
   },

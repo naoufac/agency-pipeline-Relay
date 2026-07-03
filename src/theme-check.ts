@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { renderPage } from './render.ts';
 import { screenshot, closeBrowser } from './browser.ts';
 import { THEME_NAMES, type ThemeName } from './themes.ts';
+import { DS_CSS } from './components.ts';
 
 const OUT = new URL('../sites/_themecheck/', import.meta.url);
 
@@ -73,10 +74,17 @@ async function shoot(path: string, shot: string, w: number, h: number) {
   return existsSync(shot) ? statSync(shot).size : 0;
 }
 
+// PQ1 · ART-DIRECTION — the full closed-set photo-treatment axis every theme must carry
+const PHOTO_VARS = ['--photo-filter', '--photo-tint', '--photo-tint-blend', '--photo-radius',
+  '--crop-hero-split', '--crop-hero-wide', '--crop-split', '--hero-tint-mix'];
+const cssVar = (html: string, name: string) => html.match(new RegExp(name.replace(/-/g, '\\-') + ':([^;}]+)[;}]'))?.[1]?.trim();
+
 async function main() {
   rmSync(fileURLToPath(OUT), { recursive: true, force: true });
   mkdirSync(fileURLToPath(OUT), { recursive: true });
   let failures = 0;
+  const grades = new Map<string, string>();   // theme -> --photo-filter (must DIFFER across themes)
+  const cropSplit = new Set<string>(); const photoRadius = new Set<string>();
 
   for (const theme of THEME_NAMES) {
     const spec = sampleSpec(theme);
@@ -118,6 +126,13 @@ async function main() {
       if (r < 4.5) problems.push(`btn contrast ${r.toFixed(2)} < 4.5`);
     }
 
+    // 3c. ART-DIRECTION (PQ1): the theme carries the whole photo-treatment axis (grade, tint, crop,
+    // frame) — a missing var silently collapses every site back to raw untreated stock.
+    for (const v of PHOTO_VARS) if (!cssVar(html, v)) problems.push(`art-direction var ${v} missing`);
+    const grade = cssVar(html, '--photo-filter'); if (grade) grades.set(theme, grade);
+    const cs = cssVar(html, '--crop-hero-split'); if (cs) cropSplit.add(cs);
+    const pr = cssVar(html, '--photo-radius'); if (pr) photoRadius.add(pr);
+
     // 4. real renders — non-blank screenshot at desktop AND mobile
     const dShot = fileURLToPath(new URL(`${theme}-desktop.png`, OUT));
     const mShot = fileURLToPath(new URL(`${theme}-mobile.png`, OUT));
@@ -129,6 +144,24 @@ async function main() {
     if (problems.length) { failures++; console.log(`✗ ${theme.padEnd(10)} ${problems.join(' · ')}`); }
     else console.log(`✓ ${theme.padEnd(10)} renders · structure ok · no external assets · AA contrast · desktop ${dSize}b / mobile ${mSize}b`);
   }
+
+  // ART-DIRECTION, cross-theme: five themes = five different photographic voices, applied by DS_CSS.
+  // (No grade may be duplicated — a collapse here is exactly the "one studio look" the panel scored.)
+  const adProblems: string[] = [];
+  if (new Set(grades.values()).size !== THEME_NAMES.length)
+    adProblems.push(`photo grades collapse: ${THEME_NAMES.length} themes share ${new Set(grades.values()).size} --photo-filter values`);
+  if (cropSplit.size < 3) adProblems.push(`crop discipline collapse: only ${cropSplit.size} distinct --crop-hero-split values`);
+  if (photoRadius.size < 3) adProblems.push(`photo framing collapse: only ${photoRadius.size} distinct --photo-radius values`);
+  // DS_CSS must actually APPLY the axis — vars without hooks are decoration
+  if (!/\.hero-bg\{[^}]*filter:var\(--photo-filter/.test(DS_CSS)) adProblems.push('DS_CSS: .hero-bg not graded');
+  if (!/\.hero-overlay\{[^}]*color-mix\(in srgb,var\(--primary\) var\(--hero-tint-mix/.test(DS_CSS)) adProblems.push('DS_CSS: hero overlay not brand-tinted');
+  if (!/\.hero-overlay\{[^}]*rgba\(0,0,0,\.34\)[^}]*rgba\(0,0,0,\.58\)/.test(DS_CSS)) adProblems.push('DS_CSS: hero overlay lost its fixed dark floor (AA)');
+  for (const hook of ['.hero-split .hero-media::after', '.hero-editorial .hero-wide::after', '.split-media::after'])
+    if (!DS_CSS.includes(hook)) adProblems.push(`DS_CSS: tint layer ${hook} missing`);
+  if (!/\.pdp \.split-media img\{filter:none/.test(DS_CSS) || !/\.pdp \.split-media::after\{content:none/.test(DS_CSS))
+    adProblems.push('DS_CSS: product photos must stay true colour (.pdp exemption missing)');
+  if (adProblems.length) { failures++; console.log(`✗ art-direction ${adProblems.join(' · ')}`); }
+  else console.log(`✓ art-direction ${grades.size} distinct grades · ${cropSplit.size} split crops · ${photoRadius.size} frames · tint layers + PDP exemption wired`);
 
   console.log(failures ? `\nFAILED: ${failures}/${THEME_NAMES.length} themes have problems` : `\nOK: all ${THEME_NAMES.length} themes render, pass the gate, and meet AA — output in sites/_themecheck/`);
   await closeBrowser();

@@ -38,8 +38,10 @@ p{margin:0 0 1rem}
 }
 /* hero */
 .hero{position:relative;overflow:hidden}
-.hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
-.hero-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.34),rgba(0,0,0,.58));z-index:1}
+.hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;filter:var(--photo-filter,none)}
+/* ART-DIRECTION (PQ1): the scrim is BRAND-TINTED per theme (--hero-tint-mix mixes --primary into the
+   bottom layer) but the black gradient FLOOR is fixed — white hero text can never lose its AA footing */
+.hero-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.34),rgba(0,0,0,.58)),color-mix(in srgb,var(--primary) var(--hero-tint-mix,0%),transparent);z-index:1}
 .hero .container{position:relative;z-index:2}
 /* on-image = white text; a dark brand-tinted gradient sits UNDER the photo so if the photo ever fails
    to load, the hero is an intentional dark branded panel (white text stays legible) — never a grey void */
@@ -56,11 +58,16 @@ p{margin:0 0 1rem}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,5vw,64px);align-items:center}
 .split.rev .split-media{order:2}
 @media(max-width:760px){.split{grid-template-columns:1fr}.split.rev .split-media{order:0}}
-.split-media img{width:100%;border-radius:var(--radius);aspect-ratio:4/3;object-fit:cover}
+.split-media{position:relative}
+.split-media img{width:100%;border-radius:var(--photo-radius,var(--radius));aspect-ratio:var(--crop-split,4/3);object-fit:cover;filter:var(--photo-filter,none)}
+.split-media::after{content:'';position:absolute;inset:0;background:var(--primary);opacity:var(--photo-tint,0);mix-blend-mode:var(--photo-tint-blend,multiply);border-radius:var(--photo-radius,var(--radius));pointer-events:none}
+/* products stay TRUE COLOUR — art-direction grades editorial imagery, never what's for sale */
+.pdp .split-media img{filter:none;aspect-ratio:4/3;border-radius:var(--radius)}
+.pdp .split-media::after{content:none}
 /* gallery */
 .gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 @media(max-width:760px){.gallery{grid-template-columns:1fr 1fr}}
-.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius)}
+.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--photo-radius,var(--radius));filter:var(--photo-filter,none)}
 /* cta */
 .cta{background:var(--primary);color:var(--on-primary);border-radius:calc(var(--radius) + 6px);padding:clamp(44px,7vw,80px);text-align:center}
 .cta h2{color:var(--on-primary)}.cta p{opacity:.92;max-width:48ch;margin:0 auto 1.6rem}.cta .btn{background:var(--bg);color:var(--text)}
@@ -97,10 +104,13 @@ p{margin:0 0 1rem}
    l-hero-<variant>; nav carries nav-<variant>; l-band alternates section surfaces. Each is
    responsive + uses the contrast-guaranteed palette, so no variant can be illegible or broken.
    ============================================================================ */
-/* HERO · split — copy beside a framed photo (no overlay; text on --bg) */
+/* HERO · split — copy beside a framed photo (no overlay; text on --bg). Crop + frame + grade come
+   from the theme's art-direction axis, so two split heroes on different themes read as different shoots */
 .hero-split .hero-split-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(28px,5vw,72px);align-items:center;padding:clamp(56px,10vw,120px) 0}
 .hero-split .hero-copy .lead{margin:1rem 0 2rem}
-.hero-split .hero-media img{width:100%;aspect-ratio:5/4;object-fit:cover;border-radius:calc(var(--radius) + 6px)}
+.hero-split .hero-media{position:relative}
+.hero-split .hero-media img{width:100%;aspect-ratio:var(--crop-hero-split,5/4);object-fit:cover;border-radius:var(--photo-radius,calc(var(--radius) + 6px));filter:var(--photo-filter,none)}
+.hero-split .hero-media::after{content:'';position:absolute;inset:0;background:var(--primary);opacity:var(--photo-tint,0);mix-blend-mode:var(--photo-tint-blend,multiply);border-radius:var(--photo-radius,calc(var(--radius) + 6px));pointer-events:none}
 @media(max-width:840px){.hero-split .hero-split-grid{grid-template-columns:1fr;gap:32px;padding:clamp(48px,12vw,80px) 0}.hero-split .hero-media{order:-1}}
 /* HERO · center — centered statement, no photo */
 .hero-center{text-align:center}
@@ -111,8 +121,9 @@ p{margin:0 0 1rem}
 .hero-editorial{padding:clamp(48px,8vw,96px) 0 0}
 .hero-editorial .hero-head{max-width:var(--container)}
 .hero-editorial .hero-head h1{font-size:clamp(2.8rem,9vw,6.2rem);margin:.2em 0 .5em}
-.hero-editorial .hero-wide{margin:clamp(24px,4vw,48px) 0}
-.hero-editorial .hero-wide img{width:100%;aspect-ratio:21/9;object-fit:cover;border-radius:var(--radius)}
+.hero-editorial .hero-wide{margin:clamp(24px,4vw,48px) 0;position:relative}
+.hero-editorial .hero-wide img{width:100%;aspect-ratio:var(--crop-hero-wide,21/9);object-fit:cover;border-radius:var(--photo-radius,var(--radius));filter:var(--photo-filter,none)}
+.hero-editorial .hero-wide::after{content:'';position:absolute;inset:0;background:var(--primary);opacity:var(--photo-tint,0);mix-blend-mode:var(--photo-tint-blend,multiply);border-radius:var(--photo-radius,var(--radius));pointer-events:none}
 .hero-editorial .hero-foot{max-width:620px}
 .hero-editorial .hero-foot .lead{margin:0 0 1.6rem}
 /* NAV · centered — brand stacked above centered links */
