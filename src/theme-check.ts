@@ -105,6 +105,19 @@ async function main() {
     if (!bg || !text) problems.push('palette vars not found');
     else { const ratio = contrast(text, bg); if (ratio < 4.5) problems.push(`text/bg contrast ${ratio.toFixed(2)} < 4.5`); }
 
+    // 3b. WCAG AA on the button text/background pair (AA 4.5).
+    // Ghost (minimal): text is --primary on --bg. Filled: text is --on-primary on --primary.
+    const primary = html.match(/--primary:(#[0-9a-fA-F]{3,8})/)?.[1];
+    const onPrimary = html.match(/--on-primary:(#[0-9a-fA-F]{3,8})/)?.[1];
+    if (!primary || !onPrimary) { problems.push('btn palette vars not found'); }
+    else if (theme === 'minimal') {
+      if (!bg) problems.push('ghost btn: --bg not found');
+      else { const r = contrast(primary, bg); if (r < 4.5) problems.push(`ghost btn contrast ${r.toFixed(2)} < 4.5`); }
+    } else {
+      const r = contrast(onPrimary, primary);
+      if (r < 4.5) problems.push(`btn contrast ${r.toFixed(2)} < 4.5`);
+    }
+
     // 4. real renders — non-blank screenshot at desktop AND mobile
     const dShot = fileURLToPath(new URL(`${theme}-desktop.png`, OUT));
     const mShot = fileURLToPath(new URL(`${theme}-mobile.png`, OUT));

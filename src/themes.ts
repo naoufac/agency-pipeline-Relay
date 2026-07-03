@@ -30,39 +30,40 @@ const T: Record<ThemeName, Theme> = {
       '--h1': 'clamp(2.7rem,6.5vw,5rem)', '--h2': 'clamp(1.9rem,4.2vw,3rem)', '--h3': '1.3rem',
       '--display-weight': '420', '--display-tracking': '-.012em', '--display-leading': '1.05',
       '--body-size': '1.06rem', '--body-leading': '1.7',
-      '--section-y': 'clamp(64px,9vw,130px)', '--radius': '4px', '--btn-radius': '4px',
+      '--section-y': 'clamp(64px,9vw,130px)', '--radius': '4px', '--btn-radius': '0',
+      '--btn-border': '1px solid currentColor',
       '--border-w': '1px', '--container': '1080px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.16em', '--eyebrow-weight': '600',
     },
     tone: 'measured, authoritative, refined — full sentences, zero hype',
   },
-  // SaaS / product / tech — the confident default: geometric sans, medium radius.
+  // SaaS / product / tech — the confident default: geometric sans, pill button, no border.
   modern: {
     fontDisplay: 'Grotesk', fontBody: 'Inter',
     vars: {
       '--h1': 'clamp(2.3rem,6vw,4.2rem)', '--h2': 'clamp(1.7rem,4vw,2.7rem)', '--h3': '1.25rem',
       '--display-weight': '700', '--display-tracking': '-.02em', '--display-leading': '1.08',
       '--body-size': '1rem', '--body-leading': '1.6',
-      '--section-y': 'clamp(52px,8vw,108px)', '--radius': '14px', '--btn-radius': '14px',
+      '--section-y': 'clamp(52px,8vw,108px)', '--radius': '14px', '--btn-radius': '999px',
       '--border-w': '1px', '--container': '1140px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.1em', '--eyebrow-weight': '700',
     },
     tone: 'crisp, confident, product-led — short, concrete lines',
   },
-  // Bakery / cafe / wellness / craft — soft serif, rounded corners, pill buttons, cosy spacing.
+  // Bakery / cafe / wellness / craft — soft serif, soft-rectangle button (not pill), cosy spacing.
   warm: {
     fontDisplay: 'Fraunces', fontBody: 'Inter',
     vars: {
       '--h1': 'clamp(2.2rem,5.6vw,3.9rem)', '--h2': 'clamp(1.7rem,4vw,2.6rem)', '--h3': '1.25rem',
       '--display-weight': '500', '--display-tracking': '-.004em', '--display-leading': '1.12',
       '--body-size': '1.04rem', '--body-leading': '1.72',
-      '--section-y': 'clamp(56px,8vw,104px)', '--radius': '22px', '--btn-radius': '999px',
+      '--section-y': 'clamp(56px,8vw,104px)', '--radius': '22px', '--btn-radius': '10px',
       '--border-w': '1px', '--container': '1120px',
       '--eyebrow-transform': 'none', '--eyebrow-tracking': '.02em', '--eyebrow-weight': '600',
     },
     tone: 'warm, inviting, human — sensory and welcoming',
   },
-  // Agency / fitness / events / fashion — oversized type, tight tracking, pill buttons, centred hero.
+  // Agency / fitness / events / fashion — oversized type, tight tracking, pill buttons, heavy weight.
   bold: {
     fontDisplay: 'Grotesk', fontBody: 'Inter',
     vars: {
@@ -70,12 +71,13 @@ const T: Record<ThemeName, Theme> = {
       '--display-weight': '700', '--display-tracking': '-.035em', '--display-leading': '.98',
       '--body-size': '1.05rem', '--body-leading': '1.6',
       '--section-y': 'clamp(60px,9vw,124px)', '--radius': '4px', '--btn-radius': '999px',
+      '--btn-weight': '800',
       '--border-w': '2px', '--container': '1180px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.14em', '--eyebrow-weight': '700',
     },
     tone: 'punchy, high-energy, declarative — short, bold statements',
   },
-  // Portfolio / photography / design studio — single typeface, small scale, maximum air.
+  // Portfolio / photography / design studio — single typeface, small scale, maximum air, ghost button.
   minimal: {
     fontDisplay: 'Inter', fontBody: 'Inter',
     vars: {
@@ -83,6 +85,9 @@ const T: Record<ThemeName, Theme> = {
       '--display-weight': '600', '--display-tracking': '-.02em', '--display-leading': '1.1',
       '--body-size': '1rem', '--body-leading': '1.7',
       '--section-y': 'clamp(72px,10vw,150px)', '--radius': '6px', '--btn-radius': '6px',
+      '--btn-bg': 'transparent', '--btn-color': 'var(--primary)',
+      '--btn-border': '1.5px solid var(--primary)',
+      '--btn-hover-bg': 'var(--primary)', '--btn-hover-color': 'var(--on-primary)',
       '--border-w': '1px', '--container': '1000px',
       '--eyebrow-transform': 'uppercase', '--eyebrow-tracking': '.18em', '--eyebrow-weight': '500',
     },

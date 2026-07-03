@@ -18,8 +18,8 @@ p{margin:0 0 1rem}
 .section{padding:var(--section-y,clamp(52px,8vw,108px)) 0}
 .eyebrow{display:inline-block;font-size:.78rem;font-weight:var(--eyebrow-weight,700);letter-spacing:var(--eyebrow-tracking,.1em);text-transform:var(--eyebrow-transform,uppercase);color:var(--accent);margin-bottom:1rem}
 .muted{color:var(--muted)}.lead{font-size:1.18rem;max-width:56ch}
-.btn{display:inline-flex;align-items:center;gap:.5rem;background:var(--primary);color:var(--on-primary);font-weight:600;padding:.85rem 1.6rem;border-radius:var(--btn-radius,var(--radius));text-decoration:none;border:0;cursor:pointer;transition:filter .15s;font-family:inherit;font-size:1rem}
-.btn:hover{filter:brightness(1.07)}
+.btn{display:inline-flex;align-items:center;gap:.5rem;background:var(--btn-bg,var(--primary));color:var(--btn-color,var(--on-primary));font-weight:var(--btn-weight,600);padding:.85rem 1.6rem;border-radius:var(--btn-radius,var(--radius));text-decoration:none;border:var(--btn-border,0);cursor:pointer;transition:filter .15s,background .15s,color .15s;font-family:inherit;font-size:1rem}
+.btn:hover{filter:brightness(1.07);background:var(--btn-hover-bg,var(--btn-bg,var(--primary)));color:var(--btn-hover-color,var(--btn-color,var(--on-primary)))}
 /* nav — CSS-only hamburger via checkbox */
 .nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(10px);border-bottom:var(--border-w,1px) solid var(--line)}
 .nav-inner{display:flex;align-items:center;gap:20px;max-width:var(--container,1140px);margin:0 auto;padding:14px 24px;position:relative}
@@ -27,7 +27,7 @@ p{margin:0 0 1rem}
 .nav-links{display:flex;align-items:center;gap:4px;margin-left:auto;list-style:none;padding:0;margin-top:0;margin-bottom:0}
 .nav-links a{text-decoration:none;color:var(--muted);font-weight:500;font-size:.95rem;padding:.45rem .75rem;border-radius:8px}
 .nav-links a:hover,.nav-links a[aria-current]{color:var(--text);background:color-mix(in srgb,var(--text) 7%,transparent)}
-.nav-links .btn{color:var(--on-primary);margin-left:6px}
+.nav-links .btn{color:var(--btn-color,var(--on-primary));margin-left:6px}
 .nav-toggle{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .nav-burger{display:none;margin-left:auto;font-size:1.7rem;line-height:1;cursor:pointer;user-select:none;padding:.1rem .4rem;color:var(--text)}
 @media(max-width:760px){
