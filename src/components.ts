@@ -250,7 +250,7 @@ export function footer(brand: string, pages: any[], accountLinks = false, locale
   // every page (rendered unconditionally per site), so the consistency gates hold by construction.
   const extras = accountLinks ? `<a href="find.html">${esc(L(locale, 'find_my_booking'))}</a><a href="account.html">${esc(L(locale, 'my_bookings'))}</a>` : '';
   // CHAIN: every produced site opens its own production record — the magic, visible.
-  const chain = `<a href="how-it-was-built.html">How this site was built</a>`;
+  const chain = `<a href="how-it-was-built.html">${esc(L(locale, 'chain_link'))}</a>`;
   return `<footer class="footer"><div class="container"><div class="footer-inner">
   <span>© ${esc(brand)}</span><div class="footer-links">${pages.map(p => `<a href="${esc(p.slug)}.html">${esc(p.title)}</a>`).join('')}${extras}${chain}</div>
 </div></div></footer>`;
@@ -387,7 +387,8 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   // CHAIN · "How it was built" — the production record, rendered from CURATED data only (the
   // caller in cms/live.ts whitelists every value; nothing free-form from the pipeline reaches this
   // page). SYSTEM-ONLY: deliberately NOT in spec KNOWN — a composed model can never emit it.
-  chain: (s) => {
+  chain: (s, o) => {
+    const T = (k: string, a?: Record<string, string | number>) => esc(L(o?.locale, k, a));
     const d = (s && typeof s === 'object') ? s : {} as any;
     const scope = d.scope || null; const bp = d.blueprint || {}; const run = d.run || {};
     const tables: any[] = Array.isArray(d.tables) ? d.tables : [];
@@ -396,53 +397,52 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const stat = (v: any, l: string) => `<div class="stat"><div class="stat-n">${esc(String(v))}</div><div class="muted">${esc(l)}</div></div>`;
     const wall = Number(run.wallSecs) > 0 ? (run.wallSecs >= 90 ? Math.round(run.wallSecs / 60) + ' min' : run.wallSecs + ' s') : '—';
     return `<header class="hero"><div class="container"><div class="hero-inner">
-      <span class="eyebrow">Production record</span>
-      <h1>How this site was built</h1>
-      <p class="lead">From one written brief to the live product — by an automated production line.
-      Every line below is read from the production database at this very moment; nothing here is written by hand.</p>
+      <span class="eyebrow">${T('chain_eyebrow')}</span>
+      <h1>${T('chain_link')}</h1>
+      <p class="lead">${T('chain_lead')}</p>
     </div></div></header>
     <section class="section"><div class="container">
-      <h2>The brief</h2><p class="lead muted">The client's words, verbatim — this is all the agency was given.</p>
+      <h2>${T('chain_brief_h')}</h2><p class="lead muted">${T('chain_brief_lead')}</p>
       <blockquote class="chain-quote">“${esc(String(d.brief || ''))}”</blockquote>
     </div></section>
     ${scope ? `<section class="section"><div class="container">
-      <h2>The promise</h2>
-      <p class="lead muted">Scoped before building: complexity ${esc(String(scope.difficulty))}/5.</p>
+      <h2>${T('chain_promise_h')}</h2>
+      <p class="lead muted">${T('chain_promise_lead', { n: String(scope.difficulty) })}</p>
       <div class="grid grid-3" style="margin-top:2rem">${(scope.includes || []).map((i: any) => `<div class="card"><h3>${esc(humanize(String(i.name)))}</h3><p>${esc(String(i.promise))}</p></div>`).join('')}</div>
-      ${(scope.excludes || []).length ? `<h3 style="margin-top:2.4rem">Declared out of scope — with the honest alternative</h3>
+      ${(scope.excludes || []).length ? `<h3 style="margin-top:2.4rem">${T('chain_excludes_h')}</h3>
       <div class="grid grid-3" style="margin-top:1.2rem">${scope.excludes.map((x: any) => `<div class="card"><h3>${esc(String(x.ask))}</h3><p>${esc(String(x.alternative))}</p></div>`).join('')}</div>` : ''}
     </div></section>` : ''}
     <section class="section"><div class="container">
-      <h2>The blueprint</h2>
+      <h2>${T('chain_blueprint_h')}</h2>
       <ul class="receipt-meta" style="max-width:640px">
-        <li><b>Kind:</b> ${esc(String(bp.kind || 'a presentation site'))}</li>
-        <li><b>Design language:</b> ${esc(String(bp.theme || ''))}${bp.tone ? ' — ' + esc(String(bp.tone)) : ''}</li>
-        ${bp.hero ? `<li><b>Opening treatment:</b> ${esc(String(bp.hero))} hero · ${esc(String(bp.nav || 'standard'))} navigation</li>` : ''}
-        ${bp.bg && bp.primary ? `<li><b>Identity:</b> <span class="chain-chip"><i style="background:${esc(String(bp.bg))}"></i>${esc(String(bp.bg))}</span><span class="chain-chip"><i style="background:${esc(String(bp.primary))}"></i>${esc(String(bp.primary))}</span></li>` : ''}
+        <li><b>${T('chain_kind')}</b> ${esc(String(bp.kind || L(o?.locale, 'chain_kind_default')))}</li>
+        <li><b>${T('chain_design')}</b> ${esc(String(bp.theme || ''))}${bp.tone ? ' — ' + esc(String(bp.tone)) : ''}</li>
+        ${bp.hero ? `<li><b>${T('chain_opening')}</b> ${T('chain_opening_v', { h: String(bp.hero), n: String(bp.nav || 'standard') })}</li>` : ''}
+        ${bp.bg && bp.primary ? `<li><b>${T('chain_identity')}</b> <span class="chain-chip"><i style="background:${esc(String(bp.bg))}"></i>${esc(String(bp.bg))}</span><span class="chain-chip"><i style="background:${esc(String(bp.primary))}"></i>${esc(String(bp.primary))}</span></li>` : ''}
       </ul>
     </div></section>
     ${tables.length ? `<section class="section"><div class="container">
-      <h2>The database</h2><p class="lead muted">Real tables, provisioned and verified for this product alone.</p>
-      <div class="grid grid-3" style="margin-top:2rem">${tables.map((t: any) => `<div class="card"><h3>${esc(humanize(String(t.name)))}</h3><p>${t.isPrivate ? 'Private visitor records — sealed from public view' : esc(String(t.rows)) + ' record' + (Number(t.rows) === 1 ? '' : 's') + ', publicly presented'}</p></div>`).join('')}</div>
+      <h2>${T('chain_db_h')}</h2><p class="lead muted">${T('chain_db_lead')}</p>
+      <div class="grid grid-3" style="margin-top:2rem">${tables.map((t: any) => `<div class="card"><h3>${esc(humanize(String(t.name)))}</h3><p>${t.isPrivate ? T('chain_private_row') : T(Number(t.rows) === 1 ? 'chain_record_one' : 'chain_record_many', { n: String(t.rows) })}</p></div>`).join('')}</div>
     </div></section>` : ''}
     <section class="section"><div class="container">
-      <h2>The production run</h2>
+      <h2>${T('chain_run_h')}</h2>
       <div class="grid grid-3 stats" style="margin-top:2rem">
-        ${stat(run.total ?? '—', 'production tasks')}${stat(wall, 'wall time')}${stat(run.rebuilds ? run.rebuilds : 'none', 'rebuild rounds')}
+        ${stat(run.total ?? '—', L(o?.locale, 'chain_stat_tasks'))}${stat(wall, L(o?.locale, 'chain_stat_wall'))}${stat(run.rebuilds ? run.rebuilds : L(o?.locale, 'chain_none'), L(o?.locale, 'chain_stat_rebuilds'))}
       </div>
-      ${Number(run.repairs) > 0 ? `<p class="muted" style="margin-top:1.6rem">${esc(String(run.repairs))} automatic repair${Number(run.repairs) === 1 ? '' : 's'} were applied during planning — the system corrects its own drafts and says so.</p>` : ''}
+      ${Number(run.repairs) > 0 ? `<p class="muted" style="margin-top:1.6rem">${T(Number(run.repairs) === 1 ? 'chain_repairs_one' : 'chain_repairs_many', { n: String(run.repairs) })}</p>` : ''}
     </div></section>
     <section class="section"><div class="container">
-      <h2>The checks it passed</h2>
-      <p class="lead muted">Deterministic gates — machine-verified, never an opinion.</p>
+      <h2>${T('chain_checks_h')}</h2>
+      <p class="lead muted">${T('chain_checks_lead')}</p>
       <ul class="chain-check">${checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
-      ${rev ? `<p style="margin-top:1.6rem"><span class="chain-pill${rev.passed ? ' pass' : ''}">${rev.passed ? '✓ Independent review: PASSED' : 'Independent review: ' + esc(String(rev.issues)) + ' finding(s) open'}</span></p>
-      <p class="muted" style="margin-top:.8rem">A real browser walked every page${rev.probed ? ', performed the core action end to end,' : ''} and judged the result before this site was accepted.</p>` : ''}
+      ${rev ? `<p style="margin-top:1.6rem"><span class="chain-pill${rev.passed ? ' pass' : ''}">${rev.passed ? T('chain_review_pass') : T('chain_review_open', { n: String(rev.issues) })}</span></p>
+      <p class="muted" style="margin-top:.8rem">${T('chain_browser', { p: rev.probed ? L(o?.locale, 'chain_browser_probe') : '' })}</p>` : ''}
     </div></section>
     ${d.android && d.android.url ? `<section class="section"><div class="container">
-      <h2>It is also an Android app</h2>
-      <p class="lead muted">The same product, packaged and signed as a real Android application. Scan with a phone — Android verifies this site's own domain and opens it fullscreen, no browser bar.</p>
-      <div class="chain-android">${d.android.qr || ''}<div><a class="btn" href="${esc(String(d.android.url))}">Download the app (.apk)</a></div></div>
+      <h2>${T('chain_android_h')}</h2>
+      <p class="lead muted">${T('chain_android_lead')}</p>
+      <div class="chain-android">${d.android.qr || ''}<div><a class="btn" href="${esc(String(d.android.url))}">${T('chain_android_btn')}</a></div></div>
     </div></section>` : ''}`;
   },
   // BLOG · article — ONE post's own page, rendered live from its row (the PDP pattern for content).

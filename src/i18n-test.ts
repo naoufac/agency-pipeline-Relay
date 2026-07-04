@@ -49,7 +49,7 @@ ok('client dict is Italian (the browser runtime speaks it too)', it.includes('"a
 ok('footer standing links are Italian', it.includes('>Trova la mia prenotazione</a>') || !it.includes('find.html'));
 // leak canary: NO English chrome may survive on a non-English site
 {
-  const LEAKS = ['Add to cart', 'Your cart is empty', 'Place order', 'Full name', 'Proceed to checkout', 'Find my booking', 'Search this list', "How you'll pay"];
+  const LEAKS = ['Add to cart', 'Your cart is empty', 'Place order', 'Full name', 'Proceed to checkout', 'Find my booking', 'Search this list', "How you'll pay", 'How this site was built', 'Production record'];
   const leaked = LEAKS.filter((l) => it.includes(l));
   ok('leak canary: zero English chrome on an Italian site', leaked.length === 0, leaked.join(' | '));
 }
@@ -57,6 +57,22 @@ ok('footer standing links are Italian', it.includes('>Trova la mia prenotazione<
 const en = renderPage(SPEC, CTX as any);
 ok('no locale → English chrome, unchanged', en.includes('<html lang="en">') && en.includes('Full name') && en.includes('Place order') && en.includes('"add_to_cart":"Add to cart"'));
 ok('bogus locale → English (closed set enforced at render)', renderPage(SPEC, { ...CTX, locale: 'xx' } as any).includes('<html lang="en">'));
+
+// ---- THE CHAIN performs in the site's language ----
+{
+  const { SECTIONS } = await import('./components.ts');
+  const data = { brief: 'una trattoria', scope: { difficulty: 2, includes: [{ name: 'booking', promise: 'prenotazioni online' }], excludes: [] },
+    blueprint: { kind: 'x', theme: 'warm' }, tables: [{ name: 'reservations', isPrivate: true }, { name: 'dishes', rows: 8 }],
+    run: { total: 12, wallSecs: 300, repairs: 2, rebuilds: 0 }, checks: ['privacy'], review: { passed: true, issues: 0, probed: true },
+    android: { url: 'https://x.naples.agency/app.apk', qr: '<svg/>' } };
+  const itChain = SECTIONS.chain(data, { locale: 'it' } as any);
+  ok('chain: Italian headings throughout', itChain.includes('Registro di produzione') && itChain.includes('Il brief') && itChain.includes('La promessa') && itChain.includes('I controlli superati'));
+  ok('chain: Italian dynamic lines (records, repairs, review, android)', itChain.includes('8 voci, presentate pubblicamente') && itChain.includes('2 riparazioni automatiche') && itChain.includes('SUPERATA') && itChain.includes('È anche un’app Android'));
+  const enLeaks = ['Production record', 'The brief', 'The promise', 'records, publicly presented', 'Independent review', 'It is also an Android app'].filter((l) => itChain.includes(l));
+  ok('chain: zero English on the Italian production record', enLeaks.length === 0, enLeaks.join(' | '));
+  const enChain = SECTIONS.chain(data, {} as any);
+  ok('chain: English byte-compatible by default', enChain.includes('Production record') && enChain.includes('8 records, publicly presented') && enChain.includes('✓ Independent review: PASSED') && enChain.includes('It is also an Android app'));
+}
 
 // ---- currency: a build property; English stays $, the euro-zone locales get € ----
 ok('currency: en → $, it/fr/es/de → €', curSym('en') === '$' && curSym('it') === '€' && curSym('de') === '€' && currencyFor('fr') === 'EUR' && currencyFor(undefined) === 'USD');

@@ -868,3 +868,15 @@ APKs in 24h, client activity (PRIVATE tables only — seed hygiene guarantees ev
 row was written by a real visitor), canary verdict (incl. '⏭ skipped (quota)'), vault age,
 watchdog surfaces, disk, quota stalls. Every number from the database, never an agent's
 word. Gated in backup:check (11).
+
+## 2026-07-04 — THE CHAIN SPEAKS THE CLIENT'S LANGUAGE
+
+The owner calls the how-it-was-built page "the magic" — but on every Italian site it
+performed in English, and the footer link ("How this site was built") was an actual chrome
+leak on every page the leak canary had missed. 36 chain_* keys × 5 locales: headings,
+leads, the KIND descriptions, verify-gate wordings, dynamic lines (N records publicly
+presented / N automatic repairs / review PASSED / the Android section), the footer link,
+the page title. English stays byte-compatible (chain-check + apk-check untouched); the
+leak canary now includes the chain strings. Proven: the Italian production record renders
+"Registro di produzione · Il brief · La promessa · I controlli superati · È anche un'app
+Android" with zero English residue.

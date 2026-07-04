@@ -141,14 +141,14 @@ export async function renderLiveFind(pool: pg.Pool, projectId: string): Promise<
 // "the magic is the chain"). Served live for ANY finished project — old sites included — with the
 // site's own chrome. Everything rendered is CURATED here from a closed whitelist: names, counts,
 // verdicts and the brief. Never task outputs, never event detail text, never emails or tokens.
-const VERIFY_WORDS: Record<string, string> = {
-  render: 'every page renders correctly, desktop and mobile',
-  site_renders: 'every page renders correctly, desktop and mobile',
-  sql_applies: 'the database schema applies cleanly to a real PostgreSQL',
-  site_consistent: 'one brand, one navigation — identical on every page',
-  served_from_cms: 'pages are served from the CMS, not from stale copies',
-  json_valid: 'every structured hand-off parsed and validated',
-  none: '',
+// verify → i18n key (the chain page renders these in the SITE's language)
+const VERIFY_KEYS: Record<string, string> = {
+  render: 'chain_v_render',
+  site_renders: 'chain_v_render',
+  sql_applies: 'chain_v_sql',
+  site_consistent: 'chain_v_consistent',
+  served_from_cms: 'chain_v_cms',
+  json_valid: 'chain_v_json',
 };
 export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise<string | null> {
   const pr = (await pool.query('select brief, created_at, params from projects where id=$1', [projectId])).rows[0];
@@ -172,9 +172,9 @@ export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise
 
   const archetype = String(params.archetype || 'site');
   const KIND: Record<string, string> = {
-    app: 'a real application — its own database, forms compiled from the schema, receipts and accounts',
-    store: 'a real store — live catalog, cart, server-priced checkout',
-    site: 'a presentation site — every page verified',
+    app: L(params.locale, 'chain_kind_app'),
+    store: L(params.locale, 'chain_kind_store'),
+    site: L(params.locale, 'chain_kind_site'),
   };
   let tables: { name: string; rows: number; isPrivate: boolean }[] = [];
   if (archetype === 'app' || archetype === 'store') {
@@ -184,10 +184,10 @@ export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise
         .map((t: any) => ({ name: t.table, rows: Number(t.rows) || 0, isPrivate: PRIVATE_READ.test(t.table) }));
     } catch { /* schema may be gone on legacy projects — the page stands without it */ }
   }
-  const checks = [...new Set(((tk.verifies || []) as any[]).map((v) => VERIFY_WORDS[String(v)] ?? '').filter(Boolean))];
-  checks.push('privacy: visitor records are never publicly listable');
-  if (archetype === 'store') checks.push('a real browser BOUGHT from this store before it shipped (order + line items verified in the database)');
-  if (archetype === 'app') checks.push('a real browser performed the core action and followed its receipt before this site shipped');
+  const checks = [...new Set(((tk.verifies || []) as any[]).map((v) => VERIFY_KEYS[String(v)] ? L(params.locale, VERIFY_KEYS[String(v)]) : '').filter(Boolean))];
+  checks.push(L(params.locale, 'chain_check_privacy'));
+  if (archetype === 'store') checks.push(L(params.locale, 'chain_check_store'));
+  if (archetype === 'app') checks.push(L(params.locale, 'chain_check_app'));
 
   const scope = params.scope && Array.isArray(params.scope.includes) ? {
     difficulty: Number(params.scope.difficulty) || 1,
@@ -224,7 +224,7 @@ export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise
     })(),
   }];
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections };
-  const html = renderPage(spec, { pages: navPages, slug: 'how-it-was-built', title: 'How this site was built', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale });
+  const html = renderPage(spec, { pages: navPages, slug: 'how-it-was-built', title: L(params.locale, 'chain_link'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale });
   return `<!--relay:cms=directus LIVE chain (the production record, rendered from the pipeline's own database)-->\n` + html;
 }
 
