@@ -102,6 +102,7 @@ ok('apkStatus: no artifact → apk:false, no url invented', await (async () => {
   const canary = readFileSync(new URL('./canary.ts', import.meta.url), 'utf8');
   ok('canary: asserts apk_built + serves /app.apk on the subdomain', canary.includes("type='apk_built'") && canary.includes("path: '/app.apk'"));
   ok('canary: sweeps old packaging workdirs', canary.includes('/root/apk-builds/'));
+  ok('canary: iteration leg — rebuild via the public API, data-survival + identity + re-review', canary.includes('/api/rebuild') && canary.includes('appRowCount') && canary.includes('data LOST') && canary.includes('identity changed'));
 }
 
 // ---- serving: the pieces the phone actually touches ----

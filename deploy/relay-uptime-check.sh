@@ -1,16 +1,41 @@
 #!/usr/bin/env bash
-# Ping Relay; Telegram-alert on transition up<->down (flap-dampened via state file).
+# Relay uptime watchdog v2 — every SERVING SURFACE, not just the board.
+# The board and the client sites ride DIFFERENT tunnels (relay vs the wildcard on anouf-chat):
+# v1 only pinged the board, so every client subdomain could go dark while the monitor stayed
+# green. v2 probes each surface with its own flap-dampened state; alerts name the surface.
+# Cron: */5 * * * * /usr/local/bin/relay-uptime-check.sh
 set -uo pipefail
 [ -f /root/.relay-monitor.env ] && . /root/.relay-monitor.env
-URL="https://board.naples.agency/healthz"
-STATE=/tmp/relay-uptime.state
 api="https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
-code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 "$URL" 2>/dev/null || echo 000)
-prev=$(cat "$STATE" 2>/dev/null || echo up)
-if [ "$code" = "200" ]; then
-  [ "$prev" = "down" ] && curl -s -F chat_id="$TG_CHAT_ID" -F text="✅ Relay RECOVERED — board.naples.agency is back (200)." "$api" >/dev/null
-  echo up > "$STATE"
-else
-  [ "$prev" = "up" ] && curl -s -F chat_id="$TG_CHAT_ID" -F text="🔴 Relay DOWN — board.naples.agency returned ${code}. systemd should auto-restart relay.service / the tunnel; check if it doesn't recover." "$api" >/dev/null
-  echo down > "$STATE"
-fi
+
+# name | url | mode  (200 = must be exactly 200 · up = anything but 5xx/tunnel-dead/000)
+# the sites probe MUST be a PERMANENT project — canary-built sites are swept nightly by design
+CHECKS="
+board|https://board.naples.agency/healthz|200
+sites|https://nenna.naples.agency/|200
+cms|https://cms.naples.agency/server/health|up
+"
+
+alert() { curl -s -F chat_id="${TG_CHAT_ID}" -F text="$1" "$api" >/dev/null; }
+
+echo "$CHECKS" | while IFS='|' read -r name url mode; do
+  [ -z "$name" ] && continue
+  STATE="/tmp/relay-uptime-${name}.state"
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 "$url" 2>/dev/null || echo 000)
+  case "$mode" in
+    200) [ "$code" = "200" ] && now=up || now=down ;;
+    *)   case "$code" in 000|5??) now=down ;; *) now=up ;; esac ;;
+  esac
+  prev=$(cat "$STATE" 2>/dev/null || echo up)
+  if [ "$now" = "up" ] && [ "$prev" = "down" ]; then
+    alert "✅ Relay RECOVERED — surface '${name}' (${url}) is back (${code})."
+  elif [ "$now" = "down" ] && [ "$prev" = "up" ]; then
+    case "$name" in
+      sites) hint="the WILDCARD tunnel (anouf-named-tunnel.service) or relay.service — client sites + APK downloads are dark" ;;
+      cms)   hint="the Directus container (port 8055)" ;;
+      *)     hint="relay.service / relay-tunnel.service / the database" ;;
+    esac
+    alert "🔴 Relay DOWN — surface '${name}' returned ${code}. Likely: ${hint}."
+  fi
+  echo "$now" > "$STATE"
+done

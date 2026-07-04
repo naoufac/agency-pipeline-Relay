@@ -35,6 +35,15 @@ async function sweepOldCanaries(pool: any, keepId: string) {
   return old.length;
 }
 
+// every row in the project's own app schema — the number that must never go DOWN through a rebuild
+async function appRowCount(pool: any, projectId: string): Promise<number> {
+  const schema = 'app_' + String(projectId).replace(/-/g, '').slice(0, 32);
+  const tables = (await pool.query("select table_name from information_schema.tables where table_schema=$1 and table_type='BASE TABLE'", [schema])).rows;
+  let n = 0;
+  for (const t of tables) n += Number((await pool.query(`select count(*)::int c from "${schema}"."${t.table_name}"`)).rows[0].c);
+  return n;
+}
+
 async function main() {
   const pool = makePool();
   const day = Math.floor(Date.now() / 86_400_000);
@@ -93,6 +102,37 @@ async function main() {
               rq.on('error', rej); rq.end();
             });
             if (apk.status !== 200 || apk.len < 100_000) throw new Error(`auto-APK not served: /app.apk → ${apk.status} (${apk.len}B)`);
+          }
+          // M3 · ITERATION LEG: the flagship promise — "your data survives the rebuild" —
+          // proven zero-touch. Rebuild the SAME project through the public API with an amended
+          // brief; assert identity kept, not one row lost, and the review passes AGAIN.
+          if (process.env.CANARY_ITERATE !== '0') {
+            const rowsBefore = await appRowCount(pool, id);
+            const reviewsBefore = Number((await pool.query('select count(*)::int n from dogfood_reviews where project_id=$1', [id])).rows[0].n);
+            const rb: any = await (await fetch(`${BASE}/api/rebuild`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, brief: brief + ' · UPDATE: add a short FAQ section about opening hours' }) })).json();
+            if (rb && rb.error) throw new Error('iteration: rebuild refused — ' + rb.error);
+            console.log(`canary iterating: rebuild of ${id} started (${rowsBefore} rows must survive)`);
+            const iterDeadline = Date.now() + 25 * 60_000;
+            for (;;) {
+              await new Promise(res => setTimeout(res, 30_000));
+              const q = (await pool.query(
+                `select p.status,
+                   (select count(*)::int from dogfood_reviews d where d.project_id=$1) as reviews,
+                   (select d.passed from dogfood_reviews d where d.project_id=$1 order by d.id desc limit 1) as passed,
+                   (select count(*)::int from tasks where project_id=$1 and status in ('ready','running','verifying')) as active
+                 from projects p where p.id=$1`, [id])).rows[0];
+              if (q && q.status === 'done' && Number(q.active) === 0 && Number(q.reviews) > reviewsBefore) {
+                if (q.passed !== true) throw new Error('iteration: the rebuilt site FAILED its review');
+                break;
+              }
+              if (q && q.status === 'blocked') throw new Error('iteration: rebuild blocked');
+              if (Date.now() > iterDeadline) throw new Error('iteration: rebuild timed out (25 min)');
+            }
+            const rowsAfter = await appRowCount(pool, id);
+            if (rowsAfter < rowsBefore) throw new Error(`iteration: data LOST in rebuild — ${rowsBefore} rows before, ${rowsAfter} after`);
+            const slug2 = (await pool.query("select params->>'slug' s from projects where id=$1", [id])).rows[0]?.s;
+            if (slug2 !== slug) throw new Error(`iteration: identity changed — slug ${slug} became ${slug2}`);
+            console.log(`canary iteration OK — data survived (${rowsBefore}→${rowsAfter} rows), identity kept, review re-passed`);
           }
           const swept = await sweepOldCanaries(pool, id);
           console.log(`canary OK — review passed in ${mins} min · ${slug}.naples.agency routed (${swept} old canar${swept === 1 ? 'y' : 'ies'} swept)`);
