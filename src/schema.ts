@@ -92,6 +92,24 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       if (!oi.fields.some(f => snake(f?.name) === 'variant_name')) oi.fields.push({ name: 'variant_name', type: 'text' });
       if (!oi.fields.some(f => snake(f?.name) === 'variant_id')) oi.fields.push({ name: 'variant_id', type: 'int' });
     }
+    // A model may price the VARIANTS and not the products ('scents in three sizes' — a real canary
+    // catch: no products.price → no Add-to-cart → the store cannot sell). The store contract needs
+    // products.price: inject it and BACKFILL each product seed with its cheapest variant's price
+    // (variant seeds reference products by seed position, 1-based). Underivable models are rejected
+    // upstream (normalizeDataModel) with exact feedback.
+    const prods = ents.find(e2 => e2.name === 'products');
+    const va2 = ents.find(e2 => e2.name === 'product_variants');
+    if (prods && va2 && !(prods.fields || []).some(f => /^(price|amount|cost)$/.test(snake(f?.name)))) {
+      prods.fields = prods.fields || [];
+      prods.fields.push({ name: 'price', type: 'money' });
+      const vseeds = va2.seed || [];
+      (prods.seed || []).forEach((row: any, i: number) => {
+        const mine = vseeds.filter((v: any) => Number(v?.product ?? v?.product_id) === i + 1)
+          .map((v: any) => Number(v?.price)).filter((n: number) => Number.isFinite(n) && n > 0);
+        if (mine.length && row && typeof row === 'object') row.price = Math.min(...mine);
+      });
+      warnings.push('products.price injected from the cheapest variant (variants carried the pricing)');
+    }
   }
   // PAYMENTS v1 — every store carries owner-editable PAYMENT INSTRUCTIONS: an injected public
   // payment_options table (rendered at checkout, edited in the Content tab, read live). The LLM

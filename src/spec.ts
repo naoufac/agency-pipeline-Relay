@@ -134,13 +134,33 @@ function slotInventoryErrors(model: any): string[] {
     .map((e: any) => `entity "${e.name}" is a slot-inventory table — do NOT model available times as rows. Put ONE timestamp field on the booking entity itself (e.g. appointment_at, type datetime); the system computes availability from it`);
 }
 
+// PQ2 · a store must be able to SELL every product: each product needs a price of its own OR at
+// least one PRICED variant (compile backfills from the cheapest). A priceless product = a card
+// with no Add-to-cart — a real canary build failed review exactly this way.
+function pricelessProductErrors(model: any): string[] {
+  const sn = (v: any) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const ents: any[] = Array.isArray(model?.entities) ? model.entities : [];
+  const prods = ents.find((e: any) => sn(e?.name) === 'products');
+  const va = ents.find((e: any) => /^(product_)?variants$/.test(sn(e?.name)));
+  if (!prods || (prods.fields || []).some((f: any) => /^(price|amount|cost)$/.test(sn(f?.name)))) return [];
+  // only SELLING shapes need prices — a products showcase (no orders, no variants) is honest without
+  const sellsy = !!va || ents.some((e: any) => sn(e?.name) === 'orders');
+  if (!sellsy) return [];
+  if (!va) return ['entity "products" has no price field — add one (type: money) and price every seed'];
+  const vseeds: any[] = va.seed || [];
+  const bad = (prods.seed || []).map((row: any, i: number) => ({ row, i }))
+    .filter(({ i }) => !vseeds.some((v: any) => Number(v?.product ?? v?.product_id) === i + 1 && Number(v?.price) > 0))
+    .map(({ row, i }) => String(row?.title || row?.name || '#' + (i + 1)));
+  return bad.length ? [`products ${bad.join(', ')} have NO price anywhere — give the product a price field, or give at least one of its variants a price`] : [];
+}
+
 export function normalizeDataModel(raw: string): DataModelResult {
   const repairs: string[] = []; const errors: string[] = [];
   if (!raw) { errors.push('empty database output'); return { ok: false, errors }; }
   // every recovery path funnels here: clamp seeds, then reject unbuildable shapes into retry
   const finish = (m: any): DataModelResult => {
     const model = clampSeedPks(m, repairs);
-    const errs = [...unseededRequiredRefs(model), ...slotInventoryErrors(model)];
+    const errs = [...unseededRequiredRefs(model), ...slotInventoryErrors(model), ...pricelessProductErrors(model)];
     return errs.length ? { ok: false, errors: errs } : { ok: true, model, repairs };
   };
   // first pass: the FIRST complete, balanced JSON object (string-aware; survives fences + a trailing block).

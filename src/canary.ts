@@ -48,6 +48,7 @@ async function main() {
            (select count(*)::int from tasks where project_id=$1 and status in ('ready','running','verifying')) as active
          from projects where id=$1`, [id])).rows[0];
       if (!p) throw new Error('canary project vanished mid-build');
+      // (transient poll/DB errors are tolerated by the catch-continue below — only real verdicts exit)
       const mins = Math.round((Date.now() - t0) / 60_000);
       if (p.status === 'done' && p.passed !== null && Number(p.active) === 0) {
         if (p.passed === true) {
@@ -55,6 +56,7 @@ async function main() {
           console.log(`canary OK — review passed in ${mins} min (${swept} old canar${swept === 1 ? 'y' : 'ies'} swept)`);
           process.exit(0);
         }
+        console.error(`canary FAILED — review did not pass (${mins} min) · ${BOARD}/#/p/${id}/build`);
         await telegramAlert(`🐤🛑 CANARY FAILED — the chain degraded overnight\n\n"${brief}"\nbuilt in ${mins} min but the review did NOT pass\n${BOARD}/#/p/${id}/build`);
         process.exit(1);
       }
@@ -68,6 +70,7 @@ async function main() {
       }
     }
   } catch (e: any) {
+    console.error('canary error:', e?.message ?? e);
     await telegramAlert(`🐤🛑 CANARY CRASHED: ${String(e?.message ?? e).slice(0, 300)}${id ? `\n${BOARD}/#/p/${id}/build` : ''}`);
     process.exit(1);
   }

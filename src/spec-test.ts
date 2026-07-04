@@ -292,6 +292,15 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   const canonical = '{"entities":[{"name":"barbers","fields":[{"name":"full_name","type":"text","required":true}],"seed":[{"full_name":"Marcus"}]},{"name":"bookings","fields":[{"name":"customer_name","type":"text","required":true},{"name":"barber","type":"ref:barbers","required":true},{"name":"appointment_at","type":"datetime","required":true}]}]}';
   ok('normDataModel: the canonical shape passes', normalizeDataModel(canonical).ok === true);
 }
+// 8) a store whose products have NO price anywhere (no product price, no priced variant) → rejected
+// with exact feedback; variant-priced products pass (compile backfills from the cheapest)
+{
+  const priceless = '{"entities":[{"name":"products","fields":[{"name":"title","type":"text","required":true}],"seed":[{"title":"Ghost"}]},{"name":"variants","fields":[{"name":"product","type":"ref:products","required":true},{"name":"name","type":"text","required":true}],"seed":[{"product":1,"name":"Small"}]}]}';
+  const r8 = normalizeDataModel(priceless);
+  ok('normDataModel: truly priceless product → rejected with feedback', r8.ok === false && r8.errors.some(x => /price/.test(x) && /Ghost/.test(x)), JSON.stringify(r8.ok === false ? r8.errors : []));
+  const vpriced = '{"entities":[{"name":"products","fields":[{"name":"title","type":"text","required":true}],"seed":[{"title":"Fireside"}]},{"name":"variants","fields":[{"name":"product","type":"ref:products","required":true},{"name":"name","type":"text","required":true},{"name":"price","type":"money"}],"seed":[{"product":1,"name":"Small","price":18}]}]}';
+  ok('normDataModel: variant-priced products pass (compile backfills)', normalizeDataModel(vpriced).ok === true);
+}
 
 // ---- COPY GATE moved to COMPOSE: slop rejected at the retryable stage; {{brand}} token is NOT slop ----
 {

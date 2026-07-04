@@ -50,6 +50,19 @@ ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="r
     { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }] },
   ] })));
   ok('payments: non-store models are untouched', !plain.tables.includes('payment_options'));
+  // the canary's first real catch: variants carried ALL the pricing, products had none → no
+  // Add-to-cart anywhere. Compile injects products.price and backfills from the cheapest variant.
+  const vpriced = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'products', public: true, fields: [{ name: 'title', type: 'text', required: true }], seed: [{ title: 'Fireside' }, { title: 'Ocean' }] },
+    { name: 'variants', fields: [{ name: 'product', type: 'ref:products', required: true }, { name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }],
+      seed: [{ product: 1, name: 'Small', price: 18 }, { product: 1, name: 'Large', price: 32 }, { product: 2, name: 'Small', price: 20 }] },
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+    { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'product', type: 'ref:products', required: true }, { name: 'qty', type: 'int' }] },
+  ] })));
+  ok('variant-priced model: products.price injected', /"price" numeric/.test(vpriced.resolved.createSql['products'] || ''), vpriced.resolved.createSql['products']);
+  ok('variant-priced model: seeds backfilled from the CHEAPEST variant (18, 20)',
+    (vpriced.resolved.seedSql['products'] || []).join(' ').includes('18') && (vpriced.resolved.seedSql['products'] || []).join(' ').includes('20'), JSON.stringify(vpriced.resolved.seedSql['products']));
+  ok('variant-priced model: the backfill is loud', vpriced.warnings.some((w: string) => /cheapest variant/.test(w)));
   ok('payments: checkout carries the "How you\'ll pay" box', co.includes('data-payopts') && co.includes("How you'll pay"));
   ok('payments: the page runtime fills it from payment_options (live read)', co.includes("/data/payment_options'"));
   ok('payments: the box stays hidden when the store has no options', /<div class="payopts" data-payopts hidden>/.test(co));
