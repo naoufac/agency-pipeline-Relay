@@ -23,6 +23,7 @@ ok('quota: spent credits classify as exhausted', isQuotaExhausted('MiniMax 402: 
 ok('quota: a plain 5xx is NOT quota (it retries as transient)', !isQuotaExhausted('OpenRouter 500: bad gateway') && !isQuotaExhausted('OpenRouter 502: upstream error'));
 ok('quota: timeouts are NOT quota', !isQuotaExhausted('The operation was aborted due to timeout') && !isQuotaExhausted('fetch failed'));
 ok('quota: a 429 rate limit without account words is NOT quota (transient handles bursts)', !isQuotaExhausted('OpenRouter 429: slow down'));
+ok('quota: MiniMax bills via 500 — "token plan" classifies as exhausted (observed live)', isQuotaExhausted('MiniMax 500: {"type":"error","error":{"type":"server_error","message":"your current token plan not enough"}}'));
 
 // ---- failover: same request, second provider, real answer ----
 const realFetch = globalThis.fetch;

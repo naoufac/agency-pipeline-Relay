@@ -155,6 +155,7 @@ export type LLMResult = { text: string; meta: { provider: 'openrouter' | 'minima
 // key sat unused — callLLM now fails over on exactly this class.
 export function isQuotaExhausted(msg: any): boolean {
   const s2 = String(msg ?? '');
+  if (/your current token plan|token plan (?:is )?(?:expired|exhausted|used up)/i.test(s2)) return true;  // MiniMax bills via 500 (observed live 2026-07-04)
   return /\b(401|402|403|429)\b/.test(s2) && /(key limit|quota|credit|exceeded|insufficient|billing|payment required|unauthorized|invalid.*key)/i.test(s2);
 }
 
