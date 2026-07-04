@@ -829,3 +829,17 @@ identity kept, review passes AGAIN. It caught a REAL class per flight:
 Flight 4 blocked externally: the OpenRouter key hit its WEEKLY LIMIT — builds are paused
 until the owner raises it; the operator alert fired as designed. The green E2E iteration
 flight runs automatically the moment quota returns (nightly canary).
+
+## 2026-07-04 — QUOTA RESILIENCE: the outage class killed, builds un-paused by failover
+
+Flight four's blocker dissected: OpenRouter's weekly key limit is not an error, it's a
+CONDITION that lasts days — and a configured MiniMax-direct key sat unused because callLLM
+was openrouter-first with no failover. Worse, the runner classed the 403 as a defect:
+burned 3 attempts per task, resurrect rounds, project BLOCKED, canary dead until reset.
+Fixed as a class: (1) isQuotaExhausted() — 401/402/403/429 + account words (key limit /
+credits / billing); deliberately NOT timeouts/5xx/plain-429, those stay transient;
+(2) callLLM fails over to MiniMax-direct on exactly this class — same request, second
+provider, honest compound error if both are dead; (3) the runner PARKS quota-stalled tasks
+(attempt refunded, 15-min lease, reclaim revives) — builds stall and resume BY THEMSELVES
+when quota returns, with ONE operator alert per project instead of a blocked build.
+llm:check is suite 17 (12 gates, stubbed fetch — no tokens burned proving it).

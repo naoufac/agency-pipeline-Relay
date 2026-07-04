@@ -9,6 +9,7 @@ import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { cmsFinalize } from './cms/finalize.ts';
 import { renderPage, formPageSlug, receiptsEnabled } from './render.ts';
+import { isQuotaExhausted } from './agents.ts';
 import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, modelHasCore, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
 import { ensurePwaAssets } from './pwa.ts';
@@ -285,6 +286,19 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
   } catch (e: any) {
     // agent/API error (e.g. provider down): never crash the loop.
     await ev(pool, task.project_id, task.id, 'agent_error', `#${task.seq}: ${(e?.message ?? String(e)).slice(0, 280)}`);
+    // QUOTA EXHAUSTED across providers (weekly limit / credits): this can last DAYS — never burn
+    // the defect budget, never block the project. Park with a long lease (reclaim() revives it);
+    // the build STALLS and resumes BY ITSELF the moment quota returns. One alert per project.
+    if (isQuotaExhausted(e?.message)) {
+      await pool.query("update tasks set status='running', claimed_by=null, lease_expires_at=now() + interval '15 minutes', attempts=greatest(attempts-1,0), updated_at=now() where id=$1", [task.id]);
+      const stalls = await evCount(pool, 'project_id', task.project_id, 'quota_stall');
+      await ev(pool, task.project_id, task.id, 'quota_stall', `#${task.seq}: provider quota exhausted — task parked, auto-resumes when quota returns`);
+      if (stalls === 0) {
+        const { telegramAlert } = await import('./alert.ts');
+        telegramAlert(`⏸ LLM QUOTA EXHAUSTED — builds are STALLED, not failed. They auto-resume when quota returns.\n${String(e?.message ?? '').slice(0, 180)}`).catch(() => {});
+      }
+      return;
+    }
     const errs = await evCount(pool, 'task_id', task.id, 'agent_error');   // includes the one just logged
     // TRANSIENT infra blip → back off + retry WITHOUT burning the defect budget (a flaky provider must not
     // brick a build). Park as 'running' with a future lease; reclaim() revives it to 'ready' after the backoff

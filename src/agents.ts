@@ -149,6 +149,29 @@ export type LLMResult = { text: string; meta: { provider: 'openrouter' | 'minima
 // Returns the text AND per-call meta. On failure it returns ok:false (no throw) with the captured error —
 // the string wrappers (llmText/llm/runAgent) still yield '' on failure exactly as the old throw-path did
 // (planner: empty→null; runner: re-throws after logging meta so the agent_error retry path is unchanged).
+// QUOTA-CLASS error: the provider account is unusable (weekly key limit, spent credits, bad key)
+// — can last DAYS. Distinct from transient (timeouts/5xx, which retry) and from model failures.
+// The 2026-07-04 outage: OpenRouter weekly limit killed builds while a configured MiniMax-direct
+// key sat unused — callLLM now fails over on exactly this class.
+export function isQuotaExhausted(msg: any): boolean {
+  const s2 = String(msg ?? '');
+  return /\b(401|402|403|429)\b/.test(s2) && /(key limit|quota|credit|exceeded|insufficient|billing|payment required|unauthorized|invalid.*key)/i.test(s2);
+}
+
+async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {
+  const res = await fetch(`${BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data: any = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text || !String(text).trim()) throw new Error('MiniMax: empty response ' + JSON.stringify(data).slice(0, 200));
+  return { text: String(text), meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
+}
+
 export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;
@@ -186,19 +209,15 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
       }
       return { text: String(text), meta: { provider: 'openrouter', model: OR_MODEL, latencyMs: Date.now() - t0, web, ok: true } };
     }
-    // legacy MiniMax-direct (no web search)
-    const res = await fetch(`${BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const data: any = await res.json();
-    const text = data?.choices?.[0]?.message?.content;
-    if (!text || !String(text).trim()) throw new Error('MiniMax: empty response ' + JSON.stringify(data).slice(0, 200));
-    return { text: String(text), meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
+    // no OpenRouter key → MiniMax-direct is the primary
+    return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0);
   } catch (e: any) {
+    // FAILOVER: OpenRouter account unusable (quota/credits/key) + a direct key configured →
+    // the same request rides the second provider. Transient errors do NOT fail over (they retry).
+    if (OR_KEY && KEY && isQuotaExhausted(e?.message)) {
+      try { return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0); }
+      catch (e2: any) { return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `failover after [${String(e?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } }; }
+    }
     return { text: '', meta: { provider, model, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
   }
 }
