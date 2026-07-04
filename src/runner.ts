@@ -259,12 +259,15 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(b)]);
           // DOMAINS: lock the site's subdomain slug alongside the brand — collision-safe, once
           const { brandSlug } = await import('./spec.ts');
-          let slug = brandSlug(b.name);
+          // identity: if a brand is already locked (rebuild / pre-slug project), the slug comes
+          // from THAT name — the freshly re-resolved b.name may differ and must never re-mint it
+          const lockedName = (await pool.query("select params->'brand'->>'name' as n from projects where id=$1", [task.project_id])).rows[0]?.n || b.name;
+          let slug = brandSlug(lockedName);
           if (slug) {
             for (let n = 2; n < 50; n++) {
               const clash = (await pool.query("select 1 from projects where params->>'slug' = $1 and id <> $2 limit 1", [slug, task.project_id])).rows[0];
               if (!clash) break;
-              slug = brandSlug(b.name) + '-' + n;
+              slug = brandSlug(lockedName) + '-' + n;
             }
             await pool.query("update projects set params = jsonb_set(params, '{slug}', to_jsonb($2::text), true) where id=$1 and (params->>'slug') is null", [task.project_id, slug]);
           }

@@ -203,6 +203,7 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
   const params: any = {
     planner: usedLLM ? 'llm' : 'template', pages, archetype, shape, cms: 'directus',
     theme: prev.theme || theme, brand: prev.brand,           // identity continuity across rebuilds
+    slug: prev.slug,                                         // the SUBDOMAIN is identity too — a rebuild may never move the site
     layout: prev.layout || chooseLayout(prev.theme || theme, archetype, brief),  // keep the site's structure across rebuilds
     rebuilds: Number(prev.rebuilds || 0) + 1, scope, locale: detectLocale(brief),
   };

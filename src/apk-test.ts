@@ -103,6 +103,10 @@ ok('apkStatus: no artifact → apk:false, no url invented', await (async () => {
   ok('canary: asserts apk_built + serves /app.apk on the subdomain', canary.includes("type='apk_built'") && canary.includes("path: '/app.apk'"));
   ok('canary: sweeps old packaging workdirs', canary.includes('/root/apk-builds/'));
   ok('canary: iteration leg — rebuild via the public API, data-survival + identity + re-review', canary.includes('/api/rebuild') && canary.includes('appRowCount') && canary.includes('data LOST') && canary.includes('identity changed'));
+  const plannerSrc = readFileSync(new URL('./planner.ts', import.meta.url), 'utf8');
+  ok('replan carries the slug forward (a rebuild may never move the site)', plannerSrc.includes('slug: prev.slug'));
+  const runnerSrc = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
+  ok('slug lock derives from the LOCKED brand, never the re-resolved name', runnerSrc.includes('lockedName') && runnerSrc.includes('brandSlug(lockedName)'));
 }
 
 // ---- serving: the pieces the phone actually touches ----
