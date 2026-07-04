@@ -662,3 +662,14 @@ Prod 2f698c0 (ecom 92). Flew the two unflown briefs on demand (CANARY_INDEX over
   listed informationally, cart controls store-only. Re-flight: GREEN, 7 min.
 The nightly rotation is now fully validated: store · booking app · warm app+blog all pass
 zero-touch. Seven classes killed by the canary in its first day. Next timer run 03:33.
+
+## 2026-07-04 — PQ3 COMPLETE: the Content tab is grandma-grade
+Prod 64a8ba7 (content:check 46). The last 'still ahead' items closed: booleans are TOGGLES (an
+unchecked box stores FALSE explicitly), dates/timestamps are real date inputs, prose fields are
+textareas, RELATIONS are dropdowns of the referenced collection (owner reads now keep the raw fk id
+alongside the display label — previously the edit form could never know the current relation and
+refs were filtered out entirely), and every collection has '+ Add' using the same typed form.
+PROVEN live on the tee shop through the real API: raw ids present, PATCH toggles stick, a new
+variant added WITH its product relation ('XXXL Smoke Test' → product 1, $29) — then swept.
+PQ3's full promise now stands: edit ✓ add ✓ delete ✓ upload photos ✓ export CSV ✓ typed fields ✓
+relation pickers ✓ — all live-on-next-load, all owner-gated, all machine-checked.
