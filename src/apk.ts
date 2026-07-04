@@ -40,7 +40,7 @@ export function assetlinksFor(packageId: string, sha256: string): object[] {
 }
 
 // bubblewrap's twa-manifest.json, filled ONLY from the site's own webmanifest + slug
-export function twaManifestFor(slug: string, webmanifest: any): any {
+export function twaManifestFor(slug: string, webmanifest: any, versionCode = 1): any {
   const host = `${assertCleanSlug(slug)}.naples.agency`;
   const name = String(webmanifest?.name || slug).slice(0, 50);
   const launcher = String(webmanifest?.short_name || name).slice(0, 30);
@@ -65,9 +65,11 @@ export function twaManifestFor(slug: string, webmanifest: any): any {
     splashScreenFadeOutDuration: 300,
     signingKey: { path: KEYSTORE, alias: KS_ALIAS },
     // bubblewrap's JSON field is appVersion (TwaManifest maps appVersion -> versionName);
-    // 'appVersionName' here is silently ignored and ships versionName "" — Play rejects that
-    appVersion: '1.0.0',
-    appVersionCode: 1,
+    // 'appVersionName' here is silently ignored and ships versionName "" — Play rejects that.
+    // versionCode INCREMENTS per packaging: Android only updates an installed app when the
+    // new code is HIGHER — a constant 1 froze every install on its first version forever.
+    appVersion: `1.0.${Math.max(1, Math.floor(versionCode))}`,
+    appVersionCode: Math.max(1, Math.floor(versionCode)),
     shortcuts: [],
     generatorApp: 'relay',
     webManifestUrl: `https://${host}/manifest.webmanifest`,
@@ -101,9 +103,10 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   const pass = process.env.RELAY_KS_PASS;
   if (!pass) throw new Error('RELAY_KS_PASS not set');
   if (!existsSync(KEYSTORE)) throw new Error('signing keystore missing at ' + KEYSTORE + ' — without it bubblewrap would PROMPT to create a new (wrong) identity');
-  const row = (await pool.query("select params->>'slug' as slug from projects where id=$1", [projectId])).rows[0];
+  const row = (await pool.query("select params->>'slug' as slug, coalesce((params->>'apk_version')::int, 0) as v from projects where id=$1", [projectId])).rows[0];
   const slug = row?.slug;
   if (!slug) throw new Error('project has no slug — subdomain identity is the APK origin');
+  const versionCode = Number(row.v) + 1;
   assertCleanSlug(slug);
   const siteDir = fileURLToPath(new URL(projectId + '/', sitesUrl));
   if (!existsSync(siteDir + 'manifest.webmanifest'))
@@ -112,7 +115,7 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
 
   const work = `/root/apk-builds/${slug}`;
   mkdirSync(work, { recursive: true });
-  writeFileSync(work + '/twa-manifest.json', JSON.stringify(twaManifestFor(slug, wm), null, 2));
+  writeFileSync(work + '/twa-manifest.json', JSON.stringify(twaManifestFor(slug, wm, versionCode), null, 2));
   const env = { ...process.env, BUBBLEWRAP_KEYSTORE_PASSWORD: pass, BUBBLEWRAP_KEY_PASSWORD: pass, CI: 'true' };
   // update regenerates the Android project from twa-manifest.json (build alone PROMPTS
   // about a missing checksum on a fresh project — headless means no prompts, ever)
@@ -126,6 +129,8 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   mkdirSync(siteDir + '.well-known', { recursive: true });
   writeFileSync(siteDir + '.well-known/assetlinks.json', JSON.stringify(assetlinksFor(pkg, sha), null, 1));
   copyFileSync(built, siteDir + 'app.apk');
+  // the counter moves ONLY after a verified artifact exists — a failed build never skips versions
+  await pool.query("update projects set params = jsonb_set(params, '{apk_version}', to_jsonb($2::int), true) where id=$1", [projectId, versionCode]);
   return { apk: siteDir + 'app.apk', packageId: pkg, sha256: sha, slug };
 }
 

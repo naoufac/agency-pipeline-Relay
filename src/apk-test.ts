@@ -44,7 +44,13 @@ ok('slug guard: 64+ char label throws (DNS limit)', (() => { try { assertCleanSl
 ok('twa: dirty slug cannot mint a manifest', (() => { try { twaManifestFor('../evil', {}); return false; } catch { return true; } })());
 
 // ---- version identity: the field bubblewrap actually reads ----
-ok('twa: appVersion is set (bubblewrap ignores appVersionName — versionName would ship empty)', twa.appVersion === '1.0.0' && twa.appVersionCode === 1);
+ok('twa: appVersion is set (bubblewrap ignores appVersionName — versionName would ship empty)', twa.appVersion === '1.0.1' && twa.appVersionCode === 1);
+ok('twa: versionCode is a parameter — repackaging ships a HIGHER code (Android refuses updates otherwise)', twaManifestFor('x', {}, 7).appVersionCode === 7 && twaManifestFor('x', {}, 7).appVersion === '1.0.7');
+ok('twa: garbage versionCode floors to 1, never 0 or negative', twaManifestFor('x', {}, 0).appVersionCode === 1 && twaManifestFor('x', {}, -3 as any).appVersionCode === 1);
+{
+  const src = readFileSync(new URL('./apk.ts', import.meta.url), 'utf8');
+  ok('buildApk: counter reads params.apk_version + 1 and persists ONLY after a verified artifact', src.includes("(params->>'apk_version')::int, 0") && src.indexOf('apk_version}') > src.indexOf("copyFileSync(built"));
+}
 
 // ---- secrets: the password never rides argv ----
 const apkSrc = readFileSync(new URL('./apk.ts', import.meta.url), 'utf8');
