@@ -16,7 +16,7 @@ const snake = (s: any) => String(s ?? '').toLowerCase().trim().replace(/[^a-z0-9
 // orders, messages, sign-ups…) are never publicly listable; catalog content (products, services,
 // menu…) is. Coarse, name-based closed set so it protects every ALREADY-BUILT site the moment the
 // server deploys; FS1 replaces it with a classification declared per-entity in the data model.
-export const PRIVATE_READ = /^(_relay_\w+|orders?|order_items|bookings?|appointments?|consultations?|callbacks?|intakes?|enrollments?|reservations?|\w*_?requests?|submissions?|messages?|enquir(?:y|ies)|inquir(?:y|ies)|leads?|registrations?|signups?|sign_ups?|rsvps?|applications?|waitlists?|waivers?|customers?|clients?|members?|patients?|guests?|attendees?|preorders?|pre_orders?|deliveries|shipments?|tracking_events?|users?|accounts?|sessions?|tokens?|payments?|invoices?|subscriptions?|donations?)$/i;
+export const PRIVATE_READ = /^(_relay_\w+|orders?|order_items|bookings?|appointments?|consultations?|callbacks?|intakes?|enrollments?|reservations?|\w*_?requests?|submissions?|messages?|enquir(?:y|ies)|inquir(?:y|ies)|leads?|registrations?|signups?|sign_ups?|subscribers?|newsletter_signups?|rsvps?|applications?|waitlists?|waivers?|customers?|clients?|members?|patients?|guests?|attendees?|preorders?|pre_orders?|deliveries|shipments?|tracking_events?|users?|accounts?|sessions?|tokens?|payments?|invoices?|subscriptions?|donations?)$/i;
 
 // FS3 — the ACTION tables that carry a real visitor-facing LIFECYCLE, and its closed status set.
 // pending → confirmed/declined/cancelled is the owner↔visitor loop; 'new'/'completed' keep the store

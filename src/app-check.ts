@@ -22,7 +22,8 @@ const ok = (name: string, cond: boolean, extra = '') => { if (cond) pass++; else
 for (const t of ['bookings', 'orders', 'order_items', 'appointments', 'reservations', 'messages', 'enquiries', 'leads', 'registrations', 'rsvps', 'customers', 'users', 'sessions', 'waitlist', 'waivers', 'deliveries', 'shipments', 'tracking_events', 'payments',
   // 2026-07-03: 'consultations' was blind (a law build served it publicly + broke its own form) —
   // same class as the 'bookings' plural blind spot; visitor-action nouns + any *_requests table
-  'consultations', 'consultation', 'callbacks', 'intakes', 'enrollments', 'requests', 'quote_requests', 'service_requests', 'booking_requests'])
+  'consultations', 'consultation', 'callbacks', 'intakes', 'enrollments', 'requests', 'quote_requests', 'service_requests', 'booking_requests',
+  'subscribers', 'newsletter_signups'])
   ok(`private: ${t}`, PRIVATE_READ.test(t));
 for (const t of ['products', 'services', 'menu_items', 'listings', 'posts', 'barbers', 'categories', 'events', 'rooms', 'classes'])
   ok(`public: ${t}`, !PRIVATE_READ.test(t));

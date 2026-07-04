@@ -10,7 +10,7 @@ import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { publicWriteTables } from './spec.ts';
 import { LIFECYCLE_TABLE } from './schema.ts';
-import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, renderLiveAccount, renderLiveChain } from './cms/live.ts';
+import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, renderLiveAccount, renderLiveChain, renderLivePost } from './cms/live.ts';
 import { requestVisitorMagic, verifyVisitorMagic, visitorFromCookie, visitorCookie, clearVisitorCookie, logoutVisitor } from './visitors.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
@@ -189,6 +189,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
             if (phtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(phtml); return; }
           } catch (e: any) { console.error('live-pdp', live[1], pdp[1], e?.message ?? e); }
           return send(res, 404, 'text/plain', 'product not found');
+        }
+        // BLOG: post-<n>.html renders live from the article row — honest 404 on an unknown id.
+        const post = live[2].match(/^post-(\d{1,12})$/i);
+        if (post) {
+          try {
+            const bhtml = await renderLivePost(pool, live[1], Number(post[1]));
+            if (bhtml) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache, must-revalidate' }); res.end(bhtml); return; }
+          } catch (e: any) { console.error('live-post', live[1], post[1], e?.message ?? e); }
+          return send(res, 404, 'text/plain', 'post not found');
         }
         // FS1 · RECEIPT: the visitor's own record, keyed by the secret token in their URL. Honest 404
         // on a wrong token — never a stale or someone else's page.

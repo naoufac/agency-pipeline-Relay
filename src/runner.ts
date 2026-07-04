@@ -124,7 +124,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       // FS1 — the ACTION table: the private visitor-record table the core form must WRITE (a booking
       // app's core action creates an appointment, never a catalog row). Deterministic: private tables
       // with fillable columns, action-named first; system/identity tables never qualify.
-      const ACTION_NAME = /book|appoint|reserv|rsvp|request|enquir|inquir|message|signup|sign_up|application|registration|waitlist|submission|lead|order(?!_items)/i;
+      const ACTION_NAME = /book|appoint|reserv|rsvp|request|enquir|inquir|message|signup|sign_up|subscri|application|registration|waitlist|submission|lead|order(?!_items)/i;
       const priv = desc.tables.filter((t: any) => PRIVATE_READ.test(t.table) && !/^(order_items|users?|accounts?|sessions?|tokens?|customers?|clients?|payments?)$/i.test(t.table) && (forms[t.table] || []).length >= 2);
       actionTable = (priv.find((t: any) => ACTION_NAME.test(t.table)) || priv[0] || { table: '' }).table;
     } catch (e: any) {

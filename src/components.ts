@@ -88,6 +88,11 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* BLOG · article page — long-form reading, art-directed cover */
+.post-cover{margin:1.6rem 0}
+.post-cover img{width:100%;aspect-ratio:var(--crop-hero-wide,21/9);object-fit:cover;border-radius:var(--photo-radius,var(--radius));filter:var(--photo-filter,none)}
+.post-body{font-size:1.08rem;line-height:1.75;margin-top:1.4rem}
+.post-body p{margin:0 0 1.2em}
 /* PQ2 · variant pills on the product page */
 .varpick{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 1rem}
 .varpick .varpill{font:inherit;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text);cursor:pointer}
@@ -421,6 +426,33 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       ${rev ? `<p style="margin-top:1.6rem"><span class="chain-pill${rev.passed ? ' pass' : ''}">${rev.passed ? '✓ Independent review: PASSED' : 'Independent review: ' + esc(String(rev.issues)) + ' finding(s) open'}</span></p>
       <p class="muted" style="margin-top:.8rem">A real browser walked every page${rev.probed ? ', performed the core action end to end,' : ''} and judged the result before this site was accepted.</p>` : ''}
     </div></section>`;
+  },
+  // BLOG · article — ONE post's own page, rendered live from its row (the PDP pattern for content).
+  // SYSTEM-ONLY: not in spec KNOWN; cms/live.ts synthesizes it per request. Body is textContent-safe:
+  // escaped, then split into paragraphs — the row can never inject markup.
+  article: (s) => {
+    const row = (s && s.row && typeof s.row === 'object') ? s.row : {};
+    const title = String(row.title || row.name || row.headline || 'Untitled');
+    const bodyKey = ['body', 'content', 'text', 'article', 'full_text'].find(k => typeof row[k] === 'string' && row[k].trim());
+    const excerptKey = ['excerpt', 'summary', 'description', 'intro'].find(k => typeof row[k] === 'string' && row[k].trim());
+    const paras = bodyKey ? String(row[bodyKey]).split(/\n{2,}|\r\n\r\n/).map(p => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean).slice(0, 60) : [];
+    const when = row.published_at || row.published_date || row.date || row.created_at;
+    const dateStr = when ? (when instanceof Date ? when.toDateString() : /^\d{4}-\d{2}-\d{2}/.test(String(when)) ? new Date(when).toDateString() : '') : '';
+    const author = ['author', 'author_name', 'byline', 'writer'].map(k => row[k]).find(v => typeof v === 'string' && v.trim());
+    const safeUrl = (v: any) => typeof v === 'string' && (/^https?:/.test(v) || v.charAt(0) === '/');
+    const IMG = /image|photo|picture|cover|banner/i;
+    const imgKey = Object.keys(row).find(k => IMG.test(k) && safeUrl(row[k]));
+    const img = (safeUrl(row._image) ? row._image : '') || (imgKey ? String(row[imgKey]) : '');
+    const back = (s.back && s.back.slug) ? s.back : null;
+    return `<section class="section post"><div class="container" style="max-width:760px">
+    ${back ? `<p class="pdp-crumb"><a href="${esc(back.slug)}.html">← ${esc(back.title || 'Back')}</a></p>` : ''}
+    <span class="eyebrow">${esc(String(s.label || 'Post'))}${dateStr ? ' · ' + esc(dateStr) : ''}</span>
+    <h1>${esc(title)}</h1>
+    ${author ? `<p class="muted">By ${esc(String(author))}</p>` : ''}
+    ${img ? `<figure class="post-cover"><img src="${esc(img)}" alt=""></figure>` : ''}
+    ${excerptKey && !bodyKey ? `<p class="lead">${esc(String(row[excerptKey]))}</p>` : ''}
+    ${paras.length ? `<div class="post-body">${paras.map(p => `<p>${esc(p)}</p>`).join('')}</div>` : (excerptKey && bodyKey ? `<p class="lead">${esc(String(row[excerptKey]))}</p>` : '')}
+  </div></section>`;
   },
   // FS1 · record — the RECEIPT for one visitor-submitted row (booking/order/message). SYSTEM-ONLY
   // (not in spec KNOWN): cms/live.ts synthesizes it per request from the live row; the reference

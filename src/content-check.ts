@@ -64,6 +64,37 @@ try {
   ok('orders-only store: payment instructions are the one editable collection', bareTabs.length === 1 && bareTabs[0].table === 'payment_options', JSON.stringify(bareTabs));
   ok('orders itself stays hidden from the Content tab', !bareTabs.some((t) => t.table === 'orders'));
   await pool.query(`drop schema if exists "${appdb.schemaName(bare)}" cascade`).catch(() => {});
+
+  // ---- BLOG: every article gets its own LIVE page (the PDP pattern for content) ----
+  const blogId = randomUUID();
+  await appdb.provision(pool, blogId, JSON.stringify({ entities: [
+    { name: 'posts', public: true, display: 'title', fields: [
+      { name: 'title', type: 'text', required: true }, { name: 'body', type: 'longtext' },
+      { name: 'excerpt', type: 'text' }, { name: 'author', type: 'text' }],
+      seed: [{ title: 'How we roast', body: 'First paragraph about roasting.\n\nSecond paragraph with <script>alert(1)</script> inside.', excerpt: 'Roasting, explained.', author: 'Nao' }] },
+    { name: 'subscribers', fields: [{ name: 'full_name', type: 'text' }, { name: 'email', type: 'email', required: true }] },
+  ] }));
+  await pool.query(`insert into projects(id, brief, status, params) values ($1,'blog gate scratch','done',$2)`, [blogId, JSON.stringify({
+    archetype: 'app', theme: 'editorial',
+    brand: { name: 'Roastlog', tokens: { bg: '#fbfaf7', primary: '#1c2a3a' } },
+    site: { pages: [{ slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Notes' }, { type: 'collection', table: 'posts', title: 'Latest' }] }] },
+  })]);
+  try {
+    const { renderLivePost } = await import('./cms/live.ts');
+    const ph = await renderLivePost(pool, blogId, 1);
+    ok('blog: the article page renders live from the row', !!ph && ph.includes('How we roast'), String(ph?.length));
+    ok('blog: FULL body as paragraphs (never the card slice)', !!ph && ph.includes('First paragraph about roasting.') && ph.includes('Second paragraph'));
+    ok('blog: body is textContent-safe (markup stays escaped)', !!ph && !ph.includes('<script>alert') && ph.includes('&lt;script&gt;'));
+    ok('blog: byline renders', !!ph && ph.includes('By Nao'));
+    ok('blog: back link to the page carrying the collection', !!ph && ph.includes('index.html'));
+    ok('blog: unknown post → null (honest 404)', (await renderLivePost(pool, blogId, 999)) === null);
+    await appdb.insertRow(pool, blogId, 'subscribers', { full_name: 'R', email: 'reader@example.com' });
+    ok('blog: the newsletter list is SEALED from public reads', (await appdb.readRows(pool, blogId, 'subscribers')).length === 0);
+    ok('blog: posts stay publicly readable', (await appdb.readRows(pool, blogId, 'posts')).length === 1);
+  } finally {
+    await pool.query(`drop schema if exists "${appdb.schemaName(blogId)}" cascade`).catch(() => {});
+    await pool.query('delete from projects where id=$1', [blogId]).catch(() => {});
+  }
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e);
 } finally {

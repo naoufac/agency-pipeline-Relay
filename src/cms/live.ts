@@ -68,6 +68,31 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
 const singular = (t: string) => humanizeTable(t).replace(/ies$/i, 'y').replace(/s$/i, '');
 const humanizeTable = (t: string) => String(t).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
+// BLOG — post-<id>.html rendered FRESH from the live article row (the PDP pattern for content):
+// title, date, cover, FULL body as paragraphs. Write in the Content tab → the article page changes
+// on the next load. Works for whichever content table the model shipped (posts/articles/news/…).
+const BLOG_TABLE = /^(posts|articles|news|stories|guides|recipes)$/i;
+export async function renderLivePost(pool: pg.Pool, projectId: string, postId: number): Promise<string | null> {
+  const pr = (await pool.query('select params from projects where id=$1', [projectId])).rows[0];
+  if (!pr) return null;
+  const params = pr.params || {};
+  if (!params.site || !Array.isArray(params.site.pages) || !params.site.pages.length) return null;
+  const tables = (await appdb.listTables(pool, projectId)).filter(t => BLOG_TABLE.test(t));
+  if (!tables.length) return null;
+  let row: any = null; let table = '';
+  for (const t of tables) { row = await appdb.readRow(pool, projectId, t, postId); if (row) { table = t; break; } }
+  if (!row) return null;
+  const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
+  // back to the page that CARRIES the article collection (blog/journal/news), else home
+  const blogPages = params.site.pages.filter((p: any) => (p.sections || []).some((s: any) => s.type === 'collection' && BLOG_TABLE.test(String(s.table || ''))));
+  const withBlog = blogPages.find((p: any) => p.slug !== 'index') || blogPages[0];
+  const back = withBlog ? { slug: withBlog.slug, title: withBlog.title } : navPages[0];
+  const title = String(row.title || row.name || row.headline || 'Post #' + postId);
+  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'article', row, back, label: singular(table) }] };
+  const html = renderPage(spec, { pages: navPages, slug: 'post-' + postId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
+  return `<!--relay:cms=directus LIVE post=${postId} (rendered from the live article row on request)-->\n` + html;
+}
+
 // FS1 — the RECEIPT: receipt-<table>-<token>.html rendered fresh from the visitor's own row, keyed
 // by the secret reference token in their URL. The row itself never exposes the token (reads strip
 // it); the page displays the code FROM the URL. Wrong token -> null -> honest 404.

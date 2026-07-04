@@ -14,7 +14,7 @@ export const DEFAULT_ARCHETYPE: Archetype = 'site';
 // adjective ("a boutique law firm") it forced a real law brief into a store with an empty shop grid.
 const RULES: [Archetype, RegExp][] = [
   ['store', /\b(shop|store|e-?commerce|e-?shop|catalog(ue)?|checkout|\bcart\b|(fashion|clothing|apparel|bridal|jewell?e?ry|vintage|flower|dress|gift) boutiques?|boutiques? (selling|of|for)|merch|webshop|sell (online|products?)|product (page|catalog))\b/],
-  ['app', /\b(app|application|platform|saas|dashboard|portal|bookings?|reservations?|reserve|delivery|marketplace|directory|listings?|\bcrm\b|\berp\b|tracker|tracking|sign[- ]?up|log[- ]?in|members? area|membership|subscription|orders?|inventory|appointments?|scheduling|on[- ]?demand|ride[- ]?hailing|fleet|jobs? board|classifieds)\b/],
+  ['app', /\b(app|application|platform|saas|dashboard|portal|bookings?|reservations?|reserve|delivery|marketplace|directory|listings?|\bcrm\b|\berp\b|tracker|tracking|sign[- ]?up|log[- ]?in|members? area|membership|subscription|orders?|inventory|appointments?|scheduling|on[- ]?demand|ride[- ]?hailing|fleet|jobs? board|classifieds|blog\w*|magazine|journal|newsletters?|publication)\b/],
 ];
 
 export function isArchetype(x: any): x is Archetype { return typeof x === 'string' && (ARCHETYPES as string[]).includes(x); }
