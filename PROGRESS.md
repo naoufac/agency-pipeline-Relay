@@ -673,3 +673,24 @@ PROVEN live on the tee shop through the real API: raw ids present, PATCH toggles
 variant added WITH its product relation ('XXXL Smoke Test' → product 1, $29) — then swept.
 PQ3's full promise now stands: edit ✓ add ✓ delete ✓ upload photos ✓ export CSV ✓ typed fields ✓
 relation pickers ✓ — all live-on-next-load, all owner-gated, all machine-checked.
+
+## 2026-07-04 — REAL SUBDOMAINS: every produced site now lives at <slug>.naples.agency
+
+The path URL /sites/<uuid>/ was the last "demo smell" on produced sites — unshareable,
+un-SEO-able, and a blocker for TWA/Play packaging (which needs a stable origin per app).
+Now: brandSlug() in spec.ts (accent-folding, DNS-clean, RESERVED_SLUGS like api/board/cms
+get a -site suffix, 40-char cap), runner locks a collision-safe params.slug at the branding
+pass (meridian → meridian-2 → meridian-3), server.ts routes Host: <slug>.naples.agency to
+the site's dir (api/* and reserved subs excluded; unknown slug → honest 404 "no site here
+(yet)"), seo.ts siteBase makes sitemap/robots canonical to the SUBDOMAIN, tg-door replies
+with the pretty URL. 6 new spec gates (154), all 13 suites green, deployed at 96cbb74.
+Infra: wildcard *.naples.agency DNS already pointed at the anouf-chat tunnel — instead of
+fighting DNS, that tunnel's ingress now hands the wildcard to Relay :8787 (explicit records
+board/api/cms/sites still ride the relay tunnel; both configs carry the wildcard rule so
+either tunnel can serve it). 64 existing sites backfilled through the SAME brandSlug code
+path, their built sitemap/robots regenerated via prod's own seo.ts (deploys never heal
+built sites — a backfill does). PROVEN live: la-favorita-taqueria/cypress-law/
+the-corner-table-2 .naples.agency all 200 with real titles, chain page 200, sitemap
+canonical. The nightly canary now asserts the whole invariant zero-touch: slug minted +
+Host-routed homepage serves (raw http.request — undici fetch silently drops a Host
+override and would false-pass against the board UI).

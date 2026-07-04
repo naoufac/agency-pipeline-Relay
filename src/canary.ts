@@ -4,6 +4,7 @@
 // previous canary is swept. Anything else = the operator's phone rings (telegramAlert). This is
 // the drift detector: an LLM behavior shift that degrades builds surfaces the same night, not
 // when a client finds it. Run: npm run canary (prod: relay-canary.timer, nightly).
+import { request as httpRequest } from 'node:http';
 import { makePool } from './db.ts';
 import { telegramAlert } from './alert.ts';
 
@@ -54,8 +55,21 @@ async function main() {
       const mins = Math.round((Date.now() - t0) / 60_000);
       if (p.status === 'done' && p.passed !== null && Number(p.active) === 0) {
         if (p.passed === true) {
+          // subdomain invariant: a slug was minted and Host-routing serves the site
+          // (raw http.request — fetch/undici silently drops a Host override, which
+          //  turns this probe into a false-pass against the board UI)
+          const slug = (await pool.query("select params->>'slug' s from projects where id=$1", [id])).rows[0]?.s;
+          if (!slug) throw new Error('canary built but no slug was minted');
+          const u = new URL(BASE);
+          const home = await new Promise<{ status: number; body: string }>((res, rej) => {
+            const rq = httpRequest({ host: u.hostname, port: u.port || 80, path: '/', headers: { host: `${slug}.naples.agency` } }, (rs) => {
+              let b = ''; rs.on('data', (c) => b += c); rs.on('end', () => res({ status: rs.statusCode || 0, body: b }));
+            });
+            rq.on('error', rej); rq.end();
+          });
+          if (home.status !== 200 || !home.body.includes('<title>')) throw new Error(`subdomain route dead: ${slug}.naples.agency → ${home.status}`);
           const swept = await sweepOldCanaries(pool, id);
-          console.log(`canary OK — review passed in ${mins} min (${swept} old canar${swept === 1 ? 'y' : 'ies'} swept)`);
+          console.log(`canary OK — review passed in ${mins} min · ${slug}.naples.agency routed (${swept} old canar${swept === 1 ? 'y' : 'ies'} swept)`);
           process.exit(0);
         }
         console.error(`canary FAILED — review did not pass (${mins} min) · ${BOARD}/#/p/${id}/build`);
