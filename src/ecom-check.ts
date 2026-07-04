@@ -46,6 +46,21 @@ ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="r
     { name: 'payment_methods', public: true, fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Bank transfer' }] },
   ] })));
   ok("payments: a model's OWN payment table is respected (no duplicate injection)", !own.tables.includes('payment_options'), own.tables.join(','));
+  // VARIANT COLUMN SPELLING — the flight-caught class: order_items.product_variant_id NOT NULL
+  // meant placeOrder (which writes the canonical variant_id) could never land an order.
+  const alien = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'products', public: true, fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money' }], seed: [{ title: 'Candle', price: 18 }] },
+    { name: 'product_variants', public: true, fields: [{ name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }, { name: 'product_id', type: 'int', ref: 'products' }] },
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }] },
+    { name: 'order_items', fields: [{ name: 'order_id', type: 'int', ref: 'orders', required: true }, { name: 'product_variant_id', type: 'int', required: true }, { name: 'quantity', type: 'int' }] },
+  ] })));
+  {
+    const oiDdl = alien.ddl.slice(alien.ddl.indexOf('create table') + alien.ddl.slice(alien.ddl.indexOf('create table')).indexOf('"order_items"'));
+    ok('variants: alien product_variant_id is canonicalized to variant_id', alien.ddl.includes('"variant_id"') && !alien.ddl.includes('product_variant_id'));
+    ok('variants: the line-item variant column is NULLABLE (a plain product line is legal)', !/"variant_id"[^,)]*not null/i.test(alien.ddl));
+    ok('variants: the canonicalization is loud', alien.warnings.some((w: string) => /product_variant_id → variant_id/.test(w)));
+    ok('variants: product_id still injected alongside (store contract)', /"order_items"[\s\S]{0,600}"product_id"/.test(alien.ddl), oiDdl.slice(0, 200));
+  }
   const plain = compile(parseModel(JSON.stringify({ entities: [
     { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }] },
   ] })));

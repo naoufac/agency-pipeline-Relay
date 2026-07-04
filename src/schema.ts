@@ -89,8 +89,19 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     const oi = ents.find(e2 => e2.name === 'order_items');
     if (oi) {
       oi.fields = oi.fields || [];
+      // the LLM spells the variant FK many ways (product_variant_id NOT NULL — a real canary
+      // catch: placeOrder writes the CANONICAL variant_id, the alien column stayed null and NO
+      // order could ever land). Canonicalize the spelling FIRST, then force it optional: a line
+      // item without options is legal by contract.
+      for (const f of oi.fields) {
+        if (/^(product_)?variants?_id$/.test(snake(f?.name)) && snake(f?.name) !== 'variant_id') {
+          warnings.push(`order_items.${snake(f.name)} → variant_id (canonical line-item variant column)`);
+          f.name = 'variant_id';
+        }
+      }
       if (!oi.fields.some(f => snake(f?.name) === 'variant_name')) oi.fields.push({ name: 'variant_name', type: 'text' });
       if (!oi.fields.some(f => snake(f?.name) === 'variant_id')) oi.fields.push({ name: 'variant_id', type: 'int' });
+      for (const f of oi.fields) if (['variant_id', 'variant_name'].includes(snake(f?.name))) { f.required = false; }
       // a variants-first model links line items to the VARIANT and skips the product entirely
       // (order_items.product_variant_id, no product_id — a real canary catch: placeOrder's store
       // contract needs product_id and the store could not sell). Canonicalize: product_id always exists.

@@ -74,10 +74,12 @@ async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[
 // once rendered a homepage catalog of time_slots. If only machine tables have rows, there is NO
 // primary catalog ('' → nothing is injected); no catalog is better than machine furniture.
 const MACHINE_TABLE = /^(time_?slots?|slots?|availabilit(y|ies)|schedules?|calendars?|shifts?|opening_?hours?|hours|blackout_dates?|holidays?)$/i;
+// options are rows OF a product, never a collection of their own — a variants grid is spec noise
+const OPTIONS_TABLE = /^product_variants$|_variants?$|^variants?$/i;
 export function choosePrimaryTable(tables: { table: string; rows: number }[]): string {
   const lookup = /contact|setting|config|admin|^users?$|account|auth|session|^tags?$|meta|_info$|^info$/i;
   const named = /product|listing|item|menu|post|article|service|event|propert|vehicle|\bcar\b|recipe|course|\bjob|maker|plant|book|dish|room|catalog|portfolio|gallery|review|member|deal|offer|spot|class|trip|tour/i;
-  const cand = tables.filter((t) => !lookup.test(t.table) && !MACHINE_TABLE.test(t.table) && t.rows > 0).sort((a, b) => b.rows - a.rows);
+  const cand = tables.filter((t) => !lookup.test(t.table) && !MACHINE_TABLE.test(t.table) && !OPTIONS_TABLE.test(t.table) && t.rows > 0).sort((a, b) => b.rows - a.rows);
   return (cand.find((t) => named.test(t.table)) || cand[0] || { table: '' }).table;
 }
 

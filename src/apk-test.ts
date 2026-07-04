@@ -107,6 +107,7 @@ ok('apkStatus: no artifact → apk:false, no url invented', await (async () => {
   ok('replan carries the slug forward (a rebuild may never move the site)', plannerSrc.includes('slug: prev.slug'));
   const runnerSrc = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
   ok('slug lock derives from the LOCKED brand, never the re-resolved name', runnerSrc.includes('lockedName') && runnerSrc.includes('brandSlug(lockedName)'));
+  ok('primary-table chooser never grids the options table', runnerSrc.includes('OPTIONS_TABLE') && runnerSrc.includes('!OPTIONS_TABLE.test(t.table)'));
 }
 
 // ---- serving: the pieces the phone actually touches ----
