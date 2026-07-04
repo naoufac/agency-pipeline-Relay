@@ -73,6 +73,14 @@ ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="r
   ok('variants-first line items get product_id injected', /"product_id" integer/.test(vfirst.resolved.createSql['order_items'] || ''), vfirst.resolved.createSql['order_items']);
   ok('...and qty injected when missing', /"qty" integer/.test(vfirst.resolved.createSql['order_items'] || ''));
   ok('...loudly', vfirst.warnings.some((w: string) => /product_id injected/.test(w)));
+  // seed hygiene (two canary catches): fake visitor records stripped; born-sold-out coerced
+  const seedy = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'products', public: true, fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money' }, { name: 'stock', type: 'int' }], seed: [{ title: 'Amber', price: 18, stock: 0 }] },
+    { name: 'product_variants', fields: [{ name: 'product', type: 'ref:products', required: true }, { name: 'name', type: 'text', required: true }, { name: 'stock', type: 'int' }], seed: [{ product: 1, name: '4oz', stock: 0 }] },
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }], seed: [{ customer_name: 'Emma Fake' }, { customer_name: 'James Fake' }] },
+  ] })));
+  ok('seeded FAKE ORDERS are stripped (visitors create those, never the model)', !seedy.ddl.includes('Emma Fake') && seedy.warnings.some((w: string) => /stripped 2 seeded visitor/.test(w)), JSON.stringify(seedy.warnings));
+  ok('a store is never BORN sold out (seeded stock 0 → untracked)', !/insert into "product_variants".*, 0\)/.test(seedy.ddl) && seedy.warnings.some((w: string) => /born sold out/.test(w)));
   ok('payments: checkout carries the "How you\'ll pay" box', co.includes('data-payopts') && co.includes("How you'll pay"));
   ok('payments: the page runtime fills it from payment_options (live read)', co.includes("/data/payment_options'"));
   ok('payments: the box stays hidden when the store has no options', /<div class="payopts" data-payopts hidden>/.test(co));
@@ -123,15 +131,18 @@ const id = randomUUID();
 const schema = appdb.schemaName(id);
 const MODEL = JSON.stringify({ entities: [
   { name: 'products', public: true, display: 'title', fields: [{ name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'stock', type: 'int' }],
-    seed: [{ title: 'Mug', price: 24, stock: 3 }, { title: 'Bowl', price: 38.5 }, { title: 'Vase', price: 64, stock: 0 }, { title: 'Tee', price: 20 }] },
+    seed: [{ title: 'Mug', price: 24, stock: 3 }, { title: 'Bowl', price: 38.5 }, { title: 'Vase', price: 64, stock: 9 }, { title: 'Tee', price: 20 }] },
   { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' }, { name: 'phone', type: 'text' }, { name: 'notes', type: 'longtext' }, { name: 'status', type: 'status' }, { name: 'total', type: 'money' }] },
   { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'product', type: 'ref:products', required: true }, { name: 'qty', type: 'int', required: true }, { name: 'unit_price', type: 'money' }] },
   // PQ2 · variants (note the non-canonical name — compile must normalize it to product_variants)
   { name: 'variants', fields: [{ name: 'product', type: 'ref:products', required: true }, { name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }, { name: 'stock', type: 'int' }],
-    seed: [{ product: 4, name: 'S' }, { product: 4, name: 'XL', price: 26, stock: 1 }, { product: 4, name: 'M', stock: 0 }] },
+    seed: [{ product: 4, name: 'S' }, { product: 4, name: 'XL', price: 26, stock: 1 }, { product: 4, name: 'M', stock: 5 }] },
 ] });
 try {
   await appdb.provision(pool, id, MODEL);
+  // sold-out states are the OWNER's doing (Content tab), never seeds — set them explicitly here
+  await pool.query(`update "${schema}"."products" set stock=0 where id=3`);
+  await pool.query(`update "${schema}"."product_variants" set stock=0 where id=3`);
   // the happy path: 2× Mug + 1× Bowl = 2*24 + 38.5 = 86.5 — computed SERVER-side
   const r = await appdb.placeOrder(pool, id, { customer_name: 'Ada Buyer', email: 'ada@example.com', phone: '123', notes: 'gift wrap' }, [{ id: 1, qty: 2 }, { id: 2, qty: 1 }]);
   ok('order placed', r.ok === true, JSON.stringify(r));

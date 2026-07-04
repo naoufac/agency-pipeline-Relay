@@ -206,7 +206,9 @@ try {
         seed: [{ customer_name: 'Seed Guest', reservation_date: '2030-05-04', reservation_time: '6 PM', party_size: 2 }] },
     ] })));
     ok('split date+time merges into one timestamp column', /"reservation_date" timestamptz/.test(m5.ddl) && !/"reservation_time"/.test(m5.ddl), m5.ddl.slice(0, 400));
-    ok('the merged seed carries the real time (6 PM → 18:00)', m5.ddl.includes("2030-05-04T18:00:00"), m5.ddl.slice(-300));
+    // seed hygiene supersedes the seed-merge: reservations is a visitor-record table, so its seeds
+    // are STRIPPED entirely (visitors create bookings — the model may not invent them)
+    ok('private-table seeds are stripped (nothing to merge)', !(m5.resolved.seedSql['reservations'] || []).length && m5.warnings.some((w: string) => /stripped .*visitor record/.test(w)), JSON.stringify(m5.warnings));
     ok('the merge is loud (compile warning)', m5.warnings.some((w: string) => /canonical booking-time/.test(w)), JSON.stringify(m5.warnings));
     const m6 = compile(parseModel(JSON.stringify({ entities: [
       { name: 'posts', fields: [{ name: 'title', type: 'text', required: true }, { name: 'published_date', type: 'date' }, { name: 'read_time', type: 'text' }] },
@@ -324,7 +326,9 @@ try {
     { name: 'orders', fields: [{ name: 'customer_name', type: 'text' }, { name: 'status', type: 'status' }],
       seed: [{ customer_name: 'Seeded', status: 'preparing' }, { customer_name: 'Seeded2', status: 'Confirmed' }] }] }));
   const seeded = (await pool.query(`select status from "${appdb.schemaName(id3)}"."orders" order by id`)).rows.map((r: any) => r.status);
-  ok("out-of-set seed statuses coerce to 'pending' (case-insensitive keeps valid ones)", JSON.stringify(seeded) === '["pending","confirmed"]', JSON.stringify(seeded));
+  // the seed-hygiene floor supersedes status coercion here: ORDERS ARE NEVER SEEDED AT ALL — a
+  // canary build shipped three invented customers ('Emma Rodriguez') with fake revenue
+  ok('visitor-record seeds never reach the database (fake customers are fiction)', JSON.stringify(seeded) === '[]', JSON.stringify(seeded));
   await pool.query(`drop schema if exists "${appdb.schemaName(id3)}" cascade`).catch(() => {});
   const insN = await appdb.insertRow(pool, id, 'bookings', { customer_name: 'Notify N', email: 'notify@example.com' });
   const nid = Number((await pool.query(`select id from "${schema}"."bookings" where customer_name='Notify N'`)).rows[0].id);

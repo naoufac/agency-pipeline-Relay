@@ -17,12 +17,13 @@ const MODEL = JSON.stringify({ entities: [
   { name: 'products', public: true, display: 'title', fields: [
     { name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'in_stock', type: 'bool', default: true }, { name: 'photo_url', type: 'image' }],
     seed: [{ title: 'Mug', price: 24, in_stock: true }, { title: 'Bowl', price: 38.5, in_stock: true }] },
-  { name: 'orders', fields: [{ name: 'customer_name', type: 'text' }, { name: 'total', type: 'money' }], seed: [{ customer_name: 'Prior Buyer', total: 24 }] },
+  { name: 'orders', fields: [{ name: 'customer_name', type: 'text' }, { name: 'total', type: 'money' }] },
   { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders' }, { name: 'product', type: 'ref:products' }, { name: 'qty', type: 'int' }] },
 ] });
 
 try {
   await appdb.provision(pool, id, MODEL);
+  await appdb.insertRow(pool, id, 'orders', { customer_name: 'Prior Buyer', total: 24 });   // a real visitor action, not a seed
 
   // (1) editable collections: products IS content; orders/order_items are hidden system tables
   const colls = await appdb.contentTables(pool, id);

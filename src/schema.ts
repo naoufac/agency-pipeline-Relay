@@ -122,6 +122,26 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       warnings.push('products.price injected from the cheapest variant (variants carried the pricing)');
     }
   }
+  // SEED HYGIENE (two canary catches on one build):
+  // (1) the LLM seeded FAKE ORDERS ('Emma Rodriguez, $64') — visitor-record rows are the visitors'
+  //     to create, never the model's. Private-table seeds are fiction: stripped, loudly.
+  // (2) every variant seeded stock 0 — the store was BORN SOLD OUT and could never sell anything.
+  //     A seeded zero is invented scarcity (the auto-confirm lie's twin): coerced to untracked;
+  //     the owner sets real counts in the Content tab.
+  for (const e2 of ents) {
+    if (PRIVATE_READ.test(e2.name) && Array.isArray(e2.seed) && e2.seed.length) {
+      warnings.push(`${e2.name}: stripped ${e2.seed.length} seeded visitor record(s) — visitors create these, never the model`);
+      e2.seed = [];
+    }
+    if (/^(products|product_variants)$/.test(e2.name)) {
+      for (const row of (e2.seed || [])) {
+        if (row && typeof row === 'object' && Number(row.stock) === 0) {
+          delete row.stock;
+          warnings.push(`${e2.name}: seeded stock 0 coerced to untracked (a store must not be born sold out)`);
+        }
+      }
+    }
+  }
   // PAYMENTS v1 — every store carries owner-editable PAYMENT INSTRUCTIONS: an injected public
   // payment_options table (rendered at checkout, edited in the Content tab, read live). The LLM
   // never invents an IBAN — the one safe seed is "pay on pickup"; the owner types real details.
