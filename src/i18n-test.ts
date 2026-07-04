@@ -3,7 +3,7 @@
 // (2) the detector is deterministic and never guesses (ambiguity → English),
 // (3) a locale actually changes the rendered page — chrome, lang attribute, client dict —
 // (4) and the DEFAULT stays byte-English so every existing site renders exactly as before.
-import { LOCALES, STRINGS, L, detectLocale, clientDict, isLocale } from './i18n.ts';
+import { LOCALES, STRINGS, L, detectLocale, clientDict, isLocale, currencyFor, curSym, columnLabel } from './i18n.ts';
 import { renderPage } from './render.ts';
 
 let pass = 0, fail = 0;
@@ -57,6 +57,35 @@ ok('footer standing links are Italian', it.includes('>Trova la mia prenotazione<
 const en = renderPage(SPEC, CTX as any);
 ok('no locale → English chrome, unchanged', en.includes('<html lang="en">') && en.includes('Full name') && en.includes('Place order') && en.includes('"add_to_cart":"Add to cart"'));
 ok('bogus locale → English (closed set enforced at render)', renderPage(SPEC, { ...CTX, locale: 'xx' } as any).includes('<html lang="en">'));
+
+// ---- currency: a build property; English stays $, the euro-zone locales get € ----
+ok('currency: en → $, it/fr/es/de → €', curSym('en') === '$' && curSym('it') === '€' && curSym('de') === '€' && currencyFor('fr') === 'EUR' && currencyFor(undefined) === 'USD');
+ok('client dict carries the symbol', clientDict('it').cur === '€' && clientDict(undefined).cur === '$');
+ok('PDP price renders € on an Italian site', (() => {
+  const pdp = renderPage({ brand: { name: 'X', tokens: {} }, sections: [{ type: 'product', row: { id: 1, title: 'Vaso', price: 12 } }] }, { ...CTX, locale: 'it' } as any);
+  return pdp.includes('€12.00') && !pdp.includes('$12.00');
+})());
+ok('PDP price stays $ by default (existing sites untouched)', (() => {
+  const pdp = renderPage({ brand: { name: 'X', tokens: {} }, sections: [{ type: 'product', row: { id: 1, title: 'Vase', price: 12 } }] }, CTX as any);
+  return pdp.includes('$12.00');
+})());
+
+// ---- form labels: common schema columns speak the locale; English is byte-identical fallback ----
+ok('columnLabel: it knows the common columns', columnLabel('it', 'customer_name', 'Customer name') === 'Nome e cognome' && columnLabel('it', 'party_size', 'Party size') === 'Numero di persone');
+ok('columnLabel: en ALWAYS uses the fallback (byte-compat)', columnLabel('en', 'customer_name', 'Customer name') === 'Customer name' && columnLabel(undefined, 'email', 'Email!') === 'Email!');
+ok('columnLabel: unknown column falls back to humanize, never breaks', columnLabel('it', 'favorite_dinosaur', 'Favorite dinosaur') === 'Favorite dinosaur');
+
+// ---- action errors: the visitor's language at the exact moment of rejection ----
+ok('error strings: Italian slot-taken + sold-out', L('it', 'err_slot_taken').includes('orario') && L('it', 'err_sold_out_item', { t: 'Vaso' }) === '"Vaso" è esaurito');
+ok('error strings: English byte-exact with history (gates elsewhere assert them)', L('en', 'err_slot_taken') === 'that slot was just taken — pick another time' && L('en', 'err_only_n_of', { n: 2, t: 'Mug' }) === 'only 2 of "Mug" left — reduce the quantity');
+{
+  const appdb = readFileSync(new URL('./appdb.ts', import.meta.url), 'utf8');
+  ok('appdb: every visitor error goes through L() (no hardcoded English left)', !appdb.includes("'your name is required'") && !appdb.includes('is in the past — pick an upcoming date`') && appdb.includes('localeOf'));
+}
+{
+  const canary = readFileSync(new URL('./canary.ts', import.meta.url), 'utf8');
+  ok('canary rotation includes the Italian flight', canary.includes('trattoria di quartiere con prenotazioni'));
+}
 
 // ---- client dict: every key it promises exists in every locale ----
 {

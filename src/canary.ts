@@ -12,6 +12,8 @@ const BRIEFS = [
   'a barbershop booking app — customers pick a barber, a service and a time slot, and book',
   'an online store for a small-batch candle maker — classic scents in three sizes',
   'a neighborhood taqueria with weekend reservations and a blog of family recipes',
+  // i18n: the Italian flight — proves locale detection, Italian chrome, € pricing, all zero-touch
+  'una trattoria di quartiere con prenotazioni per il weekend e un blog di ricette della nonna',
 ];
 const BASE = process.env.CANARY_BASE || 'http://127.0.0.1:8787';
 const BOARD = process.env.PUBLIC_URL || 'https://board.naples.agency';

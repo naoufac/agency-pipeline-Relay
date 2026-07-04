@@ -765,3 +765,20 @@ Default is byte-English: no locale → the exact pages we shipped yesterday (all
 suites pass untouched except two layout gates repointed at the stronger RELAY_T
 invariant). i18n:check is suite 15 (23 gates). Residual for v1.1: server/appdb error
 strings (slot taken, sold out) and LLM-named form column labels.
+
+## 2026-07-04 — i18n v1.1: the money and the messages
+
+The Italian E2E exposed what v1 didn't cover: a trattoria pricing in $, English rejection
+messages at the exact moment of trust ("that slot was just taken"), and form labels
+humanized from English column names. All three closed: currencyFor(locale) — en→$ (USD),
+it/fr/es/de→€ (EUR), symbol threaded through the client dict (RELAY_T.cur → __money, grids,
+From-prices) and the server renders (PDP, variant pills, money meta); v1 is symbol-only —
+decimal-comma formatting is future work. Every appdb visitor error (13 strings: name/email
+required, product gone, option gone, sold out, only-N-left, has-options, past date, slot
+taken, slot full, image errors) now goes through L() with a per-project localeOf lookup on
+WRITE paths only — English values byte-exact with history so every existing gate stays
+green. Common schema columns (customer_name, party_size, booking_date… 23 names) get
+localized form labels at render time; English always uses the humanize fallback
+(byte-compat); unknown columns stay humanized. The canary rotation gains a 4th brief IN
+ITALIAN — locale detection, Italian chrome and € pricing now get proven zero-touch every
+4th night. i18n:check 35 gates; all 15 suites green.

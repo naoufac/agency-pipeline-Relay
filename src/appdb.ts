@@ -1,4 +1,5 @@
 // LIVE per-project database — the leap from "ships a schema file" to "the app runs on a real DB".
+import { L } from './i18n.ts';
 // Each project's tables live in their OWN Postgres schema `app_<hex>`, NEVER `public`. Every operation
 // is namespace-isolated, identifier-validated, and parameterized, so a produced app's data model is real
 // and queryable while the engine's tables (public) can never be touched. This is the safety contract:
@@ -193,6 +194,12 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
 // products / orders / order_items (enforced by the app_db gate for store briefs). ZERO TRUST in the
 // client: prices come from the products table, the total is computed HERE, unit prices are
 // snapshotted onto the line items, and the whole write is one transaction.
+// the visitor's language for ACTION errors — write paths only (a rejected order/booking is
+// exactly the moment a half-English message breaks trust). One tiny indexed query per write.
+async function localeOf(pool: pg.Pool, projectId: string): Promise<string | undefined> {
+  try { return (await pool.query("select params->>'locale' as l from projects where id=$1", [projectId])).rows[0]?.l || undefined; } catch { return undefined; }
+}
+
 export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record<string, any>, items: { id: any; qty: any; variant?: any }[]): Promise<{ ok: boolean; order?: number; total?: number; ref?: string; error?: string }> {
   const schema = schemaName(projectId);
   const tables = await listTables(pool, projectId);
@@ -212,8 +219,9 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
   }
   const name = String(buyer?.customer_name ?? buyer?.name ?? '').trim();
   const email = String(buyer?.email ?? '').trim();
-  if (!name || name.length > 120) return { ok: false, error: 'your name is required' };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return { ok: false, error: 'a real email is required' };
+  const loc = await localeOf(pool, projectId);
+  if (!name || name.length > 120) return { ok: false, error: L(loc, 'err_name_required') };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return { ok: false, error: L(loc, 'err_email_required') };
   // server-side pricing — the client\'s numbers are never used
   const allProdCols = await typedColumns(pool, schema, 'products');
   const priceCols = allProdCols.filter(c => /numeric|int|real|double|decimal/.test(c.type) && /^(price|amount|cost)$/.test(c.name));
@@ -225,7 +233,7 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
   const prod = await pool.query(`select id, "${pcol}"::numeric as price${ttlCol ? `, "${ttlCol}" as title` : ''} from "${schema}"."products" where id = any($1)`, [lines.map(l => l.id)]);
   const priceById = new Map<number, number>(prod.rows.map((r: any) => [Number(r.id), Number(r.price)]));
   const titleById = new Map<number, string>(prod.rows.map((r: any) => [Number(r.id), String(r.title ?? ('#' + r.id))]));
-  for (const l of lines) if (!priceById.has(l.id)) return { ok: false, error: 'a product in your cart no longer exists' };
+  for (const l of lines) if (!priceById.has(l.id)) return { ok: false, error: L(loc, 'err_product_gone') };
   // column-flexible write (the model may name columns slightly differently), one transaction
   const oCols = new Set((await typedColumns(pool, schema, 'orders')).map(c => c.name));
   const iCols = new Set((await typedColumns(pool, schema, 'order_items')).map(c => c.name));
@@ -251,18 +259,18 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
       const ttl = titleById.get(l.id) || ('#' + l.id);
       if (l.variant !== null) {
         const vr = (await c.query(`select ${vHasName ? '"name", ' : ''}${vHasPrice ? '"price"::numeric as price, ' : ''}${vHasStock ? '"stock", ' : ''}"product_id" from "${schema}"."product_variants" where id=$1 for update`, [l.variant])).rows[0];
-        if (!vr || Number(vr.product_id) !== l.id) { await c.query('rollback'); return { ok: false, error: 'that option no longer exists — refresh and pick again' }; }
+        if (!vr || Number(vr.product_id) !== l.id) { await c.query('rollback'); return { ok: false, error: L(loc, 'err_option_gone') }; }
         const vname = vHasName ? String(vr.name ?? '') : '';
         if (vHasStock && vr.stock != null) {
           const stk = Number(vr.stock);
-          if (l.qty > stk) { await c.query('rollback'); return { ok: false, error: stk === 0 ? `"${ttl} — ${vname}" is sold out` : `only ${stk} of "${ttl} — ${vname}" left — reduce the quantity` }; }
+          if (l.qty > stk) { await c.query('rollback'); return { ok: false, error: stk === 0 ? L(loc, 'err_sold_out_item', { t: `${ttl} — ${vname}` }) : L(loc, 'err_only_n_of', { n: stk, t: `${ttl} — ${vname}` }) }; }
         }
         effPrice.set(key, vHasPrice && vr.price != null ? Number(vr.price) : priceById.get(l.id)!);
         vnameByKey.set(key, vname);
       } else {
         if (hasVariants) {
           const n = Number((await c.query(`select count(*)::int n from "${schema}"."product_variants" where product_id=$1`, [l.id])).rows[0].n);
-          if (n > 0) { await c.query('rollback'); return { ok: false, error: `"${ttl}" comes in options — choose one on its product page, then add it to the cart` }; }
+          if (n > 0) { await c.query('rollback'); return { ok: false, error: L(loc, 'err_has_options', { t: ttl }) }; }
         }
         effPrice.set(key, priceById.get(l.id)!);
       }
@@ -276,7 +284,7 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
         if (srow && srow.stock != null) {
           const stk = Number(srow.stock);
           const ttl = ttlCol ? String(srow.title ?? ('#' + l.id)) : ('#' + l.id);
-          if (l.qty > stk) { await c.query('rollback'); return { ok: false, error: stk === 0 ? `"${ttl}" is sold out` : `only ${stk} of "${ttl}" left — reduce the quantity` }; }
+          if (l.qty > stk) { await c.query('rollback'); return { ok: false, error: stk === 0 ? L(loc, 'err_sold_out_item', { t: ttl }) : L(loc, 'err_only_n_of', { n: stk, t: ttl }) }; }
         }
       }
     }
@@ -505,7 +513,7 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
     for (const c of use) {
       if (!/^(date|timestamp)/.test(c.type)) continue;
       const m = String(data[c.name] ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
-      if (m && m[1] < today) return { ok: false, error: `that ${c.name.replace(/_/g, ' ')} is in the past — pick an upcoming date` };
+      if (m && m[1] < today) return { ok: false, error: L(await localeOf(pool, projectId), 'err_past_date', { f: c.name.replace(/_/g, ' ') }) };
     }
     if (SLOT_TABLE.test(table)) {
       const slotErr = await slotGuard(pool, projectId, schema, table, cols, data);
@@ -521,7 +529,7 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
   try {
     await pool.query(`insert into "${schema}"."${table}" (${names.join(',')}) values (${vals.map((_, i) => '$' + (i + 1)).join(',')})`, vals);
   } catch (e: any) {
-    if (e?.code === '23505') return { ok: false, error: 'that slot was just taken — pick another time' };   // unique race
+    if (e?.code === '23505') return { ok: false, error: L(await localeOf(pool, projectId), 'err_slot_taken') };   // unique race
     throw e;
   }
   return { ok: true, ref };
@@ -559,7 +567,7 @@ async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table
       if (Number.isInteger(cap) && cap > 0) { capacity = cap; break; }
     }
   } catch {}
-  if (taken >= capacity) return capacity > 1 ? 'that time is fully booked — pick another slot' : 'that slot was just taken — pick another time';
+  if (taken >= capacity) { const gl = await localeOf(pool, projectId); return capacity > 1 ? L(gl, 'err_slot_full') : L(gl, 'err_slot_taken'); }
   return null;
 }
 
@@ -665,9 +673,10 @@ export async function saveRowImage(pool: pg.Pool, projectId: string, table: stri
   if (clean.length > 4_200_000) return { ok: false, error: 'image too large (max 3 MB)' };
   let buf: Buffer;
   try { buf = Buffer.from(clean, 'base64'); } catch { return { ok: false, error: 'not a valid image' }; }
-  if (buf.length < 24 || buf.length > 3_000_000) return { ok: false, error: buf.length <= 24 ? 'not a valid image' : 'image too large (max 3 MB)' };
+  const iloc = await localeOf(pool, projectId);
+  if (buf.length < 24 || buf.length > 3_000_000) return { ok: false, error: buf.length <= 24 ? L(iloc, 'err_not_image') : L(iloc, 'err_image_big') };
   const ext = sniffImage(buf);
-  if (!ext) return { ok: false, error: 'unsupported file type — use JPG, PNG, WebP or GIF' };
+  if (!ext) return { ok: false, error: L(iloc, 'err_bad_filetype') };
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const rel = `assets/up-${randomBytes(6).toString('hex')}.${ext}`;

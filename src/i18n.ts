@@ -101,6 +101,21 @@ export const STRINGS: Record<string, Record<Locale, string>> = {
   choose:           { en: 'Choose…', it: 'Scegli…', fr: 'Choisir…', es: 'Elegir…', de: 'Wählen…' },
   receipt_dyn_eyebrow: { en: '{x} received', it: '{x} ricevuta', fr: '{x} reçue', es: '{x} recibida', de: '{x} erhalten' },
   receipt_dyn_title:   { en: 'Your {x} is in', it: 'La tua {x} è registrata', fr: 'Votre {x} est enregistrée', es: 'Tu {x} está registrada', de: 'Deine {x} ist eingegangen' },
+  // visitor-facing ACTION errors (appdb) — the English values are byte-exact with the historical
+  // strings so every existing gate that asserts them stays green
+  err_name_required: { en: 'your name is required', it: 'il nome è obbligatorio', fr: 'votre nom est requis', es: 'tu nombre es obligatorio', de: 'dein Name ist erforderlich' },
+  err_email_required: { en: 'a real email is required', it: 'serve un indirizzo email valido', fr: 'une adresse e-mail valide est requise', es: 'se necesita un correo válido', de: 'eine gültige E-Mail ist erforderlich' },
+  err_product_gone: { en: 'a product in your cart no longer exists', it: 'un prodotto nel tuo carrello non esiste più', fr: 'un article de votre panier n’existe plus', es: 'un producto de tu carrito ya no existe', de: 'ein Produkt in deinem Warenkorb existiert nicht mehr' },
+  err_option_gone: { en: 'that option no longer exists — refresh and pick again', it: 'quell’opzione non esiste più — aggiorna e scegli di nuovo', fr: 'cette option n’existe plus — actualisez et choisissez à nouveau', es: 'esa opción ya no existe — actualiza y elige otra vez', de: 'diese Option existiert nicht mehr — bitte neu laden und erneut wählen' },
+  err_sold_out_item: { en: '"{t}" is sold out', it: '"{t}" è esaurito', fr: '« {t} » est épuisé', es: '"{t}" está agotado', de: '„{t}“ ist ausverkauft' },
+  err_only_n_of: { en: 'only {n} of "{t}" left — reduce the quantity', it: 'restano solo {n} di "{t}" — riduci la quantità', fr: 'plus que {n} de « {t} » — réduisez la quantité', es: 'solo quedan {n} de "{t}" — reduce la cantidad', de: 'nur noch {n} von „{t}“ — bitte Menge verringern' },
+  err_has_options: { en: '"{t}" comes in options — choose one on its product page, then add it to the cart', it: '"{t}" ha delle opzioni — scegline una nella sua pagina, poi aggiungila al carrello', fr: '« {t} » existe en plusieurs options — choisissez-en une sur sa page produit', es: '"{t}" tiene opciones — elige una en su página y añádela al carrito', de: '„{t}“ gibt es in Varianten — wähle eine auf der Produktseite und lege sie in den Warenkorb' },
+  err_past_date: { en: 'that {f} is in the past — pick an upcoming date', it: 'quella {f} è nel passato — scegli una data futura', fr: 'cette {f} est passée — choisissez une date à venir', es: 'esa {f} ya pasó — elige una fecha próxima', de: 'dieses {f} liegt in der Vergangenheit — bitte ein kommendes Datum wählen' },
+  err_slot_taken: { en: 'that slot was just taken — pick another time', it: 'quell’orario è appena stato preso — scegline un altro', fr: 'ce créneau vient d’être pris — choisissez un autre horaire', es: 'esa hora se acaba de ocupar — elige otra', de: 'dieser Termin wurde gerade vergeben — bitte eine andere Zeit wählen' },
+  err_slot_full: { en: 'that time is fully booked — pick another slot', it: 'quell’orario è al completo — scegli un altro orario', fr: 'cet horaire est complet — choisissez un autre créneau', es: 'esa hora está completa — elige otro horario', de: 'diese Zeit ist ausgebucht — bitte einen anderen Termin wählen' },
+  err_not_image: { en: 'not a valid image', it: 'immagine non valida', fr: 'image non valide', es: 'imagen no válida', de: 'kein gültiges Bild' },
+  err_image_big: { en: 'image too large (max 3 MB)', it: 'immagine troppo grande (max 3 MB)', fr: 'image trop lourde (max 3 Mo)', es: 'imagen demasiado grande (máx. 3 MB)', de: 'Bild zu groß (max. 3 MB)' },
+  err_bad_filetype: { en: 'unsupported file type — use JPG, PNG, WebP or GIF', it: 'formato non supportato — usa JPG, PNG, WebP o GIF', fr: 'format non pris en charge — utilisez JPG, PNG, WebP ou GIF', es: 'formato no compatible — usa JPG, PNG, WebP o GIF', de: 'Dateityp nicht unterstützt — nutze JPG, PNG, WebP oder GIF' },
 };
 
 // the lookup: unknown locale falls to 'en'; {n}-style slots are filled from args.
@@ -121,5 +136,43 @@ const CLIENT_KEYS = ['added_ok', 'thanks_msg', 'error_retry', 'generic_error', '
 export function clientDict(locale: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of CLIENT_KEYS) out[k] = L(locale, k);
+  out.cur = curSym(locale);
   return out;
+}
+
+// ---- currency: a build property derived from the locale (v1: symbol only, math untouched) ----
+export function currencyFor(locale: string | undefined): 'USD' | 'EUR' { return isLocale(locale) && locale !== 'en' ? 'EUR' : 'USD'; }
+export function curSym(locale: string | undefined): string { return currencyFor(locale) === 'EUR' ? '€' : '$'; }
+
+// ---- common schema column names → localized form labels. ENGLISH ALWAYS USES THE FALLBACK
+// (humanize), so existing sites stay byte-identical; non-en locales translate what they know
+// and humanize the rest (an unknown column is better half-translated than wrong).
+const COLUMN_LABELS: Record<string, Record<Exclude<Locale, 'en'>, string>> = {
+  customer_name: { it: 'Nome e cognome', fr: 'Nom complet', es: 'Nombre completo', de: 'Vollständiger Name' },
+  name: { it: 'Nome', fr: 'Nom', es: 'Nombre', de: 'Name' },
+  email: { it: 'Email', fr: 'E-mail', es: 'Correo electrónico', de: 'E-Mail' },
+  phone: { it: 'Telefono', fr: 'Téléphone', es: 'Teléfono', de: 'Telefon' },
+  date: { it: 'Data', fr: 'Date', es: 'Fecha', de: 'Datum' },
+  time: { it: 'Orario', fr: 'Heure', es: 'Hora', de: 'Uhrzeit' },
+  notes: { it: 'Note', fr: 'Remarques', es: 'Notas', de: 'Anmerkungen' },
+  message: { it: 'Messaggio', fr: 'Message', es: 'Mensaje', de: 'Nachricht' },
+  party_size: { it: 'Numero di persone', fr: 'Nombre de personnes', es: 'Número de personas', de: 'Personenzahl' },
+  guests: { it: 'Ospiti', fr: 'Invités', es: 'Invitados', de: 'Gäste' },
+  number_of_guests: { it: 'Numero di ospiti', fr: 'Nombre d’invités', es: 'Número de invitados', de: 'Anzahl der Gäste' },
+  service: { it: 'Servizio', fr: 'Service', es: 'Servicio', de: 'Leistung' },
+  quantity: { it: 'Quantità', fr: 'Quantité', es: 'Cantidad', de: 'Menge' },
+  address: { it: 'Indirizzo', fr: 'Adresse', es: 'Dirección', de: 'Adresse' },
+  subject: { it: 'Oggetto', fr: 'Objet', es: 'Asunto', de: 'Betreff' },
+  city: { it: 'Città', fr: 'Ville', es: 'Ciudad', de: 'Stadt' },
+  company: { it: 'Azienda', fr: 'Entreprise', es: 'Empresa', de: 'Firma' },
+  booking_date: { it: 'Data della prenotazione', fr: 'Date de réservation', es: 'Fecha de la reserva', de: 'Buchungsdatum' },
+  reservation_date: { it: 'Data della prenotazione', fr: 'Date de réservation', es: 'Fecha de la reserva', de: 'Reservierungsdatum' },
+  appointment_date: { it: 'Data dell’appuntamento', fr: 'Date du rendez-vous', es: 'Fecha de la cita', de: 'Termindatum' },
+  preferred_date: { it: 'Data preferita', fr: 'Date souhaitée', es: 'Fecha preferida', de: 'Wunschdatum' },
+  preferred_time: { it: 'Orario preferito', fr: 'Heure souhaitée', es: 'Hora preferida', de: 'Wunschzeit' },
+};
+export function columnLabel(locale: string | undefined, column: string, fallback: string): string {
+  if (!isLocale(locale) || locale === 'en') return fallback;
+  const row = COLUMN_LABELS[String(column || '').toLowerCase()];
+  return row?.[locale] ?? fallback;
 }
