@@ -35,6 +35,7 @@
     "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
     "pwa:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/pwa-check.ts",
     "chain:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/chain-check.ts",
+    "digest": "set -a; . ./.env 2>/dev/null; set +a; tsx src/digest.ts",
     "canary": "set -a; . ./.env 2>/dev/null; set +a; tsx src/canary.ts"
   },
   "dependencies": {

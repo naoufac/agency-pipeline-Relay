@@ -1,0 +1,9 @@
+[Unit]
+Description=Relay daily brief — the morning digest on Telegram (every number from the DB)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/relay
+ExecStart=/usr/bin/npm run -s digest
+TimeoutStartSec=300

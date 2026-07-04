@@ -35,5 +35,14 @@ try {
   rmSync(out, { recursive: true, force: true });
 }
 
+// ---- the daily brief: every number from the DB, visitor rows only, dry-runnable ----
+{
+  const out2 = execFileSync('npx', ['tsx', new URL('./digest.ts', import.meta.url).pathname],
+    { encoding: 'utf8', env: { ...process.env, DIGEST_DRY: '1' }, timeout: 3 * 60_000 });
+  ok('digest: renders every section from live data', out2.includes('RELAY — daily brief') && out2.includes('Builds 24h:') && out2.includes('Canary:') && out2.includes('Vault:') && out2.includes('Surfaces:'), out2.slice(0, 200));
+  const src = readFileSync(new URL('./digest.ts', import.meta.url), 'utf8');
+  ok('digest: client activity counts PRIVATE tables only (seeds can never inflate it)', src.includes('PRIVATE_READ.test(t.table_name)'));
+}
+
 console.log(`\nbackup:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

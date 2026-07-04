@@ -854,3 +854,17 @@ passato" instead of the raw English column name; (3) fmtMoney: ONE money formatt
 stays byte-identical ($12.00), EUR locales read European (12,00 €) across the client
 runtime (__money/__moneyS via RELAY_T.meur), PDP, variant pills, and money meta. Gates
 updated to the stronger invariants; 17 suites green.
+
+## 2026-07-04 — APP UPDATES UNFROZEN + THE MORNING BRIEF
+
+Two deterministic ships while providers refill. (1) versionCode: every APK carried a
+constant 1 — Android refuses updates unless the code RISES, so every installed client app
+was frozen on its first version forever. params.apk_version now increments per packaging
+(persisted ONLY after a verified artifact — failed builds never skip versions), versionName
+tracks 1.0.N, the 9 already-packaged sites backfilled so their next build ships as a real
+update. PROVEN: taqueria-dona-rosa repackaged → aapt reads versionCode='2'
+versionName='1.0.2'. (2) src/digest.ts — the MORNING BRIEF at 07:30 UTC: builds/reviews/
+APKs in 24h, client activity (PRIVATE tables only — seed hygiene guarantees every counted
+row was written by a real visitor), canary verdict (incl. '⏭ skipped (quota)'), vault age,
+watchdog surfaces, disk, quota stalls. Every number from the database, never an agent's
+word. Gated in backup:check (11).
