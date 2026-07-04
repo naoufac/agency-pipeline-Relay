@@ -37,6 +37,22 @@ try {
   ok('chain page renders for a finished project', !!html && html.length > 2000, String(html?.length));
   const h = String(html || '');
 
+  // ANDROID section: strictly artifact-gated — appears ONLY when app.apk exists on disk
+  ok('no APK on disk → no Android section (never a promise)', !h.includes('It is also an Android app'));
+  {
+    const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { SITES } = await import('./verify.ts');
+    await pool.query(`update projects set params = jsonb_set(params, '{slug}', '"chain-check-scratch"') where id=$1`, [id]);
+    const dir = fileURLToPath(new URL(id + '/', SITES));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(dir + 'app.apk', 'not-a-real-apk');
+    const h2 = String(await renderLiveChain(pool, id) || '');
+    ok('APK on disk + slug → Android section with subdomain link', h2.includes('It is also an Android app') && h2.includes('https://chain-check-scratch.naples.agency/app.apk'));
+    ok('Android section carries a scannable QR (real svg)', /<svg[^>]*>[\s\S]*<\/svg>/.test(h2.slice(h2.indexOf('It is also an Android app'))));
+    rmSync(dir, { recursive: true, force: true });
+  }
+
   // the story — from curated data
   ok('site chrome: brand in the nav', h.includes('Chopline'));
   ok('the brief, verbatim', h.includes(BRIEF));

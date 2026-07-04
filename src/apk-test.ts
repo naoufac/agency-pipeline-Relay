@@ -1,7 +1,8 @@
 // apk:check — the Android identity is DERIVED, never hand-typed. These gates pin the
 // derivations (slug→packageId, webmanifest→twa-manifest, keystore→assetlinks) so a drift
 // in any of them fails the suite before an APK with a broken identity can ever be signed.
-import { packageIdFor, twaManifestFor, assetlinksFor, assertCleanSlug } from './apk.ts';
+import { packageIdFor, twaManifestFor, assetlinksFor, assertCleanSlug, apkStatus, packageProjectAsync } from './apk.ts';
+import { SECTIONS } from './components.ts';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -51,10 +52,39 @@ ok('keytool gets the password via -storepass:env, never argv', apkSrc.includes("
 ok('keystore preflight exists (missing keystore must never reach a bubblewrap prompt)', apkSrc.includes('existsSync(KEYSTORE)'));
 ok('CLI error path redacts the keystore password', apkSrc.includes('redact'));
 
+// ---- the surface: packaging is a product action, still invariant-guarded ----
+{
+  const saved = process.env.RELAY_KS_PASS;
+  delete process.env.RELAY_KS_PASS;
+  const r = packageProjectAsync({} as any, '00000000-0000-0000-0000-000000000000');
+  ok('packaging without signing config refuses (never a half-signed app)', r.started === false && !!r.error);
+  if (saved !== undefined) process.env.RELAY_KS_PASS = saved;
+}
+ok('apkStatus: no artifact → apk:false, no url invented', await (async () => {
+  const st = await apkStatus({} as any, '00000000-0000-0000-0000-000000000000', new URL('file:///nonexistent-apk-test/'));
+  return st.apk === false && st.building === false && st.url === null;
+})());
+{
+  const withApp = SECTIONS.chain({ android: { url: 'https://demo.naples.agency/app.apk', qr: '<svg data-qr="1"></svg>' } });
+  ok('chain section: android block renders link + QR when an APK exists', withApp.includes('https://demo.naples.agency/app.apk') && withApp.includes('data-qr="1"') && withApp.includes('Android app'));
+  const without = SECTIONS.chain({});
+  ok('chain section: NO android block without an APK (never a promise)', !without.includes('Android app (') && !without.includes('Download the app'));
+}
+
 // ---- serving: the pieces the phone actually touches ----
 const server = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
 ok('server: .apk has the android MIME type', server.includes("apk: 'application/vnd.android.package-archive'"));
 ok('server: subdomain Host-routing exists (the APK origin resolves)', server.includes('.naples.agency') && server.includes("path = '/sites/'"));
+{
+  const i = server.indexOf("path === '/api/apk'");
+  const route = i >= 0 ? server.slice(i, i + 700) : '';
+  ok('server: /api/apk exists and is ownership-gated (404, never leaked)', i >= 0 && route.includes('canSee') && route.includes('ownerOf'));
+  ok('server: POST /api/apk goes through packageProjectAsync (in-flight capped)', route.includes('packageProjectAsync'));
+}
+{
+  const appjs = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  ok('board: Android button wired to /api/apk with polling', appjs.includes("/api/apk?id=") && appjs.includes('Make Android app'));
+}
 
 console.log(`\napk:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

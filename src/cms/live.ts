@@ -7,6 +7,8 @@ import { renderPage, formPageSlug, receiptsEnabled } from '../render.ts';
 import { processMedia } from '../media.ts';
 import { brandFor } from './util.ts';
 import { SITES } from '../verify.ts';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as appdb from '../appdb.ts';
 import { PRIVATE_READ } from '../schema.ts';
 import { themeTone } from '../themes.ts';
@@ -208,6 +210,17 @@ export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise
     run: { total: Number(tk.total) || 0, done: Number(tk.done) || 0, wallSecs: Number(tk.wall) || 0, repairs: evn('plan_repair'), rebuilds: evn('project_retry') },
     checks,
     review: rev ? { passed: !!rev.passed, issues: Number(rev.n) || 0, probed: archetype !== 'site' } : null,
+    android: await (async () => {
+      // shown ONLY when a signed APK actually exists on disk for this site — never a promise
+      try {
+        const slug = params.slug;
+        if (!slug || !existsSync(fileURLToPath(new URL(projectId + '/app.apk', SITES)))) return null;
+        const url = `https://${slug}.naples.agency/app.apk`;
+        const QR = (await import('qrcode')).default as any;
+        const qr = await QR.toString(url, { type: 'svg', margin: 1, width: 148 });
+        return { url, qr };
+      } catch { return null; }
+    })(),
   }];
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections };
   const html = renderPage(spec, { pages: navPages, slug: 'how-it-was-built', title: 'How this site was built', projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });

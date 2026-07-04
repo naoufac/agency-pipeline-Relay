@@ -198,6 +198,8 @@ p{margin:0 0 1rem}
 .chain-pill.pass{color:var(--accent)}
 .chain-check{list-style:none;padding:0;margin:1.2rem 0;display:grid;gap:.5rem}
 .chain-check li{padding-left:1.5rem;position:relative}.chain-check li:before{content:"✓";position:absolute;left:0;color:var(--accent);font-weight:700}
+.chain-android{display:flex;gap:2rem;align-items:center;flex-wrap:wrap;margin-top:2rem}
+.chain-android svg{width:148px;height:148px;background:#fff;border-radius:10px;padding:8px;border:1px solid var(--line)}
 /* FS1 · receipt (record) + find-my-booking */
 .receipt-box{max-width:640px;margin:0 auto}
 .receipt-ref{background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius);padding:16px 20px;margin:1.2rem 0;text-align:center}
@@ -434,7 +436,12 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <ul class="chain-check">${checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
       ${rev ? `<p style="margin-top:1.6rem"><span class="chain-pill${rev.passed ? ' pass' : ''}">${rev.passed ? '✓ Independent review: PASSED' : 'Independent review: ' + esc(String(rev.issues)) + ' finding(s) open'}</span></p>
       <p class="muted" style="margin-top:.8rem">A real browser walked every page${rev.probed ? ', performed the core action end to end,' : ''} and judged the result before this site was accepted.</p>` : ''}
-    </div></section>`;
+    </div></section>
+    ${d.android && d.android.url ? `<section class="section"><div class="container">
+      <h2>It is also an Android app</h2>
+      <p class="lead muted">The same product, packaged and signed as a real Android application. Scan with a phone — Android verifies this site's own domain and opens it fullscreen, no browser bar.</p>
+      <div class="chain-android">${d.android.qr || ''}<div><a class="btn" href="${esc(String(d.android.url))}">Download the app (.apk)</a></div></div>
+    </div></section>` : ''}`;
   },
   // BLOG · article — ONE post's own page, rendered live from its row (the PDP pattern for content).
   // SYSTEM-ONLY: not in spec KNOWN; cms/live.ts synthesizes it per request. Body is textContent-safe:

@@ -15,6 +15,7 @@ import { requestVisitorMagic, verifyVisitorMagic, visitorFromCookie, visitorCook
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
 import { mailReady, notifyLead, sendMail } from './mail.ts';
+import { apkStatus, packageProjectAsync } from './apk.ts';
 import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
 import { startTgDoor } from './tg-door.ts';
 
@@ -252,6 +253,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         return;
       }
       return send(res, 404, 'text/plain', 'site not found');
+    }
+    // ANDROID surface: GET = is there an app / is one being packaged; POST = package this site.
+    // Owner-gated like every project API (404, never 403 — existence is not leaked).
+    if (path === '/api/apk') {
+      const aid = url.searchParams.get('id') || '';
+      if (!/^[0-9a-f-]{36}$/.test(aid)) return send(res, 404, 'application/json', '{"error":"not found"}');
+      if (!canSee(user, await ownerOf(aid))) return send(res, 404, 'application/json', '{"error":"not found"}');
+      if (req.method === 'POST') {
+        const r = packageProjectAsync(pool, aid);
+        return send(res, r.started ? 202 : 409, 'application/json', JSON.stringify(r));
+      }
+      return send(res, 200, 'application/json', JSON.stringify(await apkStatus(pool, aid, SITES)));
     }
     if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(user, url.searchParams.get('id') || undefined)));
     if (path === '/api/projects') return send(res, 200, 'application/json', JSON.stringify(await projectsJSON(user)));

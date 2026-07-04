@@ -716,3 +716,18 @@ Box infra learned the hard way: bubblewrap wants sdkmanager at <sdk>/bin but gra
 wants a STANDARD sdk layout — /opt/android-sdk with bin→cmdline-tools/latest/bin symlink
 satisfies both. Also /tmp was mode 700 (broke apt entirely); restored 1777.
 Owner-gated next: Play Console account to publish the .aab to the store.
+
+## 2026-07-04 — ANDROID SURFACE: packaging is a board action, the chain page hands out the app
+
+Android v1 was root-CLI-only; now it's product. POST /api/apk?id= packages any produced
+site from the board (ownership-gated 404-style like every project API; ONE gradle build
+at a time — the in-flight set is both the double-click guard and the abuse cap; spawned
+as a child process because buildApk's execFileSync would freeze the whole server for the
+length of a gradle run; outcome recorded as run_events apk_built/apk_failed). GET returns
+{apk, building, url}. The board actionbar grows "📱 Make Android app" → "Packaging…" →
+"📱 Android app" (8s polling). The how-it-was-built page — THE CHAIN, rendered live —
+gains "It is also an Android app" with a scannable QR (qrcode → inline SVG) + .apk
+download, shown ONLY when the signed artifact actually exists on disk (never a promise).
+16 new gates (apk:check 33: preflight refusal without signing config, apkStatus honesty,
+section on/off by artifact, route ownership-gate + spawn path, board wiring; chain:check
+25: live section strictly artifact-gated, subdomain link, real QR svg). All 14 suites green.

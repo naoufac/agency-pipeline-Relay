@@ -7,7 +7,7 @@
 //   assetlinks  ← packageId + the relay signing key's SHA-256
 // Bubblewrap/gradle only executes what these generators decide — no LLM anywhere.
 import pg from 'pg';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -127,6 +127,53 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   writeFileSync(siteDir + '.well-known/assetlinks.json', JSON.stringify(assetlinksFor(pkg, sha), null, 1));
   copyFileSync(built, siteDir + 'app.apk');
   return { apk: siteDir + 'app.apk', packageId: pkg, sha256: sha, slug };
+}
+
+// ---- the product surface: packaging as a board action, not a root shell ----
+// ONE build at a time (gradle eats a core and ~1GB): the in-flight set is both the
+// double-click guard and the abuse cap on the public board.
+const inflight = new Set<string>();
+export function apkInFlight(projectId: string): boolean { return inflight.has(projectId); }
+
+export async function apkStatus(pool: pg.Pool, projectId: string, sitesUrl: URL): Promise<{ apk: boolean; building: boolean; url: string | null }> {
+  const has = existsSync(fileURLToPath(new URL(projectId + '/app.apk', sitesUrl)));
+  let url: string | null = null;
+  if (has) {
+    const slug = (await pool.query("select params->>'slug' as slug from projects where id=$1", [projectId])).rows[0]?.slug;
+    url = slug ? `https://${slug}.naples.agency/app.apk` : `/sites/${projectId}/app.apk`;
+  }
+  return { apk: has, building: inflight.has(projectId), url };
+}
+
+// spawns the CLI in a child process — buildApk itself is execFileSync-based and would
+// freeze the whole server's event loop for the length of a gradle run
+export function packageProjectAsync(pool: pg.Pool, projectId: string): { started: boolean; error?: string } {
+  if (inflight.has(projectId)) return { started: true };
+  if (inflight.size) return { started: false, error: 'another app is being packaged — try again in a minute' };
+  if (!process.env.RELAY_KS_PASS) return { started: false, error: 'signing is not configured on this server' };
+  if (!existsSync(KEYSTORE)) return { started: false, error: 'signing keystore missing on this server' };
+  inflight.add(projectId);
+  const jdk = process.env.RELAY_JDK_HOME || '/usr/lib/jvm/java-17-openjdk-amd64';
+  const child = spawn('npx', ['tsx', 'src/apk.ts', projectId], {
+    cwd: process.cwd(),
+    env: { ...process.env, JAVA_HOME: jdk, PATH: `${process.env.PATH || ''}:${jdk}/bin` },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout!.on('data', (c) => out += c);
+  child.stderr!.on('data', (c) => out += c);
+  const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 25 * 60_000);
+  const finish = async (code: number | null) => {
+    clearTimeout(killer);
+    inflight.delete(projectId);
+    const tail = out.trim().split('\n').slice(-3).join(' · ').slice(0, 400);
+    const { ev } = await import('./db.ts');
+    await ev(pool, projectId, null, code === 0 ? 'apk_built' : 'apk_failed', tail).catch(() => {});
+    if (code !== 0) console.error('apk package failed', projectId, tail);
+  };
+  child.on('close', finish);
+  child.on('error', (e) => { out += String(e?.message ?? e); finish(1); });
+  return { started: true };
 }
 
 // CLI: npm run -s apk -- <projectId>

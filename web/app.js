@@ -212,8 +212,28 @@ function project(id, tab, seq){
           <button class="btn btn-ghost" id="share">Share link</button>
           <button class="btn btn-ghost" id="rebuild" title="Update the brief — rebuilds this site in place; its database and identity survive">Rebuild</button>
           <button class="btn btn-ghost" id="rerun" title="Re-run as a new site">Re-run</button>
+          <span id="apkspot"></span>
           <span class="muted" style="margin-left:auto;font-size:13px">${prow.wall?`Built in ${prow.wall}s · `:''}${done}/${total} steps · verified</span>
         </div>`;
+      // ANDROID: package this site as a signed app / hand out the existing one
+      const apkSpot = body.querySelector('#apkspot');
+      let apkT = null;
+      const apkUI = async () => {
+        try {
+          const st = await j('/api/apk?id='+id);
+          if (st.apk) { apkSpot.innerHTML = `<a class="btn btn-ghost" href="${esc(st.url)}" title="Signed Android app — install and it opens fullscreen">📱 Android app</a>`; return true; }
+          if (st.building) { apkSpot.innerHTML = `<button class="btn btn-ghost" disabled>📱 Packaging…</button>`; return false; }
+          apkSpot.innerHTML = `<button class="btn btn-ghost" id="mkapk" title="Package this site as a signed Android app (~2 min)">📱 Make Android app</button>`;
+          apkSpot.querySelector('#mkapk').onclick = async e => {
+            e.target.disabled = true; e.target.textContent = '📱 Packaging…';
+            try { const r = await j('/api/apk?id='+id, { method:'POST' }); if (r.error) { toast(r.error); apkUI(); return; } } catch {}
+            if (apkT) clearInterval(apkT);
+            apkT = setInterval(async () => { if (await apkUI()) { clearInterval(apkT); apkT = null; } }, 8000);
+          };
+          return true;
+        } catch { return true; }
+      };
+      apkUI();
       body.querySelector('#share').onclick = e => { navigator.clipboard?.writeText(location.origin + b.site); e.target.textContent='Copied ✓'; setTimeout(()=>e.target.textContent='Share link',1500); };
       body.querySelector('#rerun').onclick = async e => { e.target.textContent='Re-running…'; e.target.disabled=true; try{ const r=await j('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({brief:b.project.brief})}); location.hash='#/p/'+r.id; }catch{} };
       body.querySelector('#rebuild').onclick = async e => {
