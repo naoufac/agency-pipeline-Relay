@@ -63,6 +63,16 @@ ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="r
   ok('variant-priced model: seeds backfilled from the CHEAPEST variant (18, 20)',
     (vpriced.resolved.seedSql['products'] || []).join(' ').includes('18') && (vpriced.resolved.seedSql['products'] || []).join(' ').includes('20'), JSON.stringify(vpriced.resolved.seedSql['products']));
   ok('variant-priced model: the backfill is loud', vpriced.warnings.some((w: string) => /cheapest variant/.test(w)));
+  // variants-first line items (the canary's third catch): order_items referenced ONLY the variant
+  const vfirst = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'products', public: true, fields: [{ name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }], seed: [{ name: 'Amber', price: 18 }] },
+    { name: 'product_variants', fields: [{ name: 'product', type: 'ref:products', required: true }, { name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }], seed: [{ product: 1, name: '4 oz', price: 18 }] },
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+    { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders', required: true }, { name: 'product_variant', type: 'ref:product_variants', required: true }] },
+  ] })));
+  ok('variants-first line items get product_id injected', /"product_id" integer/.test(vfirst.resolved.createSql['order_items'] || ''), vfirst.resolved.createSql['order_items']);
+  ok('...and qty injected when missing', /"qty" integer/.test(vfirst.resolved.createSql['order_items'] || ''));
+  ok('...loudly', vfirst.warnings.some((w: string) => /product_id injected/.test(w)));
   ok('payments: checkout carries the "How you\'ll pay" box', co.includes('data-payopts') && co.includes("How you'll pay"));
   ok('payments: the page runtime fills it from payment_options (live read)', co.includes("/data/payment_options'"));
   ok('payments: the box stays hidden when the store has no options', /<div class="payopts" data-payopts hidden>/.test(co));

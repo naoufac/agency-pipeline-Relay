@@ -91,6 +91,17 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       oi.fields = oi.fields || [];
       if (!oi.fields.some(f => snake(f?.name) === 'variant_name')) oi.fields.push({ name: 'variant_name', type: 'text' });
       if (!oi.fields.some(f => snake(f?.name) === 'variant_id')) oi.fields.push({ name: 'variant_id', type: 'int' });
+      // a variants-first model links line items to the VARIANT and skips the product entirely
+      // (order_items.product_variant_id, no product_id — a real canary catch: placeOrder's store
+      // contract needs product_id and the store could not sell). Canonicalize: product_id always exists.
+      if (!oi.fields.some(f => /^product(_id)?$/.test(snake(f?.name)))) {
+        oi.fields.push({ name: 'product_id', type: 'int' });
+        warnings.push('order_items.product_id injected (line items referenced only the variant)');
+      }
+      if (!oi.fields.some(f => /^(qty|quantity)$/.test(snake(f?.name)))) {
+        oi.fields.push({ name: 'qty', type: 'int' });
+        warnings.push('order_items.qty injected (the store contract needs a quantity)');
+      }
     }
     // A model may price the VARIANTS and not the products ('scents in three sizes' — a real canary
     // catch: no products.price → no Add-to-cart → the store cannot sell). The store contract needs
