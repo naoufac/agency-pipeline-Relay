@@ -606,3 +606,16 @@ per-register card ANATOMY (text-forward service cards, menu-list register) · a 
 · hero de-collision. Parked per the owner's chain pivot until greenlit — the panel loop measures
 honestly either way. Trio review-passed zero-touch; side-by-side is visibly the best yet (three
 brands, three palettes, three photo voices) even where the skeleton repeats.
+
+## 2026-07-04 — LOCKED FIVE: iteration at the door · SEO · search · CSV export (upload queued)
+Prod 6be18d5, 13 suites (pwa 38 · layout 47 · content 34). Shipped + proven:
+- ITERATION (the missing half of the loop): reply to a build message — or 'change <id>: …' — and the
+  SAME site rebuilds amended via M3 replan. PROVEN live on the coffee blog: '…add an about page' →
+  about.html 200, subscribers=4 + articles=6 SURVIVED, article pages back, review PASSED. The
+  rebuild even survived a prod restart mid-flight (reclaim/resurrect did its job — watched live).
+- SEO pack (Grok brief 09, first-pass): meta description/og tags deterministic from the locked spec;
+  sitemap.xml + robots.txt per site; verified 200 + tags on the rebuilt blog.
+- SEARCH: grids >=8 rows grow a themed accessible filter box (client-only, textContent-safe).
+- CSV EXPORT: owner-gated /export/<table>.csv — sensitive stripped, RFC-quoted, BOM, formula
+  injection disarmed; ownership model identical to the content admin (M4 two-user gate applies).
+- Task #7 (Content-tab image upload) locked but not started — next session's first item.
