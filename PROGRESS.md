@@ -731,3 +731,17 @@ download, shown ONLY when the signed artifact actually exists on disk (never a p
 16 new gates (apk:check 33: preflight refusal without signing config, apkStatus honesty,
 section on/off by artifact, route ownership-gate + spawn path, board wiring; chain:check
 25: live section strictly artifact-gated, subdomain link, real QR svg). All 14 suites green.
+
+## 2026-07-04 — ANDROID BY DEFAULT: every finished build auto-packages; the canary proves it nightly
+
+The button was opt-in; now the app is a PROPERTY of every production build. The runner's
+post-done hook (review context only — suites and scratch runs never package) queues the
+site into the packaging FIFO: ONE gradle at a time, board button and auto-hook share the
+same queue, cap 8 (flood → refused, never accumulated), re-request idempotent, outcome in
+run_events. The nightly canary got two new teeth: after review passes + subdomain probe,
+it waits for apk_built (8 min budget; apk_failed or silence = alarm) and then downloads
+/app.apk over the wildcard Host route expecting a >100KB signed artifact — so "canary
+green" now certifies brief → site → subdomain → signed Android app, zero-touch, every
+night. Old canary packaging workdirs are swept with the projects (33MB each — a month of
+nights would eat a GB). 8 new gates (apk:check 41), queue behavior tested via injected
+launcher, all 14 suites green. PROVEN live: flight below.

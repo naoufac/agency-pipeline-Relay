@@ -129,11 +129,14 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   return { apk: siteDir + 'app.apk', packageId: pkg, sha256: sha, slug };
 }
 
-// ---- the product surface: packaging as a board action, not a root shell ----
-// ONE build at a time (gradle eats a core and ~1GB): the in-flight set is both the
-// double-click guard and the abuse cap on the public board.
-const inflight = new Set<string>();
-export function apkInFlight(projectId: string): boolean { return inflight.has(projectId); }
+// ---- the product surface: packaging as a board action AND a default build step ----
+// ONE gradle at a time (it eats a core and real memory); everything else waits in a FIFO.
+// The queue serves both the board button and the runner's auto-package hook; its cap is
+// the abuse ceiling on the public board.
+const QUEUE_CAP = 8;
+const queue: Array<{ pool: pg.Pool; projectId: string }> = [];
+let running: string | null = null;
+export function apkInFlight(projectId: string): boolean { return running === projectId || queue.some((q) => q.projectId === projectId); }
 
 export async function apkStatus(pool: pg.Pool, projectId: string, sitesUrl: URL): Promise<{ apk: boolean; building: boolean; url: string | null }> {
   const has = existsSync(fileURLToPath(new URL(projectId + '/app.apk', sitesUrl)));
@@ -142,17 +145,30 @@ export async function apkStatus(pool: pg.Pool, projectId: string, sitesUrl: URL)
     const slug = (await pool.query("select params->>'slug' as slug from projects where id=$1", [projectId])).rows[0]?.slug;
     url = slug ? `https://${slug}.naples.agency/app.apk` : `/sites/${projectId}/app.apk`;
   }
-  return { apk: has, building: inflight.has(projectId), url };
+  return { apk: has, building: apkInFlight(projectId), url };
 }
 
 // spawns the CLI in a child process — buildApk itself is execFileSync-based and would
-// freeze the whole server's event loop for the length of a gradle run
-export function packageProjectAsync(pool: pg.Pool, projectId: string): { started: boolean; error?: string } {
-  if (inflight.has(projectId)) return { started: true };
-  if (inflight.size) return { started: false, error: 'another app is being packaged — try again in a minute' };
+// freeze the whole server's event loop for the length of a gradle run.
+// launchFn is injectable ONLY so the gate suite can observe queue behavior without spawning.
+export function packageProjectAsync(pool: pg.Pool, projectId: string, launchFn: (pool: pg.Pool, projectId: string) => void = launchPackager): { started: boolean; queued?: boolean; error?: string } {
+  if (apkInFlight(projectId)) return { started: true, queued: running !== projectId };
   if (!process.env.RELAY_KS_PASS) return { started: false, error: 'signing is not configured on this server' };
   if (!existsSync(KEYSTORE)) return { started: false, error: 'signing keystore missing on this server' };
-  inflight.add(projectId);
+  if (running) {
+    if (queue.length >= QUEUE_CAP) return { started: false, error: 'packaging queue is full — try again later' };
+    queue.push({ pool, projectId });
+    return { started: true, queued: true };
+  }
+  running = projectId;
+  launchFn(pool, projectId);
+  return { started: true };
+}
+
+// test-only: reset the queue state so gates can exercise it in isolation
+export function _resetApkQueue(): void { queue.length = 0; running = null; }
+
+function launchPackager(pool: pg.Pool, projectId: string): void {
   const jdk = process.env.RELAY_JDK_HOME || '/usr/lib/jvm/java-17-openjdk-amd64';
   const child = spawn('npx', ['tsx', 'src/apk.ts', projectId], {
     cwd: process.cwd(),
@@ -165,15 +181,16 @@ export function packageProjectAsync(pool: pg.Pool, projectId: string): { started
   const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 25 * 60_000);
   const finish = async (code: number | null) => {
     clearTimeout(killer);
-    inflight.delete(projectId);
     const tail = out.trim().split('\n').slice(-3).join(' · ').slice(0, 400);
     const { ev } = await import('./db.ts');
     await ev(pool, projectId, null, code === 0 ? 'apk_built' : 'apk_failed', tail).catch(() => {});
     if (code !== 0) console.error('apk package failed', projectId, tail);
+    running = null;
+    const next = queue.shift();
+    if (next) { running = next.projectId; launchPackager(next.pool, next.projectId); }
   };
   child.on('close', finish);
   child.on('error', (e) => { out += String(e?.message ?? e); finish(1); });
-  return { started: true };
 }
 
 // CLI: npm run -s apk -- <projectId>

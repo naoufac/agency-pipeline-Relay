@@ -348,6 +348,11 @@ export async function runLoop(
       try { await cmsFinalize(pool, projectId); } catch (e: any) { console.error('cmsFinalize', projectId, e?.message ?? e); }
       reviewSite(pool, projectId).catch(() => {});          // visual QA + board thumbnail
       dogfoodSite(pool, projectId).catch(() => {});         // interaction QA: a real browser uses the site
+      // ANDROID BY DEFAULT: every finished production build also becomes a signed app —
+      // queued behind at most one running gradle, outcome in run_events (apk_built/apk_failed)
+      if (process.env.RELAY_APK_AUTO !== '0') {
+        try { const { packageProjectAsync } = await import('./apk.ts'); packageProjectAsync(pool, projectId); } catch (e: any) { console.error('auto-apk', projectId, e?.message ?? e); }
+      }
     })();
   }
   return { stopped: done ? 'complete' : 'blocked', steps };

@@ -1,7 +1,7 @@
 // apk:check — the Android identity is DERIVED, never hand-typed. These gates pin the
 // derivations (slug→packageId, webmanifest→twa-manifest, keystore→assetlinks) so a drift
 // in any of them fails the suite before an APK with a broken identity can ever be signed.
-import { packageIdFor, twaManifestFor, assetlinksFor, assertCleanSlug, apkStatus, packageProjectAsync } from './apk.ts';
+import { packageIdFor, twaManifestFor, assetlinksFor, assertCleanSlug, apkStatus, packageProjectAsync, _resetApkQueue, apkInFlight } from './apk.ts';
 import { SECTIONS } from './components.ts';
 import { readFileSync } from 'node:fs';
 
@@ -69,6 +69,39 @@ ok('apkStatus: no artifact → apk:false, no url invented', await (async () => {
   ok('chain section: android block renders link + QR when an APK exists', withApp.includes('https://demo.naples.agency/app.apk') && withApp.includes('data-qr="1"') && withApp.includes('Android app'));
   const without = SECTIONS.chain({});
   ok('chain section: NO android block without an APK (never a promise)', !without.includes('Android app (') && !without.includes('Download the app'));
+}
+
+// ---- the queue: one gradle at a time, FIFO, capped — observed via an injected launcher ----
+{
+  const saved = process.env.RELAY_KS_PASS;
+  process.env.RELAY_KS_PASS = 'test-only';
+  _resetApkQueue();
+  const launched: string[] = [];
+  const stub = (_p: any, id: string) => { launched.push(id); };
+  const a = packageProjectAsync({} as any, '11111111-1111-1111-1111-111111111111', stub);
+  const b = packageProjectAsync({} as any, '22222222-2222-2222-2222-222222222222', stub);
+  const a2 = packageProjectAsync({} as any, '11111111-1111-1111-1111-111111111111', stub);
+  ok('queue: first job launches immediately', a.started === true && !a.queued && launched.length === 1);
+  ok('queue: second job queues behind the running one (never a parallel gradle)', b.started === true && b.queued === true && launched.length === 1);
+  ok('queue: re-requesting a job already in flight is idempotent', a2.started === true && launched.length === 1);
+  ok('queue: both jobs report as in-flight', apkInFlight('11111111-1111-1111-1111-111111111111') && apkInFlight('22222222-2222-2222-2222-222222222222'));
+  let full = 0;
+  for (let i = 0; i < 20; i++) {
+    const r = packageProjectAsync({} as any, `33333333-3333-3333-3333-3333333333${String(i).padStart(2, '0')}`, stub);
+    if (!r.started) full++;
+  }
+  ok('queue: capped — floods are refused, not accumulated', full > 0, `refused ${full}`);
+  _resetApkQueue();
+  if (saved !== undefined) process.env.RELAY_KS_PASS = saved; else delete process.env.RELAY_KS_PASS;
+}
+
+// ---- android by default: the runner packages every finished production build ----
+{
+  const runner = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
+  ok('runner: auto-packages after done+review (RELAY_APK_AUTO gate)', runner.includes('packageProjectAsync') && runner.includes('RELAY_APK_AUTO'));
+  const canary = readFileSync(new URL('./canary.ts', import.meta.url), 'utf8');
+  ok('canary: asserts apk_built + serves /app.apk on the subdomain', canary.includes("type='apk_built'") && canary.includes("path: '/app.apk'"));
+  ok('canary: sweeps old packaging workdirs', canary.includes('/root/apk-builds/'));
 }
 
 // ---- serving: the pieces the phone actually touches ----

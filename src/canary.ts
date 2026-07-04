@@ -17,7 +17,7 @@ const BASE = process.env.CANARY_BASE || 'http://127.0.0.1:8787';
 const BOARD = process.env.PUBLIC_URL || 'https://board.naples.agency';
 
 async function sweepOldCanaries(pool: any, keepId: string) {
-  const old = (await pool.query("select id from projects where brief like '%— canary 2%' and id<>$1", [keepId])).rows;
+  const old = (await pool.query("select id, params->>'slug' as slug from projects where brief like '%— canary 2%' and id<>$1", [keepId])).rows;
   const { rmSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   for (const o of old) {
@@ -25,6 +25,10 @@ async function sweepOldCanaries(pool: any, keepId: string) {
     for (const t of ['dogfood_reviews', 'run_events', 'tasks', 'site_submissions']) await pool.query(`delete from ${t} where project_id=$1`, [o.id]).catch(() => {});
     await pool.query('delete from projects where id=$1', [o.id]).catch(() => {});
     try { rmSync(fileURLToPath(new URL('../sites/' + o.id, import.meta.url)), { recursive: true, force: true }); } catch {}
+    // the packaging workdir too — nightly canaries would otherwise grow /root/apk-builds forever
+    if (o.slug && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(o.slug)) {
+      try { rmSync('/root/apk-builds/' + o.slug, { recursive: true, force: true }); } catch {}
+    }
   }
   return old.length;
 }
@@ -68,6 +72,26 @@ async function main() {
             rq.on('error', rej); rq.end();
           });
           if (home.status !== 200 || !home.body.includes('<title>')) throw new Error(`subdomain route dead: ${slug}.naples.agency → ${home.status}`);
+          // ANDROID BY DEFAULT: the runner queued a packaging job when the build finished —
+          // a green canary now also means a signed APK exists and is served on the subdomain
+          if (process.env.RELAY_APK_AUTO !== '0' && process.env.RELAY_KS_PASS) {
+            const apkDeadline = Date.now() + 8 * 60_000;
+            for (;;) {
+              const got = (await pool.query("select 1 from run_events where project_id=$1 and type='apk_built' limit 1", [id])).rows[0];
+              if (got) break;
+              const bad = (await pool.query("select detail from run_events where project_id=$1 and type='apk_failed' order by id desc limit 1", [id])).rows[0];
+              if (bad) throw new Error('auto-APK failed: ' + String(bad.detail).slice(0, 200));
+              if (Date.now() > apkDeadline) throw new Error('auto-APK never arrived (8 min) — the packaging queue is stuck or the hook is gone');
+              await new Promise(res => setTimeout(res, 15_000));
+            }
+            const apk = await new Promise<{ status: number; len: number }>((res, rej) => {
+              const rq = httpRequest({ host: u.hostname, port: u.port || 80, path: '/app.apk', headers: { host: `${slug}.naples.agency` } }, (rs) => {
+                let n = 0; rs.on('data', (c) => n += c.length); rs.on('end', () => res({ status: rs.statusCode || 0, len: n }));
+              });
+              rq.on('error', rej); rq.end();
+            });
+            if (apk.status !== 200 || apk.len < 100_000) throw new Error(`auto-APK not served: /app.apk → ${apk.status} (${apk.len}B)`);
+          }
           const swept = await sweepOldCanaries(pool, id);
           console.log(`canary OK — review passed in ${mins} min · ${slug}.naples.agency routed (${swept} old canar${swept === 1 ? 'y' : 'ies'} swept)`);
           process.exit(0);
