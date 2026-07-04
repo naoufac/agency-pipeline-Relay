@@ -590,3 +590,19 @@ writing desk — publish by adding a row, edits show on the next load.
 PROOF zero-touch (specialty coffee blog + newsletter): review PASSED; externally verified —
 article page live ('Mastering the AeroPress in 5 Minutes'), post-999 → 404, subscribers sealed
 {"rows":[]}, signup writes with a receipt token. Owner sent the phone shot.
+
+## 2026-07-04 — Locked four: register cards · order receipts pay-info · hours-aware slots · HONEST re-score
+Prod fbc96b6, 13 suites (layout 45 · ecom 79 · app 172). Shipped: (1) service/menu registers render
+money muted 'From $X' (whole dollars, NEVER 'From $0.00' — free says nothing), inventory badges are
+commerce-only; (2) placeOrder mints the FS1 receipt token, checkout LANDS the buyer on their receipt,
+and the ORDER receipt repeats the live payment instructions; (3) freeSlots reads the model's own
+opening-hours table (names or numbers, '2 PM' parses; closed day = honestly nothing).
+THE MEASUREMENT, honest: final 3-lens panel on a fresh zero-touch trio = 7.33 (7/8/7). Across four
+panels (7.3 → 6.0 → 7.7 → 7.33) the number has NOT durably moved despite real shipped axes — the
+lenses converge on two STRUCTURAL facts: one card component serves all registers (image-top SKU
+anatomy on consultations/dishes), and law+cafe share serif/cream/split DNA (editorial+warm both use
+Fraunces; both pools cream grounds; split hero collides). RECORDED as the real design backlog:
+per-register card ANATOMY (text-forward service cards, menu-list register) · a 4th display typeface
+· hero de-collision. Parked per the owner's chain pivot until greenlit — the panel loop measures
+honestly either way. Trio review-passed zero-touch; side-by-side is visibly the best yet (three
+brands, three palettes, three photo voices) even where the skeleton repeats.
