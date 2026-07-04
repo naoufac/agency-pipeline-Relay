@@ -7,6 +7,7 @@ import { mkdirSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { manifestFor, swSource, iconHtml, ensurePwaAssets } from './pwa.ts';
 import { renderPage } from './render.ts';
+import { metaDescription, sitemapXml, robotsTxt } from './seo.ts';
 import { closeBrowser } from './browser.ts';
 
 let pass = 0, fail = 0;
@@ -73,6 +74,30 @@ const ok = (name: string, cond: boolean, extra = '') => { if (cond) pass++; else
   const before = statSync(fileURLToPath(new URL('icon-512.png', dir))).mtimeMs;
   await ensurePwaAssets(dir, { name: 'Harbor Law', tokens: { bg: '#fbfaf7', primary: '#1c2a3a' } }, '_pwacheck');
   ok('icons painted once (second run skips the browser)', statSync(fileURLToPath(new URL('icon-512.png', dir))).mtimeMs === before);
+}
+
+// ---- SEO: deterministic meta + opengraph + sitemap/robots (no LLM tags ever) ----
+{
+  ok('meta: trims/collapses + caps at 160', metaDescription({sections:[{type:'hero',lead:'  A very   long lead … that goes on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on'}]}) === 'A very long lead … that goes on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on an');
+  ok('meta: empty sections returns "" safely', metaDescription({sections:[]}) === '');
+  const sm = sitemapXml('abc', [{slug:'index'},{slug:'menu'}]);
+  ok('sitemap: has urlset', sm.includes('<urlset'));
+  ok('sitemap: includes index and menu and how-it-was-built', sm.includes('/sites/abc/index.html') && sm.includes('/sites/abc/menu.html') && sm.includes('how-it-was-built.html'));
+  const rob = robotsTxt('abc');
+  ok('robots: has Sitemap line', rob.includes('Sitemap:'));
+  ok('robots: points at /sites/abc/sitemap.xml', rob.includes('/sites/abc/sitemap.xml'));
+  // reuse the existing renderPage test site
+  const html = renderPage({ brand: { name: 'Harbor Law', tokens: { bg: '#fbfaf7', primary: '#1c2a3a' } }, sections: [
+    { type: 'hero', headline: 'Guiding your family', lead: 'Counsel that answers.', cta: 'Book' },
+    { type: 'features', items: [{ title: 'Estate', body: 'planning' }] },
+  ] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', projectId: 'x', theme: 'editorial' });
+  ok('render: carries meta description', html.includes('<meta name="description"'));
+  ok('render: carries og:title', html.includes('og:title'));
+  ok('render: carries og:image', html.includes('og:image'));
+  // esc for quotes in attr
+  const qspec = { sections: [{ type: 'hero', lead: 'He said "hi" & left' }] };
+  const qhtml = renderPage({ brand: { name: 'Q', tokens: { bg: '#fff', primary: '#000' } }, sections: qspec.sections }, { pages: [{ slug: 'index', title: 'Q' }], slug: 'index', title: 'Q', projectId: 'q' });
+  ok('render: description quotes escaped (no raw " in attr)', qhtml.includes('He said &quot;hi&quot; &amp; left') && !qhtml.includes('content="He said "'));
 }
 
 console.log(`\npwa:check — ${pass} passed, ${fail} failed`);

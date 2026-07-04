@@ -104,6 +104,9 @@ ok('a zero price never renders (free ≠ From $0.00)', rendered.image.includes('
 ok('whole-dollar From-prices drop the cents', rendered.image.includes("mv%1?mv.toFixed(2):mv.toFixed(0)"));
 ok('inventory badges never render on service/menu/blog registers', rendered.image.includes('!v||svc||blog||'));
 ok('menu/dishes are in the service register', rendered.image.includes('menu|dish|drink'));
+// SEARCH: big grids get the client-side filter (8-row threshold, accessible, textContent only)
+ok('grids with >=8 rows get a search box', rendered.image.includes('__searchbox') && rendered.image.includes('count<8'));
+ok('the search box is accessible + safe', rendered.image.includes("'Search this list'") && rendered.image.includes('textContent'));
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

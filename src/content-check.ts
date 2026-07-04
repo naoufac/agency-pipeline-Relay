@@ -65,6 +65,17 @@ try {
   ok('orders itself stays hidden from the Content tab', !bareTabs.some((t) => t.table === 'orders'));
   await pool.query(`drop schema if exists "${appdb.schemaName(bare)}" cascade`).catch(() => {});
 
+  // ---- CSV EXPORT: quoting, injection guard, sensitive strip, honest nulls ----
+  await appdb.insertRow(pool, id, 'products', { title: 'Comma, "Quoted"', price: 9.5 });
+  await appdb.insertRow(pool, id, 'products', { title: '=SUM(A1:A9)', price: 1 });
+  const csv = await appdb.exportCsv(pool, id, 'products');
+  ok('csv: exports with a BOM + header row', !!csv && csv.charCodeAt(0) === 0xfeff && csv.includes('title'), csv?.slice(0, 40));
+  ok('csv: commas and quotes are RFC-quoted', !!csv && csv.includes('"Comma, ""Quoted"""'));
+  ok("csv: formula injection is disarmed", !!csv && csv.includes("'=SUM(A1:A9)"));
+  ok('csv: sensitive columns never export', !!csv && !/ref_token|password|secret/i.test(csv.split('\r\n')[0]));
+  ok('csv: unknown table -> null', (await appdb.exportCsv(pool, id, 'nope')) === null);
+  ok('csv: system tables refuse', (await appdb.exportCsv(pool, id, '_relay_visitors')) === null);
+
   // ---- BLOG: every article gets its own LIVE page (the PDP pattern for content) ----
   const blogId = randomUUID();
   await appdb.provision(pool, blogId, JSON.stringify({ entities: [

@@ -88,6 +88,9 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* SEARCH · grid filter box (appears only on grids with >=8 rows) */
+.grid-search{font:inherit;max-width:340px;width:100%;padding:.6rem .9rem;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);margin:0 0 18px}
+.grid-search:focus{outline:0;border-color:var(--primary)}
 /* BLOG · article page — long-form reading, art-directed cover */
 .post-cover{margin:1.6rem 0}
 .post-cover img{width:100%;aspect-ratio:var(--crop-hero-wide,21/9);object-fit:cover;border-radius:var(--photo-radius,var(--radius));filter:var(--photo-filter,none)}

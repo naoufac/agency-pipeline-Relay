@@ -49,7 +49,7 @@ const STATIC: Record<string, string> = {
   '/styles.css': 'styles.css', '/app.js': 'app.js',
 };
 const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'text/javascript',
-  png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp', webmanifest: 'application/manifest+json' };
+  png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp', webmanifest: 'application/manifest+json', xml: 'application/xml', txt: 'text/plain; charset=utf-8' };
 
 async function boardJSON(user: User | null, projectId?: string) {
   const p = projectId
@@ -413,6 +413,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         ? await pool.query('select form, data, created_at from site_submissions where project_id=$1 and form=$2 order by created_at desc limit 200', [id, form.slice(0, 60)])
         : await pool.query('select form, data, created_at from site_submissions where project_id=$1 order by created_at desc limit 200', [id]);
       return send(res, 200, 'application/json', JSON.stringify({ submissions: r.rows }));
+    }
+
+    // CSV EXPORT (owner-only): download a collection — same guard as the content admin
+    const exportM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/export\/([a-zA-Z_][a-zA-Z0-9_]{0,62})\.csv$/);
+    if (exportM && req.method === 'GET') {
+      if (!UUID_RE.test(exportM[1])) return send(res, 404, 'text/plain', 'not found');
+      if (!canSee(user, await ownerOf(exportM[1]))) return send(res, 404, 'text/plain', 'not found');
+      const csv = await appdb.exportCsv(pool, exportM[1], exportM[2]).catch(() => null);
+      if (csv === null) return send(res, 404, 'text/plain', 'not found');
+      res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${exportM[2]}.csv"` });
+      res.end(csv);
+      return;
     }
 
     // ---- PQ3 · CLIENT CONTENT ADMIN (owner-only): edit the site's real content (products/menu/…) ----

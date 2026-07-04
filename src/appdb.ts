@@ -630,6 +630,25 @@ export async function freeSlots(pool: pg.Pool, projectId: string, table: string,
   return out;
 }
 
+// CSV EXPORT — the owner downloads their records ("your data is yours"; the accountant wants the
+// orders). Owner audience (private tables included), sensitive columns stripped, RFC-quoted, BOM
+// for Excel, and formula-injection guarded (a value starting =/+/-/@ gets a leading apostrophe).
+export async function exportCsv(pool: pg.Pool, projectId: string, table: string): Promise<string | null> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || /^_relay_/.test(table) || !(await listTables(pool, projectId)).includes(table)) return null;
+  const cols = (await typedColumns(pool, schema, table)).map(c => c.name).filter(c => !SENSITIVE.test(c));
+  if (!cols.length) return null;
+  const rows = (await pool.query(`select ${cols.map(c => `"${c}"`).join(', ')} from "${schema}"."${table}" order by id limit 5000`)).rows;
+  const cell = (v: any): string => {
+    if (v === null || v === undefined) return '';
+    let s2 = v instanceof Date ? v.toISOString() : String(v);
+    if (/^[=+\-@]/.test(s2)) s2 = "'" + s2;                      // CSV formula injection guard
+    return /[",\n\r]/.test(s2) ? '"' + s2.replace(/"/g, '""') + '"' : s2;
+  };
+  const lines = [cols.join(','), ...rows.map((r: any) => cols.map(c => cell(r[c])).join(','))];
+  return '\ufeff' + lines.join('\r\n') + '\r\n';
+}
+
 // PQ3 — CLIENT CONTENT EDITING. Directus lives in a SEPARATE database and cannot reach the app_<hex>
 // schema (that's where products/menu/posts really live), so the owner edits their content through
 // Relay's own owner-scoped admin over THIS API. The live site already reads these tables live, so an

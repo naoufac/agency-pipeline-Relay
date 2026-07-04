@@ -1,6 +1,9 @@
 import pg from 'pg';
-import { plan } from './planner.ts';
+import { readdirSync, rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { plan, replan } from './planner.ts';
 import { runLoop } from './runner.ts';
+import { SITES } from './verify.ts';
 
 const TOKEN = process.env.TG_DOOR_TOKEN;
 const ALLOWLIST = new Set(
@@ -91,6 +94,28 @@ async function poll(pool: pg.Pool, offset: number): Promise<number> {
     // a Telegram command is never a brief — '/start' once became a real build attempt
     if (text.startsWith('/')) {
       await reply(chatId, 'Text me a brief and I build it (e.g. "a booking site for a barbershop"). Commands: /status — latest builds.');
+      continue;
+    }
+    // ITERATION (M3 at the front door): REPLY to a build message — or write 'change <id>: …' — and
+    // the SAME site rebuilds with the amendment. The schema migrates additively; the data survives.
+    const repliedShort = String(msg.reply_to_message?.text || '').match(/\bid ([0-9a-f]{8})\b/i)?.[1];
+    const changeM = text.match(/^(?:change|update)\s+([0-9a-f-]{8,36})\s*[:\u2014-]\s*(.+)$/is);
+    if (repliedShort || changeM) {
+      const short8 = (changeM ? changeM[1] : repliedShort)!.slice(0, 8).toLowerCase();
+      const changeText = (changeM ? changeM[2] : text).trim();
+      try {
+        const pr = (await pool.query("select id, brief from projects where id::text like $1 || '%' order by created_at desc limit 1", [short8])).rows[0];
+        if (!pr) { await reply(chatId, `No build found for id ${short8}.`); continue; }
+        const busy = Number((await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [pr.id])).rows[0].n);
+        if (busy) { await reply(chatId, 'That site is still building — send the change once it finishes.'); continue; }
+        const amended = `${pr.brief} · UPDATE: ${changeText}`;
+        // sweep the previous generation's pages (stale slugs would mix two navigations); assets stay
+        try { const dir = fileURLToPath(new URL(pr.id + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
+        await replan(pool, pr.id, amended);
+        if (process.env.RELAY_BUILD !== '0') runLoop(pool, pr.id, { cap: 4, review: true }).catch(() => {});
+        await reply(chatId, `Updating ${short8} — ${changeText}\nYour existing data survives the rebuild.`);
+        watchUntilDone(pool, chatId, pr.id, amended).catch(() => {});
+      } catch (e: any) { console.error('tg-door change', e?.message ?? e); await reply(chatId, 'Could not start the update — please try again.'); }
       continue;
     }
     // any other text is a brief
