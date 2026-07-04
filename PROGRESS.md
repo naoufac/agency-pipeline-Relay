@@ -628,3 +628,26 @@ load. Board edit form grew the upload control. PROVEN live on the hot-sauce stor
 the API → served 200 → row points at it; 'not an image' refused friendly. PQ3's listed gaps are now
 all closed (editing ✓ · image upload ✓ · CSV export ✓); richer field types remain as polish.
 The locked-five arc: iteration ✓ · SEO ✓ · upload ✓ · search ✓ · export ✓ — all gated, all proven.
+
+## 2026-07-04 — THE CANARY: nightly self-proof shipped, and it killed SIX classes on day one
+Prod e21723e, 13 suites (ecom 90 · app 172 · spec 148 · content 41). The agency now proves itself
+nightly: relay-canary.timer (03:30) builds one rotating brief (booking app / variant store / warm
+app+blog) zero-touch through the LIVE server; review passes → quiet line + old canaries swept;
+anything else → the operator's Telegram rings (TG vars added to prod env — the first alert had no
+phone to ring). Plus honeypot armor: every public form/checkout carries an off-screen trap; all
+three write paths answer bots with fake success and write nothing; the probe is exempt.
+THE BIRD EARNED ITS KEEP IMMEDIATELY — six flights on the candle-store brief, six permanent
+classes dead, each now a compile floor + gate:
+1) variant-only pricing → products.price injected, backfilled from the cheapest variant;
+2) grid Add-to-cart on variant products was a server-refused dead end → 'Choose options' → PDP
+   (readRows decorates _variants; the probe buys variants through the PDP);
+3) variants-first line items (product_variant_id, no product_id) → order_items canonicalized
+   (product_id + qty always exist);
+4) a store model with NO order tables at all → normalizeDataModel (archetype-aware) injects
+   canonical orders + order_items — repair, never retry;
+5) seeded FAKE CUSTOMERS ('Emma Rodriguez' + invented revenue) → visitor-record entities never
+   seed, stripped loudly;
+6) stores BORN SOLD OUT (every variant seeded stock 0) → seeded zero stock = invented scarcity,
+   coerced to untracked.
+Flight 6: canary OK, review passed, 5 failed predecessors swept. The store contract is now whole:
+pages · variants · prices · order storage · line shape · honest seeds — all forced, all gated.
