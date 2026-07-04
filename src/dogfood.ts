@@ -170,10 +170,10 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
       const oCount = async () => { try { return Number((await pool.query(`select count(*)::int n from "${sch2}"."orders"`)).rows[0].n); } catch { return -1; } };
       try {
         await goto(page, url(shopPage.slug));
-        await page.waitForFunction(`document.querySelectorAll('.p-add').length > 0`, { timeout: 8000 }).catch(() => {});
-        const addBtns = await page.evaluate(`document.querySelectorAll('.p-add').length`).catch(() => 0);
+        await page.waitForFunction(`document.querySelectorAll('.p-add,.p-choose').length > 0`, { timeout: 8000 }).catch(() => {});
+        const addBtns = await page.evaluate(`document.querySelectorAll('.p-add,.p-choose').length`).catch(() => 0);
         if (!addBtns) {
-          issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'the shop grid shows no purchasable products (no Add-to-cart buttons rendered)', severity: 'high' });
+          issues.push({ page: shopPage.slug, viewport: 'desktop', kind: 'store-broken', detail: 'the shop grid shows no purchasable products (no Add-to-cart or Choose-options rendered)', severity: 'high' });
         } else {
           // agency-grade imagery is a SYSTEM responsibility: product cards without photos are the
           // unanimous agency-panel blocker — the reviewer flags it so no build can ship it silently.
@@ -203,11 +203,12 @@ export async function dogfood(pool: pg.Pool, projectId: string, baseUrl = 'http:
             else await page.evaluate(`(function(){var vp=document.querySelector('.pdp .varpick .varpill:not([disabled])');if(vp)vp.click();document.querySelector('.pdp .p-add').click()})()`).catch(() => {});   // buy FROM the detail page (picking an option first when the product has them)
             await page.waitForTimeout(300);
             await goto(page, url(shopPage.slug));
-            await page.waitForFunction(`document.querySelectorAll('.p-add').length > 0`, { timeout: 8000 }).catch(() => {});
+            await page.waitForFunction(`document.querySelectorAll('.p-add,.p-choose').length > 0`, { timeout: 8000 }).catch(() => {});
           }
           // defensive: never throw on an empty grid (a repopulation timeout must degrade to an honest
-          // finding via the no-order path, not crash the probe into a false 'buy-flow probe failed')
-          await page.evaluate(`(function(){var b=document.querySelectorAll('.p-add');if(!b.length)return;b[0].click();if(b.length>1)b[1].click();else b[0].click()})()`).catch(() => {});
+          // finding via the no-order path, not crash the probe into a false 'buy-flow probe failed').
+          // Only REAL add buttons are clicked — variant products route through the PDP (already bought above).
+          await page.evaluate(`(function(){var b=document.querySelectorAll('.p-add:not(.p-soldout)');if(!b.length)return;b[0].click();if(b.length>1)b[1].click();else b[0].click()})()`).catch(() => {});
           await page.waitForTimeout(400);
           const before2 = await oCount();
           await goto(page, url(coPage.slug));

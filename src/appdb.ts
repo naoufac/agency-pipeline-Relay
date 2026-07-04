@@ -395,6 +395,15 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
   if (!tables.includes(table)) return [];
   const lim = Math.max(1, Math.min(200, Number(limit) || 50));
   const rows = (await pool.query(`select * from "${schema}"."${table}" order by id desc limit ${lim}`)).rows;
+  // PQ2 · variants: product cards need to know they have options — the grid then offers
+  // "Choose options" (to the PDP) instead of a bare Add-to-cart the server would refuse
+  if (table === 'products' && tables.includes('product_variants')) {
+    try {
+      const vc = (await pool.query(`select product_id, count(*)::int n from "${schema}"."product_variants" group by product_id`)).rows;
+      const byId = new Map(vc.map((v: any) => [Number(v.product_id), Number(v.n)]));
+      for (const r of rows) if (byId.has(Number(r.id))) (r as any)._variants = byId.get(Number(r.id));
+    } catch {}
+  }
   return decorateRows(pool, projectId, schema, table, tables, rows);
 }
 

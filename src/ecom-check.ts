@@ -186,6 +186,13 @@ try {
   ok('a sold-out option is disabled and says so', /data-vname="M"[^>]*disabled/.test(vpdp) && vpdp.includes('sold out'));
   ok('priced option shows its price on the pill', vpdp.includes('XL · $26.00'));
 
+  // grid register for variant products: rows carry _variants; the grid offers Choose options
+  const prows = await appdb.readRows(pool, id, 'products', 50);
+  const tee = prows.find((r: any) => r.title === 'Tee');
+  ok('readRows decorates variant products with _variants', tee && Number((tee as any)._variants) === 3, JSON.stringify(tee?._variants));
+  ok('products without options carry no _variants', prows.filter((r: any) => r.title === 'Mug').every((r: any) => (r as any)._variants === undefined));
+  ok('the grid renders Choose options for variant products', shop.includes('p-choose') && shop.includes('Choose options'));
+
   // a non-store schema answers honestly
   const other = randomUUID();
   await appdb.provision(pool, other, JSON.stringify({ entities: [{ name: 'notes', fields: [{ name: 'body', type: 'text' }] }] }));
