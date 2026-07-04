@@ -186,7 +186,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
 
       // DATABASE-dept reliability gate (R7): recover + CLAMP the data model into ONE clean object, or REJECT.
       if (task.department === 'database') {
-        const r = normalizeDataModel(content);
+        const r = normalizeDataModel(content, String((ctx as any).archetype || ''));
         if (r.ok === false) throw new Error('database rejected: ' + r.errors.join('; ') + ' — the output began: ' + JSON.stringify(String(content || '').trim().slice(0, 160)) + ' — emit ONE JSON object {"entities":[...]} and nothing else');
         // FS4: a model of identity tables only (users/clients) is a GUTTED app — the core entity was
         // truncated or forgotten. Reject into retry with exact ordering instructions.

@@ -301,6 +301,16 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   const vpriced = '{"entities":[{"name":"products","fields":[{"name":"title","type":"text","required":true}],"seed":[{"title":"Fireside"}]},{"name":"variants","fields":[{"name":"product","type":"ref:products","required":true},{"name":"name","type":"text","required":true},{"name":"price","type":"money"}],"seed":[{"product":1,"name":"Small","price":18}]}]}';
   ok('normDataModel: variant-priced products pass (compile backfills)', normalizeDataModel(vpriced).ok === true);
 }
+// 9) a STORE model without orders/order_items (a real canary catch: catalog-only, checkout had
+// nowhere to write) → the canonical selling tables are INJECTED, never a retry
+{
+  const catalogOnly = '{"entities":[{"name":"products","fields":[{"name":"title","type":"text","required":true},{"name":"price","type":"money","required":true}],"seed":[{"title":"Amber","price":18}]}]}';
+  const r9 = normalizeDataModel(catalogOnly, 'store');
+  ok('normDataModel(store): orders + order_items injected', r9.ok === true && ['orders','order_items'].every(n => r9.model.entities.some((e: any) => e.name === n)), JSON.stringify(r9.ok === true ? r9.model.entities.map((e: any) => e.name) : []));
+  ok('normDataModel(store): the injection is loud', r9.ok === true && r9.repairs.some(x => /canonical orders/.test(x)));
+  const rSite = normalizeDataModel(catalogOnly, 'site');
+  ok('normDataModel(site): showcases stay untouched', rSite.ok === true && !rSite.model.entities.some((e: any) => e.name === 'orders'));
+}
 
 // ---- COPY GATE moved to COMPOSE: slop rejected at the retryable stage; {{brand}} token is NOT slop ----
 {

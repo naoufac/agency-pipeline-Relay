@@ -154,12 +154,33 @@ function pricelessProductErrors(model: any): string[] {
   return bad.length ? [`products ${bad.join(', ')} have NO price anywhere — give the product a price field, or give at least one of its variants a price`] : [];
 }
 
-export function normalizeDataModel(raw: string): DataModelResult {
+export function normalizeDataModel(raw: string, archetype?: string): DataModelResult {
   const repairs: string[] = []; const errors: string[] = [];
   if (!raw) { errors.push('empty database output'); return { ok: false, errors }; }
-  // every recovery path funnels here: clamp seeds, then reject unbuildable shapes into retry
+  // every recovery path funnels here: clamp seeds, canonicalize the store contract, then reject
+  // the unbuildable shapes into retry
   const finish = (m: any): DataModelResult => {
     const model = clampSeedPks(m, repairs);
+    // A STORE model must be able to STORE ORDERS — a canary build shipped only catalog tables
+    // (categories/products/variants) and its checkout had nowhere to write. The canonical selling
+    // tables are fully deterministic, so a missing one is INJECTED, never a retry.
+    if (archetype === 'store' && Array.isArray(model?.entities)) {
+      const sn = (v: any) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      const has = (n: string) => model.entities.some((e: any) => sn(e?.name) === n);
+      if (has('products') && !has('orders')) {
+        model.entities.push({ name: 'orders', fields: [
+          { name: 'customer_name', type: 'text', required: true }, { name: 'email', type: 'email' },
+          { name: 'phone', type: 'text' }, { name: 'notes', type: 'text' },
+          { name: 'status', type: 'status' }, { name: 'total', type: 'money' }] });
+        repairs.push('injected canonical orders (a store must be able to store orders)');
+      }
+      if (has('products') && !has('order_items')) {
+        model.entities.push({ name: 'order_items', fields: [
+          { name: 'order', type: 'ref:orders', required: true }, { name: 'product', type: 'ref:products', required: true },
+          { name: 'qty', type: 'int', required: true }, { name: 'unit_price', type: 'money' }] });
+        repairs.push('injected canonical order_items');
+      }
+    }
     const errs = [...unseededRequiredRefs(model), ...slotInventoryErrors(model), ...pricelessProductErrors(model)];
     return errs.length ? { ok: false, errors: errs } : { ok: true, model, repairs };
   };
