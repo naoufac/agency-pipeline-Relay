@@ -31,7 +31,9 @@ async function sweepOldCanaries(pool: any, keepId: string) {
 async function main() {
   const pool = makePool();
   const day = Math.floor(Date.now() / 86_400_000);
-  const brief = `${BRIEFS[day % BRIEFS.length]} — canary ${new Date().toISOString().slice(0, 10)}`;
+  // CANARY_INDEX overrides the daily rotation — used to flight-test a specific archetype on demand
+  const idx = process.env.CANARY_INDEX !== undefined ? Math.abs(Number(process.env.CANARY_INDEX)) % BRIEFS.length : day % BRIEFS.length;
+  const brief = `${BRIEFS[idx]} — canary ${new Date().toISOString().slice(0, 10)}`;
   const t0 = Date.now();
   let id = '';
   try {
