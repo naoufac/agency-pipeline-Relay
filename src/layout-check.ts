@@ -98,6 +98,12 @@ ok('DB-card images take the theme frame (no hardcoded radius)', rendered.image.i
 // panel's 'legal consultations framed as products' finding
 ok('service-register cards render money muted as From $X', rendered.image.includes("'From $'") && rendered.image.includes('moneyLast'));
 ok('the service register is table-classed (products stay commerce)', rendered.image.includes('practice|treatment'));
+// the panel's exact findings on a real trio: 'From $0.00' on a complimentary consultation and
+// '✓ available' inventory badges on brunch dishes — free = say nothing; badges are commerce-only
+ok('a zero price never renders (free ≠ From $0.00)', rendered.image.includes('mv>0'));
+ok('whole-dollar From-prices drop the cents', rendered.image.includes("mv%1?mv.toFixed(2):mv.toFixed(0)"));
+ok('inventory badges never render on service/menu/blog registers', rendered.image.includes('!v||svc||blog||'));
+ok('menu/dishes are in the service register', rendered.image.includes('menu|dish|drink'));
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
