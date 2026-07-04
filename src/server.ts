@@ -103,7 +103,18 @@ function send(res: http.ServerResponse, code: number, type: string, body: string
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', 'http://' + (req.headers.host || 'localhost'));
-    const path = url.pathname;
+    let path = url.pathname;
+
+    // DOMAINS — <slug>.naples.agency serves that project's site at the domain root (the wildcard
+    // tunnel ingress lands here; explicit hosts like board/api keep their own ingress rules).
+    // /api/* stays untouched on every host — produced pages call it with absolute paths.
+    const reqHost = String(req.headers.host || '').toLowerCase().split(':')[0];
+    const sub = reqHost.match(/^([a-z0-9][a-z0-9-]{0,62})\.naples\.agency$/)?.[1];
+    if (sub && !/^(board|api|email|cms|sites|www|mail|admin|status|relay)$/.test(sub) && !path.startsWith('/api/') && !path.startsWith('/sites/')) {
+      const pr = (await pool.query("select id from projects where params->>'slug' = $1 limit 1", [sub])).rows[0];
+      if (pr) path = '/sites/' + pr.id + (path === '/' ? '/' : path);
+      else return send(res, 404, 'text/plain', 'no site here (yet)');
+    }
 
     if (path === '/healthz') {
       // the uptime monitor trusts this — it must NEVER say ok while the database is down

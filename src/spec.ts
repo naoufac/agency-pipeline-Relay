@@ -439,6 +439,16 @@ export function applyBrand(spec: any, canon: Brand): void {
   spec.brand.tokens = (canon.tokens && Object.keys(canon.tokens).length) ? canon.tokens : { ...DEFAULT_TOKENS };
 }
 
+// DOMAINS — every produced site gets a first-level subdomain: <slug>.naples.agency. The slug is
+// derived from the LOCKED brand name (never the LLM's whim twice), collision-safe via a suffix.
+// Reserved names guard the platform's own hosts.
+export const RESERVED_SLUGS = /^(board|api|email|cms|sites|www|mail|admin|app|status|relay|ns\d*|mx\d*|smtp|imap|pop3?|ftp|dev|staging|test)$/;
+export function brandSlug(name: string): string {
+  const s = String(name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  return (!s || RESERVED_SLUGS.test(s)) ? (s ? s + '-site' : '') : s;
+}
+
 // The ONE nav button for the whole site, chosen deterministically from the archetype (no per-page LLM label).
 export function navCtaFor(archetype?: string): string {
   const a = String(archetype || 'site').toLowerCase();

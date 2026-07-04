@@ -133,7 +133,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site } as any;
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug } as any;
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -162,8 +162,8 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       try { await ensurePwaAssets(dir, canon, task.project_id); } catch (e: any) { await ev(pool, task.project_id, task.id, 'pwa_assets_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {}); }
       // SEO: sitemap + robots per site — deterministic, from the composed page list
       try {
-        writeFileSync(fileURLToPath(new URL('sitemap.xml', dir)), sitemapXml(task.project_id, ctx.pages || []));
-        writeFileSync(fileURLToPath(new URL('robots.txt', dir)), robotsTxt(task.project_id));
+        writeFileSync(fileURLToPath(new URL('sitemap.xml', dir)), sitemapXml(task.project_id, ctx.pages || [], (ctx as any).siteSlug));
+        writeFileSync(fileURLToPath(new URL('robots.txt', dir)), robotsTxt(task.project_id, (ctx as any).siteSlug));
       } catch {}
       content = JSON.stringify(page);
       await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
@@ -257,6 +257,17 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           const ar = await pool.query("select params->>'archetype' as a, params->>'theme' as t, brief from projects where id=$1", [task.project_id]);
           const b = resolveBrand(content, (ctx as any)?.brand?.name, ar.rows[0]?.a, ar.rows[0]?.t, ar.rows[0]?.brief);
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(b)]);
+          // DOMAINS: lock the site's subdomain slug alongside the brand — collision-safe, once
+          const { brandSlug } = await import('./spec.ts');
+          let slug = brandSlug(b.name);
+          if (slug) {
+            for (let n = 2; n < 50; n++) {
+              const clash = (await pool.query("select 1 from projects where params->>'slug' = $1 and id <> $2 limit 1", [slug, task.project_id])).rows[0];
+              if (!clash) break;
+              slug = brandSlug(b.name) + '-' + n;
+            }
+            await pool.query("update projects set params = jsonb_set(params, '{slug}', to_jsonb($2::text), true) where id=$1 and (params->>'slug') is null", [task.project_id, slug]);
+          }
         } catch (e: any) { console.error('brand lock', e?.message ?? e); }
       }
       await pool.query("update tasks set status='done', claimed_by=null, lease_expires_at=null, updated_at=now() where id=$1", [task.id]);

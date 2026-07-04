@@ -42,7 +42,7 @@ async function watchUntilDone(pool: pg.Pool, chatId: string, id: string, brief: 
     await sleep(30_000);
     try {
       const r = await pool.query(
-        `select p.status,
+        `select p.status, p.params->>'slug' as slug,
           (select d.passed from dogfood_reviews d where d.project_id=p.id order by d.id desc limit 1) as review_passed
          from projects p where p.id=$1`,
         [id]
@@ -51,7 +51,7 @@ async function watchUntilDone(pool: pg.Pool, chatId: string, id: string, brief: 
       if (!row || !['done', 'blocked'].includes(row.status)) continue;
       const emoji = row.status === 'done' ? '✅' : '⚠️';
       const rv = row.review_passed === true ? ' · review ✓' : row.review_passed === false ? ' · review ✗' : '';
-      const url = row.status === 'done' ? `\n${BASE_URL}/sites/${id}/` : '';
+      const url = row.status === 'done' ? `\n${row.slug ? `https://${row.slug}.naples.agency/` : `${BASE_URL}/sites/${id}/`}` : '';
       await reply(chatId, `${emoji} ${row.status}: ${brief} · id ${short(id)}${rv}${url}`);
       return;
     } catch {

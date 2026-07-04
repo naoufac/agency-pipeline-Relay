@@ -11,13 +11,16 @@ export function metaDescription(spec: any): string {
 
 const BASE = () => String(process.env.RELAY_PUBLIC_BASE || '').replace(/\/$/, '');
 
-export function sitemapXml(projectId: string, pages: { slug: string }[]): string {
-  const base = BASE();
+// with a locked slug the site's canonical home is its OWN subdomain; else the /sites/ path
+const siteBase = (projectId: string, slug?: string) => slug ? `https://${slug}.naples.agency` : `${BASE()}/sites/${projectId}`;
+
+export function sitemapXml(projectId: string, pages: { slug: string }[], siteSlug?: string): string {
+  const base = siteBase(projectId, siteSlug);
   const urls = [...pages.map((p) => `${p.slug}.html`), 'how-it-was-built.html']
-    .map((f) => `  <url><loc>${esc(`${base}/sites/${projectId}/${f}`)}</loc></url>`).join('\n');
+    .map((f) => `  <url><loc>${esc(`${base}/${f}`)}</loc></url>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
 }
 
-export function robotsTxt(projectId: string): string {
-  return `User-agent: *\nAllow: /\nSitemap: ${BASE()}/sites/${projectId}/sitemap.xml\n`;
+export function robotsTxt(projectId: string, siteSlug?: string): string {
+  return `User-agent: *\nAllow: /\nSitemap: ${siteBase(projectId, siteSlug)}/sitemap.xml\n`;
 }

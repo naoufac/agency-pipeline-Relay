@@ -461,5 +461,17 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('hero WITHOUT image is NOT on-image (legible on brand bg, no grey void)', /<header class="hero"/.test(noImg) && !/<header class="hero on-image"/.test(noImg));
 }
 
+
+// ---- brandSlug: subdomain identity is deterministic, reserved-safe, DNS-clean ----
+{
+  const { brandSlug, RESERVED_SLUGS } = await import('./spec.ts');
+  ok('slug: plain name lowercases + hyphenates', brandSlug('Wick & Wonder Candle Co.') === 'wick-and-wonder-candle-co');
+  ok('slug: accents fold to ascii', brandSlug('Café Émile') === 'cafe-emile');
+  ok('slug: never starts/ends with hyphen', /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(brandSlug('  --Neon Nights-- ')), brandSlug('  --Neon Nights-- '));
+  ok('slug: reserved names get -site suffix (never shadow board/api/cms)', brandSlug('API') === 'api-site' && brandSlug('Admin') === 'admin-site' && RESERVED_SLUGS.test('www'));
+  ok('slug: empty/garbage input yields empty (no subdomain, path URL stands)', brandSlug('!!!') === '' && brandSlug('') === '');
+  ok('slug: capped at DNS-label length', brandSlug('A'.repeat(200)).length <= 40 && /[a-z0-9]$/.test(brandSlug('A'.repeat(200))));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
