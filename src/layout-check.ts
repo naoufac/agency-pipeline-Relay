@@ -101,7 +101,7 @@ ok('the service register is table-classed (products stay commerce)', rendered.im
 // the panel's exact findings on a real trio: 'From $0.00' on a complimentary consultation and
 // '✓ available' inventory badges on brunch dishes — free = say nothing; badges are commerce-only
 ok('a zero price never renders (free ≠ From $0.00)', rendered.image.includes('mv>0'));
-ok('whole-dollar From-prices drop the cents', rendered.image.includes("mv%1?mv.toFixed(2):mv.toFixed(0)"));
+ok('whole-dollar From-prices drop the cents (via __moneyS, locale-aware)', rendered.image.includes('__moneyS') && rendered.image.includes('n%1?n.toFixed(2)') && rendered.image.includes('RELAY_T.from_price+__moneyS(mv)'));
 ok('inventory badges never render on service/menu/blog registers', rendered.image.includes('!v||svc||blog||'));
 ok('menu/dishes are in the service register', rendered.image.includes('menu|dish|drink'));
 // SEARCH: big grids get the client-side filter (8-row threshold, accessible, textContent only)

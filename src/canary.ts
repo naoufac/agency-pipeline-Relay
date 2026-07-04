@@ -53,6 +53,15 @@ async function main() {
   const t0 = Date.now();
   let id = '';
   try {
+    // PREFLIGHT: one 8-token ping. Quota-dead providers mean the flight can only stall and
+    // time out — skip quietly (the quota_stall alert already told the operator; the watchdog
+    // covers serving). Transient ping failures still fly: the build path retries those.
+    const { callLLM, isQuotaExhausted } = await import('./agents.ts');
+    const ping = await callLLM('Answer with the single word: ok', 'ping', 8, { timeoutMs: 30000 });
+    if (!ping.meta.ok && isQuotaExhausted(ping.meta.error)) {
+      console.log('canary SKIPPED — LLM providers exhausted (quota); builds are stalled and resume on refill.');
+      process.exit(0);
+    }
     const r: any = await (await fetch(`${BASE}/api/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brief }) })).json();
     id = String(r?.id || '');
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('run refused: ' + JSON.stringify(r).slice(0, 200));

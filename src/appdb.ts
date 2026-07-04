@@ -1,5 +1,5 @@
 // LIVE per-project database — the leap from "ships a schema file" to "the app runs on a real DB".
-import { L } from './i18n.ts';
+import { L, columnLabel } from './i18n.ts';
 // Each project's tables live in their OWN Postgres schema `app_<hex>`, NEVER `public`. Every operation
 // is namespace-isolated, identifier-validated, and parameterized, so a produced app's data model is real
 // and queryable while the engine's tables (public) can never be touched. This is the safety contract:
@@ -513,7 +513,7 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
     for (const c of use) {
       if (!/^(date|timestamp)/.test(c.type)) continue;
       const m = String(data[c.name] ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
-      if (m && m[1] < today) return { ok: false, error: L(await localeOf(pool, projectId), 'err_past_date', { f: c.name.replace(/_/g, ' ') }) };
+      if (m && m[1] < today) { const l2 = await localeOf(pool, projectId); return { ok: false, error: L(l2, 'err_past_date', { f: columnLabel(l2, c.name, c.name.replace(/_/g, ' ')).toLowerCase() }) }; }
     }
     if (SLOT_TABLE.test(table)) {
       const slotErr = await slotGuard(pool, projectId, schema, table, cols, data);

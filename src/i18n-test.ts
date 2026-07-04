@@ -3,7 +3,7 @@
 // (2) the detector is deterministic and never guesses (ambiguity → English),
 // (3) a locale actually changes the rendered page — chrome, lang attribute, client dict —
 // (4) and the DEFAULT stays byte-English so every existing site renders exactly as before.
-import { LOCALES, STRINGS, L, detectLocale, clientDict, isLocale, currencyFor, curSym, columnLabel } from './i18n.ts';
+import { LOCALES, STRINGS, L, detectLocale, clientDict, isLocale, currencyFor, curSym, columnLabel, fmtMoney } from './i18n.ts';
 import { renderPage } from './render.ts';
 
 let pass = 0, fail = 0;
@@ -60,10 +60,11 @@ ok('bogus locale → English (closed set enforced at render)', renderPage(SPEC, 
 
 // ---- currency: a build property; English stays $, the euro-zone locales get € ----
 ok('currency: en → $, it/fr/es/de → €', curSym('en') === '$' && curSym('it') === '€' && curSym('de') === '€' && currencyFor('fr') === 'EUR' && currencyFor(undefined) === 'USD');
-ok('client dict carries the symbol', clientDict('it').cur === '€' && clientDict(undefined).cur === '$');
-ok('PDP price renders € on an Italian site', (() => {
+ok('client dict carries the symbol + format flag', clientDict('it').cur === '€' && clientDict('it').meur === '1' && clientDict(undefined).cur === '$' && clientDict(undefined).meur === '');
+ok('fmtMoney: en byte-identical with history, EUR reads European', fmtMoney('en', 12) === '$12.00' && fmtMoney('it', 12) === '12,00 €' && fmtMoney('de', 9.5) === '9,50 €' && fmtMoney(undefined, 3) === '$3.00');
+ok('PDP price renders European money on an Italian site', (() => {
   const pdp = renderPage({ brand: { name: 'X', tokens: {} }, sections: [{ type: 'product', row: { id: 1, title: 'Vaso', price: 12 } }] }, { ...CTX, locale: 'it' } as any);
-  return pdp.includes('€12.00') && !pdp.includes('$12.00');
+  return pdp.includes('12,00 €') && !pdp.includes('$12.00');
 })());
 ok('PDP price stays $ by default (existing sites untouched)', (() => {
   const pdp = renderPage({ brand: { name: 'X', tokens: {} }, sections: [{ type: 'product', row: { id: 1, title: 'Vase', price: 12 } }] }, CTX as any);

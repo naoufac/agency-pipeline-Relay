@@ -137,12 +137,18 @@ export function clientDict(locale: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of CLIENT_KEYS) out[k] = L(locale, k);
   out.cur = curSym(locale);
+  out.meur = currencyFor(locale) === 'EUR' ? '1' : '';   // client __money switches format on this
   return out;
 }
 
 // ---- currency: a build property derived from the locale (v1: symbol only, math untouched) ----
 export function currencyFor(locale: string | undefined): 'USD' | 'EUR' { return isLocale(locale) && locale !== 'en' ? 'EUR' : 'USD'; }
 export function curSym(locale: string | undefined): string { return currencyFor(locale) === 'EUR' ? '€' : '$'; }
+// the ONE money formatter: en → $12.00 (byte-identical with history); EUR locales → 12,00 €
+export function fmtMoney(locale: string | undefined, n: number): string {
+  const v = (Math.round(Number(n) * 100) / 100).toFixed(2);
+  return currencyFor(locale) === 'EUR' ? v.replace('.', ',') + ' €' : '$' + v;
+}
 
 // ---- common schema column names → localized form labels. ENGLISH ALWAYS USES THE FALLBACK
 // (humanize), so existing sites stay byte-identical; non-en locales translate what they know

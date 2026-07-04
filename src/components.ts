@@ -2,7 +2,7 @@
 // The LLM never writes these; it only chooses sections + copy + brand tokens. Structure can't be wrong.
 import { FONT_FACES } from './fonts.ts';
 import { SLOT_TABLE } from './schema.ts';
-import { L, curSym, columnLabel } from './i18n.ts';
+import { L, curSym, columnLabel, fmtMoney } from './i18n.ts';
 
 export const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c]);
 const q = (query: string, cls = '') => `<img data-q="${esc(query)}" alt="" class="${cls}" loading="lazy">`;
@@ -349,7 +349,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       if (typeof v === 'boolean') return v ? `<li>✓ ${esc(humanize(k))}</li>` : '';
       if (isFinite(Number(v)) && Number(v) === 0) return '';   // "Weight Grams: 0" is spec noise, not information (pg numerics arrive as strings)
       const money = /price|amount|cost|fee|rate/i.test(k) && isFinite(parseFloat(v));
-      return `<li><b>${esc(humanize(k))}:</b> ${esc(money ? cur + parseFloat(v).toFixed(2) : String(v).slice(0, 200))}</li>`;
+      return `<li><b>${esc(humanize(k))}:</b> ${esc(money ? fmtMoney(o?.locale, parseFloat(v)) : String(v).slice(0, 200))}</li>`;
     }).join('');
     const back = (s.back && s.back.slug) ? s.back : null;
     // no photo -> an intentional dark branded panel with the product initial — never a grey void
@@ -360,7 +360,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <div class="split-media">${media}</div>
       <div class="pdp-info">
         <h1>${esc(title)}</h1>
-        ${isFinite(price) ? `<div class="p-price">${esc(cur)}${price.toFixed(2)}</div>` : ''}
+        ${isFinite(price) ? `<div class="p-price">${esc(fmtMoney(o?.locale, price))}</div>` : ''}
         ${descKey ? `<p class="lead muted">${esc(String(row[descKey]))}</p>` : ''}
         ${meta ? `<ul class="pdp-meta">${meta}</ul>` : ''}
         ${isFinite(price) && row.id != null ? (() => {
@@ -368,10 +368,10 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
           // a plain list, never cart controls — an Add-to-cart without a checkout is a dead end.
           const vars: any[] = Array.isArray(s.variants) ? s.variants : [];
           if (s.store === false) {
-            return vars.length ? `<ul class="pdp-meta">${vars.slice(0, 24).map((v: any) => `<li><b>${esc(String(v.name))}</b>${v.price != null ? ` · ${esc(cur)}${Number(v.price).toFixed(2)}` : ''}</li>`).join('')}</ul>` : '';
+            return vars.length ? `<ul class="pdp-meta">${vars.slice(0, 24).map((v: any) => `<li><b>${esc(String(v.name))}</b>${v.price != null ? ` · ${esc(fmtMoney(o?.locale, Number(v.price)))}` : ''}</li>`).join('')}</ul>` : '';
           }
           if (vars.length) {
-            const pills = vars.slice(0, 24).map((v: any) => `<button type="button" class="varpill" data-vid="${esc(String(v.id))}" data-vname="${esc(String(v.name))}" data-vprice="${v.price != null ? esc(String(v.price)) : ''}"${v.stock === 0 ? ' disabled' : ''} onclick="relayVarPick(this)">${esc(String(v.name))}${v.price != null ? ` · ${esc(cur)}${Number(v.price).toFixed(2)}` : ''}${v.stock === 0 ? ' — ' + esc(L(o?.locale, 'sold_out_l')) : ''}</button>`).join('');
+            const pills = vars.slice(0, 24).map((v: any) => `<button type="button" class="varpill" data-vid="${esc(String(v.id))}" data-vname="${esc(String(v.name))}" data-vprice="${v.price != null ? esc(String(v.price)) : ''}"${v.stock === 0 ? ' disabled' : ''} onclick="relayVarPick(this)">${esc(String(v.name))}${v.price != null ? ` · ${esc(fmtMoney(o?.locale, Number(v.price)))}` : ''}${v.stock === 0 ? ' — ' + esc(L(o?.locale, 'sold_out_l')) : ''}</button>`).join('');
             return `<div class="varpick">${pills}</div><p class="muted varmsg" hidden></p>
             <button type="button" class="btn p-add" onclick="relayCartAddVariant(this,${esc(JSON.stringify({ id: row.id, title, price }))})">${esc(L(o?.locale, 'add_to_cart'))}</button>`;
           }

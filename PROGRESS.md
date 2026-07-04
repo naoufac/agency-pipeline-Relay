@@ -843,3 +843,14 @@ provider, honest compound error if both are dead; (3) the runner PARKS quota-sta
 (attempt refunded, 15-min lease, reclaim revives) — builds stall and resume BY THEMSELVES
 when quota returns, with ONE operator alert per project instead of a blocked build.
 llm:check is suite 17 (12 gates, stubbed fetch — no tokens burned proving it).
+
+## 2026-07-04 — NO-LLM POLISH (quota pause put to use): preflight, error labels, European money
+
+Providers are quota-dead (owner refilling), so the turn went to deterministic polish:
+(1) the canary PREFLIGHTS one 8-token ping — quota-dead providers → quiet skip instead of
+a doomed 35-minute flight and a redundant timeout alert (transient ping failures still
+fly); (2) err_past_date interpolates columnLabel — "quella data della prenotazione è nel
+passato" instead of the raw English column name; (3) fmtMoney: ONE money formatter — en
+stays byte-identical ($12.00), EUR locales read European (12,00 €) across the client
+runtime (__money/__moneyS via RELAY_T.meur), PDP, variant pills, and money meta. Gates
+updated to the stronger invariants; 17 suites green.
