@@ -1,0 +1,9 @@
+[Unit]
+Description=Relay nightly canary — one zero-touch build proves the whole chain
+After=relay.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/relay
+ExecStart=/usr/bin/npm run -s canary
+TimeoutStartSec=2700

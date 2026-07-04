@@ -88,6 +88,8 @@ p{margin:0 0 1rem}
 .rform textarea{min-height:120px;resize:vertical}.rform .btn{align-self:flex-start}
 .rform .rcheck{flex-direction:row;align-items:center;gap:8px;font-weight:500}.rform .rcheck input{width:auto}
 .rform-msg{margin:.4rem 0 0;font-weight:600;color:var(--accent)}
+/* honeypot — off-screen for humans; a filled value marks the submission as a bot */
+.hp-field{position:absolute!important;left:-9999px!important;width:1px;height:1px;opacity:0;pointer-events:none}
 /* SEARCH · grid filter box (appears only on grids with >=8 rows) */
 .grid-search{font:inherit;max-width:340px;width:100%;padding:.6rem .9rem;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text);margin:0 0 18px}
 .grid-search:focus{outline:0;border-color:var(--primary)}
@@ -312,6 +314,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     <div class="cart-box" data-cart="summary" style="margin:1.4rem 0"><p class="cart-empty">Your cart is empty.</p></div>
     <div class="payopts" data-payopts hidden><h3>How you'll pay</h3></div>
     <form class="rcheckout rform" onsubmit="return relayCheckout(event)">
+      <input type="text" name="company_website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
       <label>Full name<input name="customer_name" type="text" required></label>
       <label>Email<input name="email" type="email" required></label>
       <label>Phone<input name="phone" type="text"></label>
@@ -646,6 +649,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     return `<section class="section" id="contact-form"><div class="container"><div class="formwrap">
       ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
       <form class="rform" data-form="${esc(s.form || dataTable || 'contact')}"${dataTable ? ` data-table="${esc(dataTable)}"` : ''} onsubmit="return relaySubmit(event)">
+        <input type="text" name="company_website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
         ${fields.map(field).join('')}
         <button class="btn" type="submit">${esc(s.cta || (dataTable ? 'Add' : 'Send'))}</button>
         <p class="rform-msg" hidden></p>

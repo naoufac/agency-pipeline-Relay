@@ -29,7 +29,8 @@
     "eval": "set -a; . ./.env 2>/dev/null; set +a; tsx src/eval.ts",
     "dogfood": "set -a; . ./.env 2>/dev/null; set +a; tsx src/dogfood-cli.ts",
     "pwa:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/pwa-check.ts",
-    "chain:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/chain-check.ts"
+    "chain:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/chain-check.ts",
+    "canary": "set -a; . ./.env 2>/dev/null; set +a; tsx src/canary.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

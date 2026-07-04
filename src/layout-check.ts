@@ -107,6 +107,17 @@ ok('menu/dishes are in the service register', rendered.image.includes('menu|dish
 // SEARCH: big grids get the client-side filter (8-row threshold, accessible, textContent only)
 ok('grids with >=8 rows get a search box', rendered.image.includes('__searchbox') && rendered.image.includes('count<8'));
 ok('the search box is accessible + safe', rendered.image.includes("'Search this list'") && rendered.image.includes('textContent'));
+// HONEYPOT: every public form carries the trap; CSS hides it off-screen; a filled value = bot
+{
+  const formHtml = renderPage({ brand: { name: 'A', tokens: { bg: '#fff', primary: '#123456' } }, sections: [
+    { type: 'hero', headline: 'Hi there' }, { type: 'form', title: 'Contact' }] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home' });
+  ok('public forms carry the honeypot field', formHtml.includes('name="company_website"') && formHtml.includes('hp-field'));
+  ok('the honeypot is hidden off-screen (humans never see it)', DS_CSS.includes('.hp-field') && DS_CSS.includes('-9999px'));
+  const coHtml = renderPage({ brand: { name: 'A', tokens: {} }, sections: [{ type: 'hero', headline: 'Checkout' }, { type: 'checkout' }] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'checkout', title: 'Checkout' });
+  ok('checkout carries the honeypot too', coHtml.includes('name="company_website"'));
+}
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -262,6 +262,9 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     // ---- Full-stack: a produced site's form posts here -> Postgres ----
     const submitM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/submit$/i);
     if (submitM && !UUID_RE.test(submitM[1])) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+    // honeypot: a filled 'company_website' marks a bot — pretend success, write nothing
+    const isBot = (d: any) => !!String(d?.company_website ?? '').trim();
+    const stripHp = (d: any) => { if (d && typeof d === 'object') delete d.company_website; return d; };
     if (submitM && req.method === 'POST') {
       const sid = submitM[1];
       const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
@@ -272,6 +275,8 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const data = (b.data && typeof b.data === 'object') ? b.data : {};
       const proj = (await pool.query('select brief from projects where id=$1', [sid])).rows[0];
       if (!proj) return send(res, 404, 'application/json', '{"error":"unknown site"}');
+      if (isBot(data)) return send(res, 200, 'application/json', '{"ok":true}');
+      stripHp(data);
       await pool.query('insert into site_submissions(project_id,form,data) values($1,$2,$3)', [sid, form, JSON.stringify(data)]);
       notifyLead(pool, sid, proj.brief, form, data);   // the operator hears about every lead by email
       return send(res, 200, 'application/json', '{"ok":true}');
@@ -304,6 +309,8 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       let raw = ''; for await (const c of req) raw += c;
       let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
       const data = (b.data && typeof b.data === 'object') ? b.data : {};
+      if (isBot(data)) return send(res, 200, 'application/json', '{"ok":true}');
+      stripHp(data);
       try {
         // FS1: the public may write ONLY the tables the composed site actually targets with a form —
         // never the catalog (anyone could "add services" to a barbershop through the raw API).
@@ -388,12 +395,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     const orderM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/order$/i);
     if (orderM && !UUID_RE.test(orderM[1])) return send(res, 404, 'application/json', '{"ok":false,"error":"unknown site"}');
     if (orderM && req.method === 'POST') {
+      // (honeypot checked after parse below)
       const ip = clientIp(req);
       if (formLimited(ip)) return send(res, 429, 'application/json', '{"ok":false,"error":"too many orders — try again shortly"}');
       let raw = ''; for await (const c of req) raw += c;
       let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
       const proj = (await pool.query('select brief from projects where id=$1', [orderM[1]])).rows[0];
       if (!proj) return send(res, 404, 'application/json', '{"ok":false,"error":"unknown site"}');
+      if (isBot(b.buyer)) return send(res, 200, 'application/json', '{"ok":true}');
+      stripHp(b.buyer);
       const r = await appdb.placeOrder(pool, orderM[1], b.buyer || {}, Array.isArray(b.items) ? b.items : []);
       if (r.ok) {
         await pool.query("insert into run_events(project_id, type, detail) values ($1,'order_placed',$2)", [orderM[1], `order #${r.order} · total $${r.total}`]).catch(() => {});
