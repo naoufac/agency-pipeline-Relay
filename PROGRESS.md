@@ -651,3 +651,14 @@ classes dead, each now a compile floor + gate:
    coerced to untracked.
 Flight 6: canary OK, review passed, 5 failed predecessors swept. The store contract is now whole:
 pages · variants · prices · order storage · line shape · honest seeds — all forced, all gated.
+
+## 2026-07-04 — ALL THREE CANARY ARCHETYPES GREEN: proactive flights instead of waiting for rotation
+Prod 2f698c0 (ecom 92). Flew the two unflown briefs on demand (CANARY_INDEX override):
+- BARBERSHOP (booking): GREEN first flight, 7 min — the whole booking chain (canonical timestamp,
+  availability picker, receipts, accounts, semantics) holds zero-touch.
+- TAQUERIA (reservations + blog, warm): caught class #7 — an APP with a products table (its menu)
+  linked 12 dish cards to product-N.html but the PDP was store-only → 404s. Fixed productively:
+  detail pages for ANY archetype with products — dish pages with photo/price/description, options
+  listed informationally, cart controls store-only. Re-flight: GREEN, 7 min.
+The nightly rotation is now fully validated: store · booking app · warm app+blog all pass
+zero-touch. Seven classes killed by the canary in its first day. Next timer run 03:33.
