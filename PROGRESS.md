@@ -577,3 +577,16 @@ stock seeded, bare add refused ('"Classic Black Tee" comes in options…'), orde
 at the inherited price with the 'S' snapshot on the line item. PQ2's plan definition is DONE.
 Remaining queue: Stripe v2 (owner's call) · TWA packaging · PQ1 backlog (register cards, re-score)
 · freeSlots from an hours table.
+
+## 2026-07-04 — BLOGS shipped (owner-directed): the PDP pattern for content, one chain, no second CMS
+Prod 89db101, 13 suites (content 28 · app 170 · scope 34). The owner asked for blogs + suspected
+open source could carry it — the honest answer: the open source is ALREADY inside (Directus +
+Postgres); adding WordPress/Ghost would break the one-pipeline rule. Shipped the missing READ side:
+blog briefs classify as data apps (posts/articles + a newsletter action; subscribers is PRIVATE_READ
+— the list never leaks); post-<id>.html renders LIVE from the article row (byline, date,
+art-directed cover, FULL body as escaped paragraphs — XSS-sealed, gated); collection cards link
+through and never dump body text; honest 404s; SCOPE promises 'a real blog'. The Content tab is the
+writing desk — publish by adding a row, edits show on the next load.
+PROOF zero-touch (specialty coffee blog + newsletter): review PASSED; externally verified —
+article page live ('Mastering the AeroPress in 5 Minutes'), post-999 → 404, subscribers sealed
+{"rows":[]}, signup writes with a receipt token. Owner sent the phone shot.
