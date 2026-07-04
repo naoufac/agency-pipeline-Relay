@@ -98,12 +98,11 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   const work = `/root/apk-builds/${slug}`;
   mkdirSync(work, { recursive: true });
   writeFileSync(work + '/twa-manifest.json', JSON.stringify(twaManifestFor(slug, wm), null, 2));
-  execFileSync('bubblewrap', ['build', '--skipPwaValidation'], {
-    cwd: work,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    env: { ...process.env, BUBBLEWRAP_KEYSTORE_PASSWORD: pass, BUBBLEWRAP_KEY_PASSWORD: pass, CI: 'true' },
-    timeout: 15 * 60_000,
-  });
+  const env = { ...process.env, BUBBLEWRAP_KEYSTORE_PASSWORD: pass, BUBBLEWRAP_KEY_PASSWORD: pass, CI: 'true' };
+  // update regenerates the Android project from twa-manifest.json (build alone PROMPTS
+  // about a missing checksum on a fresh project — headless means no prompts, ever)
+  execFileSync('bubblewrap', ['update', '--skipVersionUpgrade'], { cwd: work, stdio: ['ignore', 'inherit', 'inherit'], env, timeout: 5 * 60_000 });
+  execFileSync('bubblewrap', ['build', '--skipPwaValidation'], { cwd: work, stdio: ['ignore', 'inherit', 'inherit'], env, timeout: 15 * 60_000 });
   const built = work + '/app-release-signed.apk';
   if (!existsSync(built)) throw new Error('bubblewrap finished but no signed APK at ' + built);
 
