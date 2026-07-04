@@ -358,7 +358,7 @@ async function displayColumn(pool: pg.Pool, schema: string, table: string): Prom
 // source of truth, so a detail page always shows exactly what its card shows, plus the rest.
 // RELATION-AWARE: each FK column (x_id -> table y) is resolved to y's display value and exposed as `x`,
 // so it shows "Category: Ceramics", not "category_id: 3". Secrets are stripped.
-async function decorateRows(pool: pg.Pool, projectId: string, schema: string, table: string, tables: string[], rows: any[]): Promise<any[]> {
+async function decorateRows(pool: pg.Pool, projectId: string, schema: string, table: string, tables: string[], rows: any[], audience: ReadAudience = 'public'): Promise<any[]> {
   try {
     const fks = (await pool.query(
       `select kcu.column_name as col, ccu.table_name as ref
@@ -374,7 +374,8 @@ async function decorateRows(pool: pg.Pool, projectId: string, schema: string, ta
       if (!IDENT.test(dcol)) continue;
       const map = new Map((await pool.query(`select id, "${dcol}" as d from "${schema}"."${fk.ref}" where id = any($1)`, [ids])).rows.map((r: any) => [r.id, r.d]));
       const label = fk.col.replace(/_id$/, '');
-      for (const r of rows) { r[label] = map.get(r[fk.col]) ?? null; delete r[fk.col]; }
+      // the OWNER keeps the raw id too — the edit form needs the current relation, not just its label
+      for (const r of rows) { r[label] = map.get(r[fk.col]) ?? null; if (audience !== 'owner') delete r[fk.col]; }
     }
   } catch {}
   return rows.map((row: any) => {
@@ -404,7 +405,7 @@ export async function readRows(pool: pg.Pool, projectId: string, table: string, 
       for (const r of rows) if (byId.has(Number(r.id))) (r as any)._variants = byId.get(Number(r.id));
     } catch {}
   }
-  return decorateRows(pool, projectId, schema, table, tables, rows);
+  return decorateRows(pool, projectId, schema, table, tables, rows, audience);
 }
 
 // FS1 — THE scoped read: ONE column, ONE value, parameterized, identifier-validated, decorated like
@@ -479,7 +480,7 @@ export async function readRow(pool: pg.Pool, projectId: string, table: string, i
   if (!tables.includes(table)) return null;
   const rows = (await pool.query(`select * from "${schema}"."${table}" where id=$1`, [id])).rows;
   if (!rows.length) return null;
-  return (await decorateRows(pool, projectId, schema, table, tables, rows))[0];
+  return (await decorateRows(pool, projectId, schema, table, tables, rows, audience))[0];
 }
 
 // FS0 — SYSTEM-OWNED columns: lifecycle state belongs to the system/owner, never to the visitor

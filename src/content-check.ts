@@ -85,6 +85,27 @@ try {
   ok('upload: a collection without an image field says so', noimg.ok === false && /image field/.test((noimg as any).error));
   ok('upload: unknown record refused', (await appdb.saveRowImage(pool, id, 'products', 99999, 'data:image/png;base64,' + PNG1)).ok === false);
 
+  // ---- PQ3 · typed editing: owner reads keep raw FK ids; coercion handles toggles/dates/refs ----
+  {
+    const items = await appdb.readRows(pool, id, 'order_items', 50, 'owner');
+    // seed an order_items row first (via a real order path is overkill here — direct insert)
+    await pool.query(`insert into "${schema}"."order_items"(order_id, product_id, qty) values (1, 1, 2)`);
+    const items2 = await appdb.readRows(pool, id, 'order_items', 50, 'owner');
+    const li = items2[0];
+    ok('owner reads keep the RAW fk id (the edit form needs it)', li && li.product_id === 1 && typeof li.product === 'string', JSON.stringify({ pid: li?.product_id, label: li?.product }));
+    const pub = await appdb.readRows(pool, id, 'products', 50, 'public');
+    ok('public reads still hide raw fk ids elsewhere (unchanged shape)', !!pub.length);
+    // toggles: an explicit FALSE must store as false (unchecked checkbox → false, not skipped)
+    const prow = (await pool.query(`select id from "${schema}"."products" order by id limit 1`)).rows[0];
+    ok('updateRow: boolean false stores false', (await appdb.updateRow(pool, id, 'products', Number(prow.id), { in_stock: false })) === true
+      && (await pool.query(`select in_stock from "${schema}"."products" where id=$1`, [prow.id])).rows[0].in_stock === false);
+    ok('updateRow: boolean true stores true', (await appdb.updateRow(pool, id, 'products', Number(prow.id), { in_stock: true })) === true
+      && (await pool.query(`select in_stock from "${schema}"."products" where id=$1`, [prow.id])).rows[0].in_stock === true);
+    // relations: setting a ref by id sticks
+    ok('updateRow: a relation set by id sticks', (await appdb.updateRow(pool, id, 'order_items', Number(li.id), { product_id: 2 })) === true
+      && Number((await pool.query(`select product_id from "${schema}"."order_items" where id=$1`, [li.id])).rows[0].product_id) === 2);
+  }
+
   // ---- CSV EXPORT: quoting, injection guard, sensitive strip, honest nulls ----
   await appdb.insertRow(pool, id, 'products', { title: 'Comma, "Quoted"', price: 9.5 });
   await appdb.insertRow(pool, id, 'products', { title: '=SUM(A1:A9)', price: 1 });

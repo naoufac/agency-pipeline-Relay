@@ -343,9 +343,10 @@ function project(id, tab, seq){
       const wrap = document.getElementById('coll'); wrap.innerHTML = '<div class="muted" style="padding:12px 2px">Loading…</div>';
       let d; try { d = await j(`/api/site/${id}/content/${table}`); } catch { d = { columns: [], rows: [] }; }
       cols[table] = d.columns || [];
-      if (!d.rows || !d.rows.length){ wrap.innerHTML = `<div class="empty">No records yet.</div>`; return; }
+      const addBar = `<div class="row" style="margin-bottom:10px"><button class="btn btn-sm" id="caddbtn">+ Add ${esc(table.replace(/_/g,' ').replace(/s$/,''))}</button></div><div id="caddslot"></div>`;
+      if (!d.rows || !d.rows.length){ wrap.innerHTML = addBar + `<div class="empty">No records yet.</div>`; wireAdd(table, wrap); return; }
       const fields = (d.columns||[]).map(c=>c.name);
-      wrap.innerHTML = d.rows.map(r=>`<div class="card" style="margin-bottom:12px" data-rid="${r.id}">
+      wrap.innerHTML = addBar + d.rows.map(r=>`<div class="card" style="margin-bottom:12px" data-rid="${r.id}">
         <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
           <div style="flex:1;min-width:0">${fields.slice(0,4).map(f=>`<div style="font-size:14px;margin-bottom:2px"><b class="muted" style="font-weight:600">${esc(f)}</b> ${esc(String(r[f]??''))}</div>`).join('')}</div>
           <div class="row" style="gap:6px"><button class="btn btn-sm btn-ghost cedit">Edit</button><button class="btn btn-sm btn-ghost cdel" title="Delete">✕</button></div>
@@ -355,15 +356,68 @@ function project(id, tab, seq){
         card.querySelector('.cedit').onclick = ()=>editRecord(table, rid, rec, card);
         card.querySelector('.cdel').onclick = async ()=>{ if(!confirm('Delete this record?'))return; const res=await fetch(`/api/site/${id}/content/${table}/${rid}`,{method:'DELETE'}).then(r=>r.json()).catch(()=>({})); if(res.ok){card.remove();} else alert('Could not delete (are you signed in as the owner?)'); };
       });
+      wireAdd(table, wrap);
+    }
+    // PQ3 · typed fields: toggles for booleans, real date/time inputs, dropdowns for relations,
+    // textareas for prose — a form a grandma-owner can actually use (was: everything as raw text,
+    // relations not editable at all).
+    const IMGCOL = /image|photo|picture|cover|thumb|banner|avatar|logo/i;
+    function fieldInput(c, v){
+      const name = esc(c.name), label = esc(c.name.replace(/_/g,' '));
+      if (c.ref) return `<label>${label}<select name="${name}" data-cref="${esc(c.ref)}" data-cur="${esc(String(v??''))}"><option value="">— none —</option></select></label>`;
+      if (/bool/.test(c.type)) return `<label class="rcheck" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="${name}" data-cbool="1"${(v===true||v==='true')?' checked':''}> ${label}</label>`;
+      if (/timestamp/.test(c.type)) return `<label>${label}<input name="${name}" type="datetime-local" value="${esc(String(v??'').slice(0,16))}"></label>`;
+      if (/^date$/.test(c.type)) return `<label>${label}<input name="${name}" type="date" value="${esc(String(v??'').slice(0,10))}"></label>`;
+      if (/int|numeric|real|double|decimal/.test(c.type)) return `<label>${label}<input name="${name}" type="number" step="0.01" value="${esc(String(v??''))}"></label>`;
+      if (/desc|message|note|bio|content|about|detail|summary|story|body/.test(c.name)) return `<label>${label}<textarea name="${name}" rows="4">${esc(String(v??''))}</textarea></label>`;
+      const base = `<label>${label}<input name="${name}" type="text" value="${esc(String(v??''))}"></label>`;
+      return base + (IMGCOL.test(c.name) ? `<label style="font-size:12px" class="muted">Upload a photo (JPG/PNG/WebP, max 3 MB)<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-upcol="${name}"></label>` : '');
+    }
+    async function loadRefOptions(scope){
+      for (const sel of scope.querySelectorAll('select[data-cref]')){
+        const ref = sel.getAttribute('data-cref'), cur = sel.getAttribute('data-cur');
+        try {
+          const d = await j(`/api/site/${id}/content/${ref}`);
+          for (const r of (d.rows||[]).slice(0,200)){
+            const o = document.createElement('option');
+            o.value = r.id; o.textContent = String(r.name||r.title||r.label||('#'+r.id)).slice(0,60);
+            if (String(r.id)===String(cur)) o.selected = true;
+            sel.appendChild(o);
+          }
+        } catch {}
+      }
+    }
+    function serializeForm(form){
+      const data = {};
+      for (const el of form.querySelectorAll('input[name],textarea[name],select[name]')){
+        if (el.type==='file') continue;
+        if (el.getAttribute('data-cbool')) data[el.name] = el.checked;
+        else data[el.name] = el.value;
+      }
+      return data;
+    }
+    function wireAdd(table, wrap){
+      const btn = wrap.querySelector('#caddbtn'); if (!btn) return;
+      btn.onclick = ()=>{
+        const slot = wrap.querySelector('#caddslot');
+        const fs = (cols[table]||[]);
+        slot.innerHTML = `<div class="card" style="margin-bottom:12px"><form class="rform" style="margin:0">${fs.map(c=>fieldInput(c,'')).join('')}
+          <div class="row" style="gap:8px"><button class="btn btn-sm" type="submit">Add</button><button class="btn btn-sm btn-ghost" type="button" id="caddcancel">Cancel</button><span class="rform-msg muted" hidden></span></div></form></div>`;
+        loadRefOptions(slot);
+        slot.querySelector('#caddcancel').onclick = ()=>{ slot.innerHTML=''; };
+        slot.querySelector('form').onsubmit = async e=>{
+          e.preventDefault();
+          const msg = slot.querySelector('.rform-msg');
+          const res = await fetch(`/api/site/${id}/content/${table}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({data: serializeForm(e.target)})}).then(r=>r.json()).catch(()=>({}));
+          if (res.ok){ msg.hidden=false; msg.textContent='Added ✓ — live on your site'; setTimeout(()=>openCollection(table),700); }
+          else { msg.hidden=false; msg.textContent='Could not add (check required fields / sign in as the owner).'; }
+        };
+      };
     }
     function editRecord(table, rid, rec, card){
-      const fs = (cols[table]||[]).filter(c=>!c.ref);
-      const IMGCOL = /image|photo|picture|cover|thumb|banner|avatar|logo/i;
-      card.innerHTML = `<form class="rform" style="margin:0">${fs.map(c=>{
-        const v = esc(String(rec[c.name]??'')); const num = /int|numeric|real|double|decimal/.test(c.type);
-        const base = `<label>${esc(c.name.replace(/_/g,' '))}<input name="${esc(c.name)}" type="${num?'number':'text'}"${num?' step="0.01"':''} value="${v}"></label>`;
-        return base + (IMGCOL.test(c.name)&&!num ? `<label style="font-size:12px" class="muted">Upload a photo (JPG/PNG/WebP, max 3 MB)<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-upcol="${esc(c.name)}"></label>` : '');
-      }).join('')}<div class="row" style="gap:8px"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" id="ccancel">Cancel</button><span class="rform-msg muted" hidden></span></div></form>`;
+      const fs = (cols[table]||[]);
+      card.innerHTML = `<form class="rform" style="margin:0">${fs.map(c=>fieldInput(c, rec[c.name])).join('')}<div class="row" style="gap:8px"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" id="ccancel">Cancel</button><span class="rform-msg muted" hidden></span></div></form>`;
+      loadRefOptions(card);
       card.querySelector('#ccancel').onclick = ()=>openCollection(table);
       card.querySelectorAll('input[type=file][data-upcol]').forEach(fi=>{
         fi.onchange = () => {
@@ -380,7 +434,7 @@ function project(id, tab, seq){
         };
       });
       card.querySelector('form').onsubmit = async e=>{
-        e.preventDefault(); const data={}; new FormData(e.target).forEach((v,k)=>data[k]=v);
+        e.preventDefault(); const data = serializeForm(e.target);
         const msg=card.querySelector('.rform-msg'); const res=await fetch(`/api/site/${id}/content/${table}/${rid}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({data})}).then(r=>r.json()).catch(()=>({}));
         if(res.ok){ msg.hidden=false; msg.textContent='Saved ✓ — live on your site'; setTimeout(()=>openCollection(table),700); }
         else { msg.hidden=false; msg.textContent='Could not save (sign in as the owner).'; }
