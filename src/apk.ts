@@ -93,6 +93,8 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   const slug = row?.slug;
   if (!slug) throw new Error('project has no slug — subdomain identity is the APK origin');
   const siteDir = fileURLToPath(new URL(projectId + '/', sitesUrl));
+  if (!existsSync(siteDir + 'manifest.webmanifest'))
+    throw new Error('site predates the PWA base (no manifest.webmanifest) — rebuild the site first, then package it');
   const wm = JSON.parse(readFileSync(siteDir + 'manifest.webmanifest', 'utf8'));
 
   const work = `/root/apk-builds/${slug}`;

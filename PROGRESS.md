@@ -694,3 +694,25 @@ the-corner-table-2 .naples.agency all 200 with real titles, chain page 200, site
 canonical. The nightly canary now asserts the whole invariant zero-touch: slug minted +
 Host-routed homepage serves (raw http.request — undici fetch silently drops a Host
 override and would false-pass against the board UI).
+
+## 2026-07-04 — ANDROID v1: produced sites become installable, signed Android apps
+
+The mission's "apps that can be published on Android" now has its first real artifact.
+src/apk.ts derives the ENTIRE app identity deterministically from produced output:
+packageId ← slug (agency.naples.la_favorita_taqueria), twa-manifest ← the site's own
+manifest.webmanifest (name/colors/icons — CMS-first, nothing re-invented), assetlinks ←
+the relay keystore's actual SHA-256 read via keytool (a hand-typed fingerprint is the
+exact class of lie this forbids). Bubblewrap update+build run headlessly (CI=true +
+BUBBLEWRAP_* password envs — build alone PROMPTS on fresh projects). One relay signing
+key (/root/relay-android.keystore, pass in .env) signs every app; the .aab for Play
+Store upload is produced alongside. apk:check is the 14th gate suite (17 gates: packageId
+java-safety, twa field derivations + caps, assetlinks shape + fingerprint validation,
+apk MIME, Host-routing present). PROVEN: apksigner-verified APK live at
+la-favorita-taqueria.naples.agency/app.apk (200, android MIME, 889KB) with matching
+/.well-known/assetlinks.json on the SAME origin — install it and Android verifies the
+origin and opens the site fullscreen as a real app. trimtime built too (2nd archetype);
+claybound correctly REFUSED (predates the PWA base — rebuild first, honest error).
+Box infra learned the hard way: bubblewrap wants sdkmanager at <sdk>/bin but gradle/AGP
+wants a STANDARD sdk layout — /opt/android-sdk with bin→cmdline-tools/latest/bin symlink
+satisfies both. Also /tmp was mode 700 (broke apt entirely); restored 1777.
+Owner-gated next: Play Console account to publish the .aab to the store.
