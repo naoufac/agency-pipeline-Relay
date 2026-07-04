@@ -801,3 +801,31 @@ app schemas, all 15 secret files present. docs/RESTORE.md is the step-by-step. T
 recovery key was delivered to the owner's Telegram — the vault is useless without it and
 the box is no longer a single point of failure with it. Gotcha for posterity: `pg_restore
 --list | grep -q` dies of SIGPIPE under pipefail on first match — list to a file first.
+
+## 2026-07-04 — WATCHDOG v2 + THE ITERATION LEG: one new leg, three classes killed in one evening
+
+The uptime monitor only watched the board — but client sites ride the WILDCARD tunnel, a
+different process entirely; they could all go dark while the monitor stayed green. Proven
+real the same hour: the "flagship" la-favorita-taqueria 404'd — it had been a CANARY
+project, swept by design (lesson encoded: demos and probes use permanent projects only;
+taqueria-dona-rosa built as the permanent replacement). Watchdog v2 probes every surface
+(board healthz · a permanent flagship subdomain · cms) with per-surface flap state and
+culprit-naming alerts; the down→up transition was fired live as proof.
+
+The canary grew the ITERATION LEG — after the green flight it rebuilds the SAME project
+through the public /api/rebuild with an amended brief and asserts: not one row lost, slug
+identity kept, review passes AGAIN. It caught a REAL class per flight:
+· Flight 1: identity NOT stable — replan dropped the slug and the lock re-derived from the
+  freshly re-resolved LLM name (hearthside → still-and-wick): domain, packageId, assetlinks,
+  printed QRs all orphaned. Fixed at both floors (replan carries slug; lock derives from the
+  LOCKED brand). apk:check 44.
+· Flight 2: order_items.product_variant_id NOT NULL (alien spelling) — placeOrder writes
+  canonical variant_id; NO order could land. Compile canonicalizes the spelling + forces
+  line-item variant columns nullable. ecom 96.
+· Flight 3: NO products table at all (candle scents modeled as categories+variants) —
+  category cards, nothing purchasable. CATALOG CANON: the variants' parent entity becomes
+  products (refs, FK column, seed keys rewritten). ecom 99. Plus: the options table is
+  never chosen as the collection grid.
+Flight 4 blocked externally: the OpenRouter key hit its WEEKLY LIMIT — builds are paused
+until the owner raises it; the operator alert fired as designed. The green E2E iteration
+flight runs automatically the moment quota returns (nightly canary).
