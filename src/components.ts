@@ -478,6 +478,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     ${status ? `<span class="receipt-status">Status: ${esc(status)}</span>` : ''}
     <div class="receipt-ref"><code>${esc(String(s.refCode || ''))}</code><span class="muted">Save this reference code — it is the key to this page.</span></div>
     ${meta ? `<ul class="receipt-meta">${meta}</ul>` : ''}
+    ${Array.isArray(s.payinfo) && s.payinfo.length ? `<div class="payopts"><h3>How to pay</h3>${s.payinfo.slice(0, 6).map((o: any) => `<div class="payopt"><b>${esc(String(o.name).slice(0, 80))}</b>${o.details ? `<p>${esc(String(o.details).slice(0, 300))}</p>` : ''}</div>`).join('')}</div>` : ''}
     ${s.findSlug ? `<p class="muted">Lost the link? Retrieve it anytime at <a href="${esc(String(s.findSlug))}.html">${esc(String(s.findTitle || 'Find my booking'))}</a>.</p>` : ''}
   </div></div></section>`;
   },

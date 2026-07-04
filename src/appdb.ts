@@ -193,7 +193,7 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
 // products / orders / order_items (enforced by the app_db gate for store briefs). ZERO TRUST in the
 // client: prices come from the products table, the total is computed HERE, unit prices are
 // snapshotted onto the line items, and the whole write is one transaction.
-export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record<string, any>, items: { id: any; qty: any; variant?: any }[]): Promise<{ ok: boolean; order?: number; total?: number; error?: string }> {
+export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record<string, any>, items: { id: any; qty: any; variant?: any }[]): Promise<{ ok: boolean; order?: number; total?: number; ref?: string; error?: string }> {
   const schema = schemaName(projectId);
   const tables = await listTables(pool, projectId);
   for (const t of ['products', 'orders', 'order_items']) if (!tables.includes(t)) return { ok: false, error: 'this site has no store (missing ' + t + ')' };
@@ -281,6 +281,9 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
       }
     }
     const cols: string[] = [nameCol]; const vals: any[] = [name];
+    // FS1 — the buyer keeps a receipt too: mint the same secret token every visitor action gets
+    const ref = oCols.has('ref_token') ? randomBytes(16).toString('hex') : undefined;
+    if (ref) { cols.push('ref_token'); vals.push(ref); }
     if (oCols.has('email')) { cols.push('email'); vals.push(email); }
     if (oCols.has('phone') && buyer?.phone) { cols.push('phone'); vals.push(String(buyer.phone).slice(0, 40)); }
     if (oCols.has('notes') && buyer?.notes) { cols.push('notes'); vals.push(String(buyer.notes).slice(0, 500)); }
@@ -304,7 +307,7 @@ export async function placeOrder(pool: pg.Pool, projectId: string, buyer: Record
       for (const l of lines) { if (l.variant !== null) await c.query(`update "${schema}"."product_variants" set stock = stock - $1 where id=$2 and stock is not null`, [l.qty, l.variant]); }
     }
     await c.query('commit');
-    return { ok: true, order: orderId, total };
+    return { ok: true, order: orderId, total, ref };
   } catch (e: any) {
     try { await c.query('rollback'); } catch {}
     console.error('placeOrder', projectId, e?.message ?? e);
@@ -594,9 +597,32 @@ export async function freeSlots(pool: pg.Pool, projectId: string, table: string,
       if (Number.isInteger(cap) && cap > 0) { capacity = cap; break; }
     }
   } catch {}
+  // the business grid: from the model's OWN opening-hours table when it ships one (the machine-table
+  // exclusion keeps it off catalogs; here it becomes useful); else the deterministic 09:00–17:00.
+  // Numeric weekdays read as 0/7=Sunday…6=Saturday; names are preferred and unambiguous.
+  let openH = 9, closeH = 17;
+  const hoursTable = (await listTables(pool, projectId)).find(t => /^(opening_?hours?|business_?hours?|store_?hours?|hours)$/i.test(t));
+  if (hoursTable) {
+    const hc = (await typedColumns(pool, schema, hoursTable)).map(c => c.name);
+    const dayCol = hc.find(c => /^(day|weekday|day_of_week|dow|day_name)$/.test(c));
+    const openCol = hc.find(c => /open/.test(c) && c !== dayCol);
+    const closeCol = hc.find(c => /clos/.test(c));
+    if (dayCol && openCol && closeCol) {
+      const DAYNUM: Record<string, number> = { sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2, wednesday: 3, wed: 3, thursday: 4, thu: 4, thur: 4, thurs: 4, friday: 5, fri: 5, saturday: 6, sat: 6 };
+      const ph = (v: any): number | null => { const m = String(v ?? '').trim().match(/^(\d{1,2})(?::\d{2})?(?::\d{2})?\s*(am|pm)?$/i); if (!m) return null; let h2 = Number(m[1]) % 24; const ap = (m[2] || '').toLowerCase(); if (ap === 'pm' && h2 < 12) h2 += 12; if (ap === 'am' && h2 === 12) h2 = 0; return h2; };
+      try {
+        const rows2 = (await pool.query(`select "${dayCol}"::text as d, "${openCol}"::text as o, "${closeCol}"::text as c from "${schema}"."${hoursTable}" limit 14`)).rows;
+        const wd = new Date(date + 'T12:00:00').getDay();
+        const hit = rows2.find((r: any) => { const dv = String(r.d ?? '').trim().toLowerCase(); const n = /^\d+$/.test(dv) ? (Number(dv) % 7) : DAYNUM[dv]; return n === wd; });
+        if (!hit) return [];   // closed that day — no slots is the honest answer
+        const o = ph(hit.o), c2 = ph(hit.c);
+        if (o !== null && c2 !== null && c2 > o) { openH = o; closeH = c2; }
+      } catch {}
+    }
+  }
   const now = Date.now();
   const out: { t: string; free: boolean }[] = [];
-  for (let h = 9; h <= 16; h++) {
+  for (let h = openH; h < closeH; h++) {
     const t = String(h).padStart(2, '0') + ':00';
     const n = Number(taken.find((r: any) => r.t === t)?.n || 0);
     out.push({ t, free: new Date(`${date}T${t}:00`).getTime() > now && n < capacity });

@@ -94,6 +94,10 @@ ok('emitted card renderer filters ISO timestamps (backslashes intact)', rendered
 ok('emitted card renderer uses toDateString for dates', rendered.image.includes('toDateString'));
 ok('admin-flag booleans never render as card copy', rendered.image.includes('active|enabled|visible|published'));
 ok('DB-card images take the theme frame (no hardcoded radius)', rendered.image.includes('border-radius:var(--radius)'));
+// REGISTER: service tables never render SKU-style bold prices — a quiet muted 'From $X' closes the
+// panel's 'legal consultations framed as products' finding
+ok('service-register cards render money muted as From $X', rendered.image.includes("'From $'") && rendered.image.includes('moneyLast'));
+ok('the service register is table-classed (products stay commerce)', rendered.image.includes('practice|treatment'));
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

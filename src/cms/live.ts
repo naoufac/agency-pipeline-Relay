@@ -106,8 +106,14 @@ export async function renderLiveReceipt(pool: pg.Pool, projectId: string, table:
   const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
   const backSlug = formPageSlug(params.site) || navPages[0].slug;
   const back = navPages.find((p: any) => p.slug === backSlug) || navPages[0];
+  // PAYMENTS: an ORDER receipt repeats the store's payment instructions — the visitor who closed
+  // the checkout tab still knows how to pay (read live from the owner-editable table).
+  let payinfo: any[] = [];
+  if (/^orders?$/i.test(table)) {
+    try { payinfo = (await appdb.readRows(pool, projectId, 'payment_options', 6)).filter((o: any) => o && o.name && o.active !== false); } catch {}
+  }
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [
-    { type: 'record', row: rows[0], refCode: token, back, findSlug: 'find', findTitle: 'Find my booking', eyebrow: singular(table) + ' received', title: 'Your ' + singular(table).toLowerCase() + ' is in' }] };
+    { type: 'record', row: rows[0], refCode: token, back, findSlug: 'find', findTitle: 'Find my booking', eyebrow: singular(table) + ' received', title: 'Your ' + singular(table).toLowerCase() + ' is in', payinfo }] };
   const html = renderPage(spec, { pages: navPages, slug: 'receipt', title: 'Your ' + singular(table).toLowerCase(), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE receipt (rendered from the visitor's own row on request)-->\n` + html;
 }

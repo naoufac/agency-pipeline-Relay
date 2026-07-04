@@ -357,6 +357,20 @@ try {
     ok('slot table form: the hidden input carries the real field name', fhtml.includes('name="at" data-slot="at"'));
     const nhtml = SECTIONS.form({ table: 'services', form: 'services' }, { forms: { services: [{ name: 'name', type: 'text', nullable: false }, { name: 'available_from', type: 'date', nullable: true }] } } as any);
     ok('non-slot tables keep the plain date input', !nhtml.includes('slotchips'));
+
+    // hours-aware: the grid comes from the model's OWN opening-hours table; a closed day offers nothing
+    const id4 = randomUUID();
+    await appdb.provision(pool, id4, JSON.stringify({ entities: [
+      { name: 'bookings', fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'at', type: 'datetime', required: true }, { name: 'table_number', type: 'int' }] },
+      { name: 'business_hours', public: true, display: 'day', fields: [{ name: 'day', type: 'text', required: true }, { name: 'opens_at', type: 'text' }, { name: 'closes_at', type: 'text' }],
+        seed: [{ day: 'Tuesday', opens_at: '10:00', closes_at: '2 PM' }, { day: 'Saturday', opens_at: '9:00', closes_at: '13:00' }] },
+    ] }));
+    const nextDow = (dow: number) => { const d = new Date(); do { d.setDate(d.getDate() + 1); } while (d.getDay() !== dow); return d.toISOString().slice(0, 10); };
+    const tue = await appdb.freeSlots(pool, id4, 'bookings', nextDow(2), {});
+    ok('hours table drives the grid (Tue 10:00–2 PM → 10..13)', !!tue && tue.length === 4 && tue[0].t === '10:00' && tue[3].t === '13:00', JSON.stringify(tue));
+    const sun = await appdb.freeSlots(pool, id4, 'bookings', nextDow(0), {});
+    ok('a closed day offers NOTHING (honest empty, not the default grid)', Array.isArray(sun) && sun.length === 0, JSON.stringify(sun));
+    await pool.query(`drop schema if exists "${appdb.schemaName(id4)}" cascade`).catch(() => {});
   }
 }
 

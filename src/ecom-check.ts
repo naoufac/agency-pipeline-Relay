@@ -225,6 +225,17 @@ try {
   ok('renderLivePdp back-links to the page carrying the shop grid', !!lp && lp.includes('href="shop.html"'));
   ok('renderLivePdp answers null for a product that does not exist', (await renderLivePdp(pool, id, 424242)) === null);
 
+  // PAYMENTS + FS1: the buyer keeps a receipt, and the receipt says HOW TO PAY
+  {
+    const rr = await appdb.placeOrder(pool, id, { customer_name: 'Rex Receipt', email: 'rex@b.co' }, [{ id: 2, qty: 1 }]);
+    ok('placeOrder mints the FS1 receipt token', rr.ok === true && typeof rr.ref === 'string' && rr.ref!.length === 32, JSON.stringify(rr));
+    const { renderLiveReceipt } = await import('./cms/live.ts');
+    const rh = await renderLiveReceipt(pool, id, 'orders', rr.ref!);
+    ok('the order receipt renders from the token', !!rh && rh.includes('Rex Receipt'), String(rh?.length));
+    ok('the receipt says HOW TO PAY (live payment instructions)', !!rh && rh.includes('How to pay') && rh.includes('Pay on pickup'));
+    ok('checkout success lands the buyer ON their receipt', co.includes('receipt-orders-'));
+  }
+
   // ---- a store the system marks buildable MUST be able to SELL (the checkout-eviction class) ----
   // site_model is the deterministic gate every composed model passes through — prove it rejects a
   // store whose checkout page is missing (the planner cap once evicted it: Proceed button 404'd,
