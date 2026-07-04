@@ -46,6 +46,16 @@ ok('checkout form counts as WIRED for the render gate', /<form\b[^>]*onsubmit="r
     { name: 'payment_methods', public: true, fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Bank transfer' }] },
   ] })));
   ok("payments: a model's OWN payment table is respected (no duplicate injection)", !own.tables.includes('payment_options'), own.tables.join(','));
+  // CATALOG CANON — flight-caught: a store modeled as categories+variants with NO products table
+  const catless = compile(parseModel(JSON.stringify({ entities: [
+    { name: 'categories', public: true, fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Amber' }, { name: 'Cedar' }] },
+    { name: 'product_variants', public: true, fields: [{ name: 'name', type: 'text', required: true }, { name: 'price', type: 'money' }, { name: 'category_id', type: 'int', ref: 'categories' }], seed: [{ name: 'Small', price: 12, category_id: 1 }] },
+    { name: 'orders', fields: [{ name: 'customer_name', type: 'text', required: true }] },
+  ] })));
+  ok('catalog canon: variants without products → the parent BECOMES products', catless.tables.includes('products') && !catless.tables.includes('categories'), catless.tables.join(','));
+  ok('catalog canon: the variants FK column is canonicalized to product_id', /"product_variants"[\s\S]{0,400}"product_id"/.test(catless.ddl) && !/"product_variants"[\s\S]{0,400}"category_id"/.test(catless.ddl));
+  ok('catalog canon: the repair is loud', catless.warnings.some((w: string) => /variants existed without a catalog/.test(w)));
+
   // VARIANT COLUMN SPELLING — the flight-caught class: order_items.product_variant_id NOT NULL
   // meant placeOrder (which writes the canonical variant_id) could never land an order.
   const alien = compile(parseModel(JSON.stringify({ entities: [

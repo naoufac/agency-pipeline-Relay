@@ -85,6 +85,26 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
     const va = ents.find(e2 => VARIANT_TABLE.test(e2.name));
     if (va) { warnings.push(`renamed entity ${va.name} → product_variants (canonical options table)`); va.name = 'product_variants'; }
   }
+  // CATALOG CANON — a store may model its sellables as anything ('categories' of candle scents —
+  // a real canary catch: no products table existed, the grid rendered category cards, nothing was
+  // purchasable). If variants exist WITHOUT products, the variants' parent entity IS the catalog:
+  // rename it to products, rewrite every ref, canonicalize the variants' FK column and seed keys.
+  if (ents.some(e2 => e2.name === 'product_variants') && !ents.some(e2 => e2.name === 'products')) {
+    const pv = ents.find(e2 => e2.name === 'product_variants')!;
+    const parentField = (pv.fields || []).find(f => f?.ref && ents.some(e2 => e2.name === snake(f.ref!) && e2.name !== 'product_variants'));
+    const parent = parentField ? ents.find(e2 => e2.name === snake(parentField.ref!)) : null;
+    if (parent) {
+      const old = parent.name;
+      const oldCol = snake(parentField!.name);
+      parent.name = 'products';
+      for (const e2 of ents) for (const f of (e2.fields || [])) if (f?.ref && snake(f.ref) === old) f.ref = 'products';
+      if (oldCol !== 'product_id') {
+        parentField!.name = 'product_id';
+        for (const row of (pv.seed || [])) if (row && typeof row === 'object' && oldCol in row) { (row as any).product_id = (row as any)[oldCol]; delete (row as any)[oldCol]; }
+      }
+      warnings.push(`renamed entity ${old} → products (variants existed without a catalog — nothing was purchasable)`);
+    }
+  }
   if (ents.some(e2 => e2.name === 'product_variants')) {
     const oi = ents.find(e2 => e2.name === 'order_items');
     if (oi) {
