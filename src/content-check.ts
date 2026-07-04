@@ -15,7 +15,7 @@ const ok = (name: string, cond: boolean, extra = '') => { if (cond) pass++; else
 
 const MODEL = JSON.stringify({ entities: [
   { name: 'products', public: true, display: 'title', fields: [
-    { name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'in_stock', type: 'bool', default: true }],
+    { name: 'title', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'in_stock', type: 'bool', default: true }, { name: 'photo_url', type: 'image' }],
     seed: [{ title: 'Mug', price: 24, in_stock: true }, { title: 'Bowl', price: 38.5, in_stock: true }] },
   { name: 'orders', fields: [{ name: 'customer_name', type: 'text' }, { name: 'total', type: 'money' }], seed: [{ customer_name: 'Prior Buyer', total: 24 }] },
   { name: 'order_items', fields: [{ name: 'order', type: 'ref:orders' }, { name: 'product', type: 'ref:products' }, { name: 'qty', type: 'int' }] },
@@ -64,6 +64,25 @@ try {
   ok('orders-only store: payment instructions are the one editable collection', bareTabs.length === 1 && bareTabs[0].table === 'payment_options', JSON.stringify(bareTabs));
   ok('orders itself stays hidden from the Content tab', !bareTabs.some((t) => t.table === 'orders'));
   await pool.query(`drop schema if exists "${appdb.schemaName(bare)}" cascade`).catch(() => {});
+
+  // ---- IMAGE UPLOAD: magic-byte checked, size-capped, row updated to the served path ----
+  const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const up = await appdb.saveRowImage(pool, id, 'products', 1, 'data:image/png;base64,' + PNG1);
+  ok('upload: a real PNG lands + the row points at it', up.ok === true && /^\/sites\/.+\/assets\/up-[0-9a-f]{12}\.png$/.test((up as any).path), JSON.stringify(up));
+  if (up.ok) {
+    const { existsSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    ok('upload: the file exists on disk', existsSync(fileURLToPath(new URL('..' + (up as any).path.replace('/sites/', '/sites/'), new URL('../sites/x', import.meta.url)).href.replace('/sites/x', '')) ) || existsSync('/root/agency-pipeline' + (up as any).path.replace('/sites/', '/sites/')), (up as any).path);
+    const rowNow = (await pool.query(`select photo_url from "${appdb.schemaName(id)}"."products" where id=1`)).rows[0];
+    ok('upload: the image column carries the served path', rowNow?.photo_url === (up as any).path, JSON.stringify(rowNow));
+  }
+  const bad = await appdb.saveRowImage(pool, id, 'products', 1, Buffer.from('#!/bin/sh evil').toString('base64'));
+  ok('upload: wrong magic bytes refused (filename never trusted)', bad.ok === false && /unsupported|valid/.test((bad as any).error));
+  const big = await appdb.saveRowImage(pool, id, 'products', 1, 'A'.repeat(4_500_000));
+  ok('upload: oversized refused with a friendly cap', big.ok === false && /large/.test((big as any).error));
+  const noimg = await appdb.saveRowImage(pool, id, 'orders', 1, 'data:image/png;base64,' + PNG1);
+  ok('upload: a collection without an image field says so', noimg.ok === false && /image field/.test((noimg as any).error));
+  ok('upload: unknown record refused', (await appdb.saveRowImage(pool, id, 'products', 99999, 'data:image/png;base64,' + PNG1)).ok === false);
 
   // ---- CSV EXPORT: quoting, injection guard, sensitive strip, honest nulls ----
   await appdb.insertRow(pool, id, 'products', { title: 'Comma, "Quoted"', price: 9.5 });

@@ -445,6 +445,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         try { return send(res, 200, 'application/json', JSON.stringify({ columns: await appdb.formColumns(pool, sid, table, 'owner'), rows: await appdb.readRows(pool, sid, table, 200, 'owner') })); }
         catch { return send(res, 200, 'application/json', '{"columns":[],"rows":[]}'); }
       }
+      // IMAGE UPLOAD (owner-only): set a row's photo — body {image:<base64>}; magic-byte checked
+      if (table && rid !== null && req.method === 'POST') {
+        let raw = ''; let over = false;
+        for await (const c of req) { raw += c; if (raw.length > 6_000_000) { over = true; break; } }
+        if (over) return send(res, 413, 'application/json', '{"error":"image too large (max 3 MB)"}');
+        let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+        const r = await appdb.saveRowImage(pool, sid, table, rid, String(b.image || '')).catch(() => ({ ok: false as const, error: 'upload failed' }));
+        return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r));
+      }
       // edit one record
       if (table && rid !== null && (req.method === 'PATCH' || req.method === 'PUT')) {
         let raw = ''; for await (const c of req) raw += c;

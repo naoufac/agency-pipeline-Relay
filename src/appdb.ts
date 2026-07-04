@@ -630,6 +630,45 @@ export async function freeSlots(pool: pg.Pool, projectId: string, table: string,
   return out;
 }
 
+// IMAGE UPLOAD — the owner sets their OWN photo on a content row (PQ3's listed gap). The file type
+// comes from MAGIC BYTES, never the filename; size-capped; stored under the site's own assets; the
+// row's image column is updated to the served path so the live site shows it on the next load.
+const UPLOAD_SITES = new URL('../sites/', import.meta.url);
+const IMG_COL = /image|photo|picture|cover|thumb|banner|avatar|logo/i;
+function sniffImage(buf: Buffer): string | null {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.length > 7 && buf.readUInt32BE(0) === 0x89504e47) return 'png';
+  if (buf.length > 11 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  if (buf.length > 5 && buf.toString('ascii', 0, 4) === 'GIF8') return 'gif';
+  return null;
+}
+export async function saveRowImage(pool: pg.Pool, projectId: string, table: string, rid: number, b64: string): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const schema = schemaName(projectId);
+  if (!IDENT.test(table) || /^_relay_/.test(table) || !Number.isInteger(rid) || rid < 1) return { ok: false, error: 'bad request' };
+  if (!(await listTables(pool, projectId)).includes(table)) return { ok: false, error: 'unknown collection' };
+  const cols = await typedColumns(pool, schema, table);
+  const imgCol = cols.find(c => IMG_COL.test(c.name) && /text|char/.test(c.type) && !SENSITIVE.test(c.name));
+  if (!imgCol) return { ok: false, error: 'this collection has no image field' };
+  const row = (await pool.query(`select id from "${schema}"."${table}" where id=$1`, [rid])).rows[0];
+  if (!row) return { ok: false, error: 'record not found' };
+  const clean = String(b64 || '').replace(/^data:[^,]*,/, '');
+  if (clean.length > 4_200_000) return { ok: false, error: 'image too large (max 3 MB)' };
+  let buf: Buffer;
+  try { buf = Buffer.from(clean, 'base64'); } catch { return { ok: false, error: 'not a valid image' }; }
+  if (buf.length < 24 || buf.length > 3_000_000) return { ok: false, error: buf.length <= 24 ? 'not a valid image' : 'image too large (max 3 MB)' };
+  const ext = sniffImage(buf);
+  if (!ext) return { ok: false, error: 'unsupported file type — use JPG, PNG, WebP or GIF' };
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const rel = `assets/up-${randomBytes(6).toString('hex')}.${ext}`;
+  const dir = new URL(projectId + '/', UPLOAD_SITES);
+  mkdirSync(fileURLToPath(new URL('assets/', dir)), { recursive: true });
+  writeFileSync(fileURLToPath(new URL(rel, dir)), buf);
+  const served = `/sites/${projectId}/${rel}`;
+  await pool.query(`update "${schema}"."${table}" set "${imgCol.name}"=$1 where id=$2`, [served, rid]);
+  return { ok: true, path: served };
+}
+
 // CSV EXPORT — the owner downloads their records ("your data is yours"; the accountant wants the
 // orders). Owner audience (private tables included), sensitive columns stripped, RFC-quoted, BOM
 // for Excel, and formula-injection guarded (a value starting =/+/-/@ gets a leading apostrophe).

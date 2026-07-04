@@ -358,11 +358,27 @@ function project(id, tab, seq){
     }
     function editRecord(table, rid, rec, card){
       const fs = (cols[table]||[]).filter(c=>!c.ref);
+      const IMGCOL = /image|photo|picture|cover|thumb|banner|avatar|logo/i;
       card.innerHTML = `<form class="rform" style="margin:0">${fs.map(c=>{
         const v = esc(String(rec[c.name]??'')); const num = /int|numeric|real|double|decimal/.test(c.type);
-        return `<label>${esc(c.name.replace(/_/g,' '))}<input name="${esc(c.name)}" type="${num?'number':'text'}"${num?' step="0.01"':''} value="${v}"></label>`;
+        const base = `<label>${esc(c.name.replace(/_/g,' '))}<input name="${esc(c.name)}" type="${num?'number':'text'}"${num?' step="0.01"':''} value="${v}"></label>`;
+        return base + (IMGCOL.test(c.name)&&!num ? `<label style="font-size:12px" class="muted">Upload a photo (JPG/PNG/WebP, max 3 MB)<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-upcol="${esc(c.name)}"></label>` : '');
       }).join('')}<div class="row" style="gap:8px"><button class="btn btn-sm" type="submit">Save</button><button class="btn btn-sm btn-ghost" type="button" id="ccancel">Cancel</button><span class="rform-msg muted" hidden></span></div></form>`;
       card.querySelector('#ccancel').onclick = ()=>openCollection(table);
+      card.querySelectorAll('input[type=file][data-upcol]').forEach(fi=>{
+        fi.onchange = () => {
+          const f = fi.files && fi.files[0]; if(!f) return;
+          if (f.size > 3_000_000) { alert('That photo is over 3 MB — pick a smaller one.'); fi.value=''; return; }
+          const rd = new FileReader();
+          rd.onload = async () => {
+            const res = await fetch(`/api/site/${id}/content/${table}/${rid}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({image: rd.result})}).then(r=>r.json()).catch(()=>({}));
+            const msg = card.querySelector('.rform-msg');
+            if (res.ok) { const inp = card.querySelector(`input[name="${fi.getAttribute('data-upcol')}"]`); if (inp) inp.value = res.path; if (msg) { msg.hidden=false; msg.textContent='Photo uploaded ✓ — live on your site'; } }
+            else if (msg) { msg.hidden=false; msg.textContent=res.error || 'Upload failed (sign in as the owner?)'; }
+          };
+          rd.readAsDataURL(f);
+        };
+      });
       card.querySelector('form').onsubmit = async e=>{
         e.preventDefault(); const data={}; new FormData(e.target).forEach((v,k)=>data[k]=v);
         const msg=card.querySelector('.rform-msg'); const res=await fetch(`/api/site/${id}/content/${table}/${rid}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({data})}).then(r=>r.json()).catch(()=>({}));
