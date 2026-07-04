@@ -24,7 +24,7 @@ export async function cmsFinalize(pool: pg.Pool, projectId: string, sitesDirOver
   const chosen: CmsName = isCmsName(params.cms) ? params.cms : 'directus';
   const { name: builtOn, entry, fellBackFrom } = resolveBuildable(chosen);
   const sitesDir = sitesDirOverride || fileURLToPath(SITES);
-  const ctx: BuildCtx = { projectId, brief: r.brief, archetype: params.archetype || 'site', theme: params.theme || 'modern', sitesDir, schemaForms: params.schema_forms, layout: params.layout };
+  const ctx: BuildCtx = { projectId, brief: r.brief, archetype: params.archetype || 'site', theme: params.theme || 'modern', sitesDir, schemaForms: params.schema_forms, layout: params.layout, locale: params.locale };
   const model: SiteModel = { pages: site.pages, brand: params.brand || site.brand, data: site.data };
   const tag = fellBackFrom ? `assigned ${fellBackFrom} (not operational yet) → built on ${builtOn}` : `built on ${builtOn}`;
 

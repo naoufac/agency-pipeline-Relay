@@ -72,6 +72,9 @@ const runner = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
 ok('runner: locale threaded into both render paths', (runner.match(/locale: \(ctx as any\)\.locale/g) || []).length >= 2);
 const live = readFileSync(new URL('./cms/live.ts', import.meta.url), 'utf8');
 ok('live pages: locale threaded into every renderPage', (live.match(/locale: params\.locale/g) || []).length >= 7);
+const cmsD = readFileSync(new URL('./cms/directus.ts', import.meta.url), 'utf8');
+const cmsF = readFileSync(new URL('./cms/finalize.ts', import.meta.url), 'utf8');
+ok('CMS re-serve path carries the locale (the leak the Italian E2E caught)', cmsD.includes('locale: (ctx as any).locale') && cmsF.includes('locale: params.locale'));
 
 console.log(`\ni18n:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

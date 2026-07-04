@@ -40,6 +40,7 @@ export interface SiteModel {
 export interface BuildCtx {
   projectId: string;
   brief: string;
+  locale?: string;   // i18n: the site's language — EVERY render path must carry it or chrome falls back to English
   archetype: Archetype;
   theme: ThemeName;
   sitesDir: string;     // where /sites/<id>/ artifacts are written
