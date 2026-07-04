@@ -14,6 +14,13 @@ import { fileURLToPath } from 'node:url';
 export const KEYSTORE = process.env.RELAY_KS_PATH || '/root/relay-android.keystore';
 export const KS_ALIAS = 'relay';
 
+// the slug IS the app's identity (host, packageId, build path) — anything that is not a
+// clean lowercase DNS label stops HERE, before it can mint a divergent or traversing identity
+export function assertCleanSlug(slug: string): string {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(String(slug || ''))) throw new Error('slug is not a clean DNS label: ' + JSON.stringify(slug));
+  return slug;
+}
+
 // a Java package segment must be [A-Za-z_][A-Za-z0-9_]* — slugs are DNS labels, so the only
 // repairs are dash→underscore and a leading digit (java forbids it, DNS allows it)
 export function packageIdFor(slug: string): string {
@@ -34,7 +41,7 @@ export function assetlinksFor(packageId: string, sha256: string): object[] {
 
 // bubblewrap's twa-manifest.json, filled ONLY from the site's own webmanifest + slug
 export function twaManifestFor(slug: string, webmanifest: any): any {
-  const host = `${slug}.naples.agency`;
+  const host = `${assertCleanSlug(slug)}.naples.agency`;
   const name = String(webmanifest?.name || slug).slice(0, 50);
   const launcher = String(webmanifest?.short_name || name).slice(0, 30);
   const theme = String(webmanifest?.theme_color || '#1a1a1a');
@@ -57,7 +64,9 @@ export function twaManifestFor(slug: string, webmanifest: any): any {
     maskableIconUrl: `https://${host}/icon-512.png`,
     splashScreenFadeOutDuration: 300,
     signingKey: { path: KEYSTORE, alias: KS_ALIAS },
-    appVersionName: '1.0.0',
+    // bubblewrap's JSON field is appVersion (TwaManifest maps appVersion -> versionName);
+    // 'appVersionName' here is silently ignored and ships versionName "" — Play rejects that
+    appVersion: '1.0.0',
     appVersionCode: 1,
     shortcuts: [],
     generatorApp: 'relay',
@@ -80,7 +89,9 @@ export function twaManifestFor(slug: string, webmanifest: any): any {
 // the signing cert's SHA-256, straight from the keystore — assetlinks must NEVER be written
 // from anything else (a hand-typed fingerprint is exactly the class of lie this forbids)
 export function keystoreSha256(storepass: string): string {
-  const out = execFileSync('keytool', ['-list', '-v', '-keystore', KEYSTORE, '-alias', KS_ALIAS, '-storepass', storepass], { encoding: 'utf8' });
+  // -storepass:env — the password must NEVER ride argv: /proc/*/cmdline is world-readable and
+  // execFileSync puts the full argv into e.message on failure, which the CLI would then log
+  const out = execFileSync('keytool', ['-list', '-v', '-keystore', KEYSTORE, '-alias', KS_ALIAS, '-storepass:env', 'RELAY_KT_PASS'], { encoding: 'utf8', env: { ...process.env, RELAY_KT_PASS: storepass } });
   const m = out.match(/SHA256:\s*([0-9A-F:]{95})/);
   if (!m) throw new Error('keystoreSha256: fingerprint not found in keytool output');
   return m[1];
@@ -89,9 +100,11 @@ export function keystoreSha256(storepass: string): string {
 export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL): Promise<{ apk: string; packageId: string; sha256: string; slug: string }> {
   const pass = process.env.RELAY_KS_PASS;
   if (!pass) throw new Error('RELAY_KS_PASS not set');
+  if (!existsSync(KEYSTORE)) throw new Error('signing keystore missing at ' + KEYSTORE + ' — without it bubblewrap would PROMPT to create a new (wrong) identity');
   const row = (await pool.query("select params->>'slug' as slug from projects where id=$1", [projectId])).rows[0];
   const slug = row?.slug;
   if (!slug) throw new Error('project has no slug — subdomain identity is the APK origin');
+  assertCleanSlug(slug);
   const siteDir = fileURLToPath(new URL(projectId + '/', sitesUrl));
   if (!existsSync(siteDir + 'manifest.webmanifest'))
     throw new Error('site predates the PWA base (no manifest.webmanifest) — rebuild the site first, then package it');
@@ -127,5 +140,10 @@ if (process.argv[1] && process.argv[1].endsWith('apk.ts')) {
     const r = await buildApk(pool, id, SITES);
     console.log(`APK ready: ${r.apk}\npackage ${r.packageId}\nsha256 ${r.sha256}\nhttps://${r.slug}.naples.agency/app.apk`);
     process.exit(0);
-  } catch (e: any) { console.error('apk build failed:', e?.message ?? e); process.exit(1); }
+  } catch (e: any) {
+    // belt-and-braces: no error path may echo the keystore password into logs
+    const redact = (m: string) => process.env.RELAY_KS_PASS ? m.split(process.env.RELAY_KS_PASS).join('***') : m;
+    console.error('apk build failed:', redact(String(e?.message ?? e)));
+    process.exit(1);
+  }
 }

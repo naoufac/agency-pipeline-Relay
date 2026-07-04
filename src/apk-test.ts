@@ -1,7 +1,7 @@
 // apk:check — the Android identity is DERIVED, never hand-typed. These gates pin the
 // derivations (slug→packageId, webmanifest→twa-manifest, keystore→assetlinks) so a drift
 // in any of them fails the suite before an APK with a broken identity can ever be signed.
-import { packageIdFor, twaManifestFor, assetlinksFor } from './apk.ts';
+import { packageIdFor, twaManifestFor, assetlinksFor, assertCleanSlug } from './apk.ts';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -34,6 +34,22 @@ const al: any = assetlinksFor('agency.naples.demo', SHA);
 ok('assetlinks: single statement, handle_all_urls relation', Array.isArray(al) && al.length === 1 && al[0].relation[0] === 'delegate_permission/common.handle_all_urls');
 ok('assetlinks: android_app namespace + package + fingerprint', al[0].target.namespace === 'android_app' && al[0].target.package_name === 'agency.naples.demo' && al[0].target.sha256_cert_fingerprints[0] === SHA);
 ok('assetlinks: malformed fingerprint throws (never publish a broken identity)', (() => { try { assetlinksFor('agency.naples.demo', 'AA:BB'); return false; } catch { return true; } })());
+
+// ---- slug guard: the identity can only be minted from a clean DNS label ----
+ok('slug guard: clean label passes through', assertCleanSlug('la-favorita-taqueria') === 'la-favorita-taqueria');
+ok('slug guard: path traversal throws', (() => { try { assertCleanSlug('../../etc'); return false; } catch { return true; } })());
+ok('slug guard: uppercase throws (Android host match is case-sensitive)', (() => { try { assertCleanSlug('Evil'); return false; } catch { return true; } })());
+ok('slug guard: 64+ char label throws (DNS limit)', (() => { try { assertCleanSlug('a'.repeat(64)); return false; } catch { return true; } })());
+ok('twa: dirty slug cannot mint a manifest', (() => { try { twaManifestFor('../evil', {}); return false; } catch { return true; } })());
+
+// ---- version identity: the field bubblewrap actually reads ----
+ok('twa: appVersion is set (bubblewrap ignores appVersionName — versionName would ship empty)', twa.appVersion === '1.0.0' && twa.appVersionCode === 1);
+
+// ---- secrets: the password never rides argv ----
+const apkSrc = readFileSync(new URL('./apk.ts', import.meta.url), 'utf8');
+ok('keytool gets the password via -storepass:env, never argv', apkSrc.includes("'-storepass:env'") && !apkSrc.includes("'-storepass',"));
+ok('keystore preflight exists (missing keystore must never reach a bubblewrap prompt)', apkSrc.includes('existsSync(KEYSTORE)'));
+ok('CLI error path redacts the keystore password', apkSrc.includes('redact'));
 
 // ---- serving: the pieces the phone actually touches ----
 const server = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
