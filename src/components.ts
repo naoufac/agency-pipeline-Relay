@@ -2,6 +2,7 @@
 // The LLM never writes these; it only chooses sections + copy + brand tokens. Structure can't be wrong.
 import { FONT_FACES } from './fonts.ts';
 import { SLOT_TABLE } from './schema.ts';
+import { L } from './i18n.ts';
 
 export const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c]);
 const q = (query: string, cls = '') => `<img data-q="${esc(query)}" alt="" class="${cls}" loading="lazy">`;
@@ -235,19 +236,19 @@ body.l-cards-overlay .collection .card.has-img .btn,body.l-cards-overlay .produc
 body.l-cards-overlay .collection .card.has-img p,body.l-cards-overlay .products .card.has-img p,body.l-cards-overlay .feed .card.has-img p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 `;
 
-export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard') {
+export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard', locale?: string) {
   const links = pages.map(p => `<li><a href="${esc(p.slug)}.html"${p.slug === current ? ' aria-current="page"' : ''}>${esc(p.title)}</a></li>`).join('');
   return `<nav class="nav nav-${esc(variant)}"><div class="nav-inner">
   <a class="nav-brand" href="index.html">${esc(brand)}</a>
   <input type="checkbox" id="navmenu" class="nav-toggle" aria-hidden="true">
-  <label for="navmenu" class="nav-burger" aria-label="Toggle menu">☰</label>
+  <label for="navmenu" class="nav-burger" aria-label="${esc(L(locale, 'toggle_menu'))}">☰</label>
   <ul class="nav-links">${links}${ctaText ? `<li><a class="btn" href="${esc(ctaHref)}">${esc(ctaText)}</a></li>` : ''}</ul>
 </div></nav>`;
 }
-export function footer(brand: string, pages: any[], accountLinks = false) {
+export function footer(brand: string, pages: any[], accountLinks = false, locale?: string) {
   // FS2: receipt-enabled apps carry the visitor's two standing doors in the footer — identical on
   // every page (rendered unconditionally per site), so the consistency gates hold by construction.
-  const extras = accountLinks ? `<a href="find.html">Find my booking</a><a href="account.html">My bookings</a>` : '';
+  const extras = accountLinks ? `<a href="find.html">${esc(L(locale, 'find_my_booking'))}</a><a href="account.html">${esc(L(locale, 'my_bookings'))}</a>` : '';
   // CHAIN: every produced site opens its own production record — the magic, visible.
   const chain = `<a href="how-it-was-built.html">How this site was built</a>`;
   return `<footer class="footer"><div class="container"><div class="footer-inner">
@@ -256,7 +257,7 @@ export function footer(brand: string, pages: any[], accountLinks = false) {
 }
 
 // section components — each takes a content object, returns perfect HTML
-type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string; hero?: string };
+type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string; hero?: string; locale?: string };
 const href = (o: SecOpts | undefined, raw: any, text: any) => esc(o?.link ? o.link(raw, text) : '#');
 // A CTA value may be a STRING or an OBJECT ({text/label, link/href}). Normalize to {text, link} or null
 // so a button is NEVER `esc(object)` ("[object Object]") and never renders with an empty label.
@@ -301,27 +302,27 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const t = esc((s.table && o?.forms && o.forms[s.table]) ? s.table : (o?.primaryTable || s.table || 'products'));
     return `<section class="section" id="shop"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
-    <div class="grid grid-3 products" data-products="${t}" style="margin-top:2.4rem"><p class="muted feed-empty">${esc(s.empty || 'Loading the collection…')}</p></div>
+    <div class="grid grid-3 products" data-products="${t}" style="margin-top:2.4rem"><p class="muted feed-empty">${esc(s.empty || L(o?.locale, 'loading'))}</p></div>
   </div></section>`;
   },
   // STORE · cart — line items, quantity controls, total; rendered entirely by the client runtime.
-  cart: (s) => `<section class="section" id="cart"><div class="container" style="max-width:760px">
+  cart: (s, o) => `<section class="section" id="cart"><div class="container" style="max-width:760px">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
-    <div class="cart-box" data-cart="full"><p class="cart-empty">Your cart is empty.</p></div>
+    <div class="cart-box" data-cart="full"><p class="cart-empty">${esc(L(o?.locale, 'cart_empty'))}</p></div>
   </div></section>`,
   // STORE · checkout — buyer details + order summary; submit posts the cart to /api/site/:id/order,
   // which recomputes the total from the database and writes order + order_items in one transaction.
-  checkout: (s) => `<section class="section" id="checkout"><div class="container" style="max-width:640px">
+  checkout: (s, o) => `<section class="section" id="checkout"><div class="container" style="max-width:640px">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
-    <div class="cart-box" data-cart="summary" style="margin:1.4rem 0"><p class="cart-empty">Your cart is empty.</p></div>
-    <div class="payopts" data-payopts hidden><h3>How you'll pay</h3></div>
+    <div class="cart-box" data-cart="summary" style="margin:1.4rem 0"><p class="cart-empty">${esc(L(o?.locale, 'cart_empty'))}</p></div>
+    <div class="payopts" data-payopts hidden><h3>${esc(L(o?.locale, 'how_youll_pay'))}</h3></div>
     <form class="rcheckout rform" onsubmit="return relayCheckout(event)">
       <input type="text" name="company_website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
-      <label>Full name<input name="customer_name" type="text" required></label>
-      <label>Email<input name="email" type="email" required></label>
-      <label>Phone<input name="phone" type="text"></label>
-      <label>Notes<textarea name="notes"></textarea></label>
-      <button class="btn" type="submit">${esc(s.cta || 'Place order')}</button>
+      <label>${esc(L(o?.locale, 'full_name'))}<input name="customer_name" type="text" required></label>
+      <label>${esc(L(o?.locale, 'email'))}<input name="email" type="email" required></label>
+      <label>${esc(L(o?.locale, 'phone'))}<input name="phone" type="text"></label>
+      <label>${esc(L(o?.locale, 'notes'))}<textarea name="notes"></textarea></label>
+      <button class="btn" type="submit">${esc(s.cta || L(o?.locale, 'place_order'))}</button>
       <p class="rform-msg" hidden></p>
     </form>
   </div></section>`,
@@ -329,7 +330,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   // in spec.ts KNOWN, so a composed model can never emit it — cms/live.ts synthesizes it per request
   // from the live DB row (price/description/photo edits show on the very next load). Every value is
   // escaped server-side; Add-to-cart joins the same client cart (the order is still priced server-side).
-  product: (s) => {
+  product: (s, o) => {
     const row = (s && s.row && typeof s.row === 'object') ? s.row : {};
     const keys = Object.keys(row).filter(k => !['id', 'created_at', '_image'].includes(k) && row[k] != null && row[k] !== '' && !/pass|secret|token|hash|salt|api_?key|private|credential/i.test(k));   // defense-in-depth: mirrors appdb's SENSITIVE strip
     const titleKey = ['title', 'name', 'label'].find(k => typeof row[k] === 'string' && row[k].trim());
@@ -353,7 +354,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     // no photo -> an intentional dark branded panel with the product initial — never a grey void
     const media = img ? `<img src="${esc(img)}" alt="${esc(title)}">` : `<div class="pdp-noimg">${esc((title.trim().charAt(0) || '·').toUpperCase())}</div>`;
     return `<section class="section pdp"><div class="container">
-    ${back ? `<p class="pdp-crumb"><a href="${esc(back.slug)}.html">← ${esc(back.title || 'Back')}</a></p>` : ''}
+    ${back ? `<p class="pdp-crumb"><a href="${esc(back.slug)}.html">← ${esc(back.title || L(o?.locale, 'back'))}</a></p>` : ''}
     <div class="split">
       <div class="split-media">${media}</div>
       <div class="pdp-info">
@@ -369,15 +370,15 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
             return vars.length ? `<ul class="pdp-meta">${vars.slice(0, 24).map((v: any) => `<li><b>${esc(String(v.name))}</b>${v.price != null ? ` · $${Number(v.price).toFixed(2)}` : ''}</li>`).join('')}</ul>` : '';
           }
           if (vars.length) {
-            const pills = vars.slice(0, 24).map((v: any) => `<button type="button" class="varpill" data-vid="${esc(String(v.id))}" data-vname="${esc(String(v.name))}" data-vprice="${v.price != null ? esc(String(v.price)) : ''}"${v.stock === 0 ? ' disabled' : ''} onclick="relayVarPick(this)">${esc(String(v.name))}${v.price != null ? ` · $${Number(v.price).toFixed(2)}` : ''}${v.stock === 0 ? ' — sold out' : ''}</button>`).join('');
+            const pills = vars.slice(0, 24).map((v: any) => `<button type="button" class="varpill" data-vid="${esc(String(v.id))}" data-vname="${esc(String(v.name))}" data-vprice="${v.price != null ? esc(String(v.price)) : ''}"${v.stock === 0 ? ' disabled' : ''} onclick="relayVarPick(this)">${esc(String(v.name))}${v.price != null ? ` · $${Number(v.price).toFixed(2)}` : ''}${v.stock === 0 ? ' — ' + esc(L(o?.locale, 'sold_out_l')) : ''}</button>`).join('');
             return `<div class="varpick">${pills}</div><p class="muted varmsg" hidden></p>
-            <button type="button" class="btn p-add" onclick="relayCartAddVariant(this,${esc(JSON.stringify({ id: row.id, title, price }))})">Add to cart</button>`;
+            <button type="button" class="btn p-add" onclick="relayCartAddVariant(this,${esc(JSON.stringify({ id: row.id, title, price }))})">${esc(L(o?.locale, 'add_to_cart'))}</button>`;
           }
-          if (stock === 0) return `<button type="button" class="btn p-add p-soldout" disabled>Sold out</button>`;
-          const note = stock != null && stock >= 1 && stock <= 5 ? `<p class="muted">Only ${stock} left</p>` : '';
-          return note + `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">Add to cart</button>`;
+          if (stock === 0) return `<button type="button" class="btn p-add p-soldout" disabled>${esc(L(o?.locale, 'sold_out'))}</button>`;
+          const note = stock != null && stock >= 1 && stock <= 5 ? `<p class="muted">${esc(L(o?.locale, 'only_n_left', { n: stock }))}</p>` : '';
+          return note + `<button type="button" class="btn p-add" onclick="relayCartAdd(${esc(JSON.stringify({ id: row.id, title, price }))},this)">${esc(L(o?.locale, 'add_to_cart'))}</button>`;
         })() : ''}
-        ${s.cartSlug ? `<p class="pdp-cartlink"><a href="${esc(String(s.cartSlug))}.html">View cart →</a></p>` : ''}
+        ${s.cartSlug ? `<p class="pdp-cartlink"><a href="${esc(String(s.cartSlug))}.html">${esc(L(o?.locale, 'view_cart'))}</a></p>` : ''}
       </div>
     </div>
   </div></section>`;
@@ -473,7 +474,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   // FS1 · record — the RECEIPT for one visitor-submitted row (booking/order/message). SYSTEM-ONLY
   // (not in spec KNOWN): cms/live.ts synthesizes it per request from the live row; the reference
   // code comes from the visitor's own URL, never from the row (reads strip it as a secret).
-  record: (s) => {
+  record: (s, o) => {
     const row = (s && s.row && typeof s.row === 'object') ? s.row : {};
     const keys = Object.keys(row).filter(k => !['id', 'created_at', '_image'].includes(k) && row[k] != null && row[k] !== '' && !/pass|secret|token|hash|salt|api_?key|private|credential/i.test(k));
     const status = typeof row.status === 'string' && row.status.trim() ? row.status.trim() : '';
@@ -489,59 +490,59 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const back = (s.back && s.back.slug) ? s.back : null;
     return `<section class="section receipt"><div class="container"><div class="receipt-box">
     ${back ? `<p class="pdp-crumb"><a href="${esc(back.slug)}.html">← ${esc(back.title || 'Back')}</a></p>` : ''}
-    <span class="eyebrow">${esc(s.eyebrow || 'Request received')}</span>
-    <h1>${esc(s.title || 'We got it — here is your receipt')}</h1>
-    ${status ? `<span class="receipt-status">Status: ${esc(status)}</span>` : ''}
-    <div class="receipt-ref"><code>${esc(String(s.refCode || ''))}</code><span class="muted">Save this reference code — it is the key to this page.</span></div>
+    <span class="eyebrow">${esc(s.eyebrow || L(o?.locale, 'receipt_eyebrow'))}</span>
+    <h1>${esc(s.title || L(o?.locale, 'receipt_title'))}</h1>
+    ${status ? `<span class="receipt-status">${esc(L(o?.locale, 'status_label'))}${esc(status)}</span>` : ''}
+    <div class="receipt-ref"><code>${esc(String(s.refCode || ''))}</code><span class="muted">${esc(L(o?.locale, 'receipt_save_ref'))}</span></div>
     ${meta ? `<ul class="receipt-meta">${meta}</ul>` : ''}
-    ${Array.isArray(s.payinfo) && s.payinfo.length ? `<div class="payopts"><h3>How to pay</h3>${s.payinfo.slice(0, 6).map((o: any) => `<div class="payopt"><b>${esc(String(o.name).slice(0, 80))}</b>${o.details ? `<p>${esc(String(o.details).slice(0, 300))}</p>` : ''}</div>`).join('')}</div>` : ''}
-    ${s.findSlug ? `<p class="muted">Lost the link? Retrieve it anytime at <a href="${esc(String(s.findSlug))}.html">${esc(String(s.findTitle || 'Find my booking'))}</a>.</p>` : ''}
+    ${Array.isArray(s.payinfo) && s.payinfo.length ? `<div class="payopts"><h3>${esc(L(o?.locale, 'how_to_pay'))}</h3>${s.payinfo.slice(0, 6).map((o: any) => `<div class="payopt"><b>${esc(String(o.name).slice(0, 80))}</b>${o.details ? `<p>${esc(String(o.details).slice(0, 300))}</p>` : ''}</div>`).join('')}</div>` : ''}
+    ${s.findSlug ? `<p class="muted">${esc(L(o?.locale, 'receipt_lost'))}<a href="${esc(String(s.findSlug))}.html">${esc(String(s.findTitle || L(o?.locale, 'find_my_booking')))}</a>.</p>` : ''}
   </div></div></section>`;
   },
   // FS1 · find — paste the reference code (or ask for an email with the links). SYSTEM-ONLY, served
   // live at find.html. No enumeration: the email path always answers "sent" and mails only real matches.
-  find: (s) => `<section class="section" id="find"><div class="container"><div class="receipt-box">
-    <span class="eyebrow">${esc(s.eyebrow || 'Your receipts')}</span>
-    <h1>${esc(s.title || 'Find my booking')}</h1>
+  find: (s, o) => `<section class="section" id="find"><div class="container"><div class="receipt-box">
+    <span class="eyebrow">${esc(s.eyebrow || L(o?.locale, 'your_receipts'))}</span>
+    <h1>${esc(s.title || L(o?.locale, 'find_my_booking'))}</h1>
     <form class="rform" onsubmit="return relayFindCode(event)" style="margin-bottom:2rem">
-      <label>Reference code<input name="code" type="text" required minlength="16" placeholder="e.g. 3f9c…"></label>
-      <button class="btn" type="submit">Open my receipt</button>
+      <label>${esc(L(o?.locale, 'reference_code'))}<input name="code" type="text" required minlength="16" placeholder="e.g. 3f9c…"></label>
+      <button class="btn" type="submit">${esc(L(o?.locale, 'open_my_receipt'))}</button>
       <p class="rform-msg" hidden></p>
     </form>
     <form class="rform" onsubmit="return relayFindMail(event)">
-      <label>…or email me my links<input name="email" type="email" required placeholder="you@example.com"></label>
-      <button class="btn" type="submit">Email me</button>
+      <label>${esc(L(o?.locale, 'or_email_links'))}<input name="email" type="email" required placeholder="you@example.com"></label>
+      <button class="btn" type="submit">${esc(L(o?.locale, 'email_me'))}</button>
       <p class="rform-msg" hidden></p>
     </form>
   </div></div></section>`,
   // FS2 · signin — email in, magic link out. SYSTEM-ONLY; served live at account.html (signed out).
-  signin: (s) => `<section class="section" id="signin"><div class="container"><div class="receipt-box">
-    <span class="eyebrow">${esc(s.eyebrow || 'Your account')}</span>
-    <h1>${esc(s.title || 'Sign in')}</h1>
-    <p class="lead muted">Enter your email — we'll send you a sign-in link. No password, ever.</p>
+  signin: (s, o) => `<section class="section" id="signin"><div class="container"><div class="receipt-box">
+    <span class="eyebrow">${esc(s.eyebrow || L(o?.locale, 'your_account'))}</span>
+    <h1>${esc(s.title || L(o?.locale, 'sign_in'))}</h1>
+    <p class="lead muted">${esc(L(o?.locale, 'signin_lead'))}</p>
     <form class="rform" onsubmit="return relayVisitorRequest(event)">
-      <label>Email<input name="email" type="email" required placeholder="you@example.com"></label>
-      <button class="btn" type="submit">Email me a sign-in link</button>
+      <label>${esc(L(o?.locale, 'email'))}<input name="email" type="email" required placeholder="you@example.com"></label>
+      <button class="btn" type="submit">${esc(L(o?.locale, 'email_signin'))}</button>
       <p class="rform-msg" hidden></p>
     </form>
   </div></div></section>`,
   // FS2 · records — "My bookings": the signed-in visitor's rows across the app's private tables,
   // each opening its own receipt. SYSTEM-ONLY; rendered server-side from the verified email.
-  records: (s) => {
+  records: (s, o) => {
     const items: any[] = Array.isArray(s.items) ? s.items : [];
     const cards = items.map((it: any) => {
       const row = it.row || {};
       const title = ['title', 'name', 'customer_name'].map(k => row[k]).find(v => typeof v === 'string' && v.trim()) || ('#' + (row.id ?? ''));
       const status = typeof row.status === 'string' && row.status.trim() ? `<span class="receipt-status">${esc(row.status)}</span>` : '';
       const when = row.created_at instanceof Date ? row.created_at.toDateString() : String(row.created_at || '').slice(0, 10);
-      const open = it.ref ? `<a class="btn" href="receipt-${esc(it.table)}-${esc(it.ref)}.html" style="margin-top:.8rem">Open</a>` : '';
+      const open = it.ref ? `<a class="btn" href="receipt-${esc(it.table)}-${esc(it.ref)}.html" style="margin-top:.8rem">${esc(L(o?.locale, 'open'))}</a>` : '';
       return `<div class="card"><p class="muted" style="margin-bottom:.3rem">${esc(humanize(String(it.table)))}${when ? ' · ' + esc(when) : ''}</p><h3>${esc(String(title))}</h3>${status}${open}</div>`;
     }).join('');
     return `<section class="section" id="records"><div class="container">
-    <span class="eyebrow">Signed in as ${esc(String(s.email || ''))}</span>
-    <h1>${esc(s.title || 'My bookings')}</h1>
-    ${items.length ? `<div class="grid grid-3" style="margin-top:2rem">${cards}</div>` : `<p class="lead muted">Nothing here yet — once you book, it shows up right here.</p>`}
-    <p style="margin-top:2rem"><button type="button" class="btn" onclick="relayVisitorLogout()" style="background:var(--surface);color:var(--text);border:1px solid var(--line)">Sign out</button></p>
+    <span class="eyebrow">${esc(L(o?.locale, 'signed_in_as'))}${esc(String(s.email || ''))}</span>
+    <h1>${esc(s.title || L(o?.locale, 'my_bookings'))}</h1>
+    ${items.length ? `<div class="grid grid-3" style="margin-top:2rem">${cards}</div>` : `<p class="lead muted">${esc(L(o?.locale, 'records_empty'))}</p>`}
+    <p style="margin-top:2rem"><button type="button" class="btn" onclick="relayVisitorLogout()" style="background:var(--surface);color:var(--text);border:1px solid var(--line)">${esc(L(o?.locale, 'sign_out'))}</button></p>
   </div></section>`;
   },
   features: (s) => `<section class="section"><div class="container">
@@ -641,7 +642,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       const req = f.required === false ? '' : ' required';
       // RELATION (M2): a real FK renders as a <select> of the referenced table's records — options are
       // loaded live from the data API (empty under file:// so the static gate still passes).
-      if (f.ref) return `<label>${esc(f.label)}<select name="${esc(f.name)}" data-ref="${esc(f.ref)}"${f.display ? ` data-display="${esc(f.display)}"` : ''}${req}><option value="">Choose…</option></select></label>`;
+      if (f.ref) return `<label>${esc(f.label)}<select name="${esc(f.name)}" data-ref="${esc(f.ref)}"${f.display ? ` data-display="${esc(f.display)}"` : ''}${req}><option value="">${esc(L(o?.locale, 'choose'))}</option></select></label>`;
       if (f.type === 'checkbox') return `<label class="rcheck"><input type="checkbox" name="${esc(f.name)}"> ${esc(f.label)}</label>`;
       if (f.type === 'textarea') return `<label>${esc(f.label)}<textarea name="${esc(f.name)}"${req}></textarea></label>`;
       // FS5 · REAL AVAILABILITY: on a slot table, the timestamp field is a date + tappable free-time
@@ -651,7 +652,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       if (f.type === 'date' && dataTable && SLOT_TABLE.test(dataTable) && /timestamp|date/.test(String(f.rawType || ''))) {
         return `<label>${esc(f.label)}<input type="date" data-slotdate="${esc(f.name)}"${req}>
           <input type="hidden" name="${esc(f.name)}" data-slot="${esc(f.name)}">
-          <div class="slotchips" data-slots="${esc(dataTable)}" data-field="${esc(f.name)}"><span class="muted">Pick a date to see available times.</span></div></label>`;
+          <div class="slotchips" data-slots="${esc(dataTable)}" data-field="${esc(f.name)}"><span class="muted">${esc(L(o?.locale, 'pick_date'))}</span></div></label>`;
       }
       const step = f.type === 'number' ? (/int/.test(String(f.rawType || '')) ? ' step="1"' : ' step="0.01" min="0"') : '';
       return `<label>${esc(f.label)}<input name="${esc(f.name)}" type="${esc(f.type || 'text')}"${req}${step}></label>`;
@@ -661,7 +662,7 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <form class="rform" data-form="${esc(s.form || dataTable || 'contact')}"${dataTable ? ` data-table="${esc(dataTable)}"` : ''} onsubmit="return relaySubmit(event)">
         <input type="text" name="company_website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
         ${fields.map(field).join('')}
-        <button class="btn" type="submit">${esc(s.cta || (dataTable ? 'Add' : 'Send'))}</button>
+        <button class="btn" type="submit">${esc(s.cta || (dataTable ? L(o?.locale, 'add') : L(o?.locale, 'send')))}</button>
         <p class="rform-msg" hidden></p>
       </form>
     </div></div></section>`;

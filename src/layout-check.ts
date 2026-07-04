@@ -96,7 +96,7 @@ ok('admin-flag booleans never render as card copy', rendered.image.includes('act
 ok('DB-card images take the theme frame (no hardcoded radius)', rendered.image.includes('border-radius:var(--radius)'));
 // REGISTER: service tables never render SKU-style bold prices — a quiet muted 'From $X' closes the
 // panel's 'legal consultations framed as products' finding
-ok('service-register cards render money muted as From $X', rendered.image.includes("'From $'") && rendered.image.includes('moneyLast'));
+ok('service-register cards render money muted as From $X (via the locale dict)', rendered.image.includes('RELAY_T.from_price') && rendered.image.includes('moneyLast') && rendered.image.includes('"from_price":"From "'));
 ok('the service register is table-classed (products stay commerce)', rendered.image.includes('practice|treatment'));
 // the panel's exact findings on a real trio: 'From $0.00' on a complimentary consultation and
 // '✓ available' inventory badges on brunch dishes — free = say nothing; badges are commerce-only
@@ -106,7 +106,7 @@ ok('inventory badges never render on service/menu/blog registers', rendered.imag
 ok('menu/dishes are in the service register', rendered.image.includes('menu|dish|drink'));
 // SEARCH: big grids get the client-side filter (8-row threshold, accessible, textContent only)
 ok('grids with >=8 rows get a search box', rendered.image.includes('__searchbox') && rendered.image.includes('count<8'));
-ok('the search box is accessible + safe', rendered.image.includes("'Search this list'") && rendered.image.includes('textContent'));
+ok('the search box is accessible + safe (aria from the locale dict)', rendered.image.includes('RELAY_T.search_aria') && rendered.image.includes('"search_aria":"Search this list"') && rendered.image.includes('textContent'));
 // HONEYPOT: every public form carries the trap; CSS hides it off-screen; a filled value = bot
 {
   const formHtml = renderPage({ brand: { name: 'A', tokens: { bg: '#fff', primary: '#123456' } }, sections: [

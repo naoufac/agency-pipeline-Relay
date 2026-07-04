@@ -133,7 +133,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug } as any;
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug, locale: params.locale } as any;
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -155,7 +155,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       applyBrand(spec, canon);                                          // FORCE the one identity onto the projection
       mkdirSync(fileURLToPath(dir), { recursive: true });
       const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site) });
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale });
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));   // rendered page -> served file (CMS-native serving replaces the old edit-overlay; src/cms.ts removed)
       // PWA: every produced site ships manifest + offline shell + brand icons (compiled from the
       // locked brand; icons painted once). A failure here must not fail the page render itself.
@@ -236,7 +236,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
           applyBrand(spec, canon);
           const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
-          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site) });
+          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale });
           writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));
         } else {
           let body = stripFences(content);

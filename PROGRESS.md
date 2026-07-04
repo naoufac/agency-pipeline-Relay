@@ -745,3 +745,23 @@ green" now certifies brief → site → subdomain → signed Android app, zero-t
 night. Old canary packaging workdirs are swept with the projects (33MB each — a month of
 nights would eat a GB). 8 new gates (apk:check 41), queue behavior tested via injected
 launcher, all 14 suites green. PROVEN live: flight below.
+
+## 2026-07-04 — i18n v1: the produced site's LANGUAGE is a build property
+
+naples.agency sells into Italy; until now an Italian brief produced a half-English site —
+the LLM copy followed the brief's language but every deterministic chrome string (cart,
+checkout labels, receipts, account, search, slot picker, availability, aria) was hardcoded
+English. Killed at the floor: src/i18n.ts holds a CLOSED locale set (en/it/fr/es/de), a
+deterministic stopword detector (weighted markers; ambiguity → English, never a guess; no
+LLM votes on identity), and ONE string table (61 keys × 5 locales) whose completeness is
+machine-gated. detectLocale(brief) runs at plan AND replan → params.locale; renderPage
+threads it into every SECTION, navBar, footer, <html lang>, and injects a JSON client
+dictionary (window.RELAY_T) so the browser runtime — cart, checkout, search box, slot
+picker, error messages — speaks the same language (JSON.stringify IS the escaping; no
+string-spliced code). Live pages (receipt/find/account/PDP) read params.locale. The leak
+canary gate asserts ZERO English chrome on an Italian render — it caught its first leak
+before ship (a code comment quoting "How you'll pay" emitted into the client script).
+Default is byte-English: no locale → the exact pages we shipped yesterday (all 14 prior
+suites pass untouched except two layout gates repointed at the stronger RELAY_T
+invariant). i18n:check is suite 15 (23 gates). Residual for v1.1: server/appdb error
+strings (slot taken, sold out) and LLM-named form column labels.
