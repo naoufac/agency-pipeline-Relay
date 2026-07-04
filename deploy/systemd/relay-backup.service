@@ -1,0 +1,8 @@
+[Unit]
+Description=Relay vault backup — encrypted DB + secrets to relay-vault (verified before shipping)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /srv/relay/deploy/backup.sh push
+TimeoutStartSec=900

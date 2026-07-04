@@ -6,7 +6,7 @@
   "description": "Autonomous agency pipeline: brief -> planner -> dependency DAG of AI calls, stage-by-stage, zero-trust verification, Supabase/Postgres board.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s app:check && npm run -s scope:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check && npm run -s pwa:check && npm run -s chain:check && npm run -s apk:check && npm run -s i18n:check",
+    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s app:check && npm run -s scope:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check && npm run -s pwa:check && npm run -s chain:check && npm run -s apk:check && npm run -s i18n:check && npm run -s backup:check",
     "app:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/app-check.ts",
     "scope:check": "tsx src/scope-check.ts",
     "serve": "set -a; . ./.env 2>/dev/null; set +a; tsx src/server.ts",
@@ -14,6 +14,7 @@
     "kpi": "set -a; . ./.env 2>/dev/null; set +a; tsx src/kpi-cli.ts",
     "theme:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/theme-check.ts",
     "apk": "set -a; . ./.env 2>/dev/null; set +a; tsx src/apk.ts",
+    "backup:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/backup-test.ts",
     "i18n:check": "tsx src/i18n-test.ts",
     "apk:check": "tsx src/apk-test.ts",
     "spec:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/spec-test.ts",

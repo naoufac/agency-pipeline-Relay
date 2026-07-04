@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Relay vault backup (04:44 — after the canary has flown)
+
+[Timer]
+OnCalendar=*-*-* 04:44:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

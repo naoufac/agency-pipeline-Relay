@@ -782,3 +782,22 @@ localized form labels at render time; English always uses the humanize fallback
 (byte-compat); unknown columns stay humanized. The canary rotation gains a 4th brief IN
 ITALIAN — locale detection, Italian chrome and € pricing now get proven zero-touch every
 4th night. i18n:check 35 gates; all 15 suites green.
+
+## 2026-07-04 — SURVIVAL: the agency can now outlive the box
+
+Until tonight everything — 76 projects, 46 client app schemas, the Android signing keystore
+(unrecoverable by definition), envs, tunnel creds — lived on ONE machine with zero offsite
+copy. Now: deploy/backup.sh dumps the database, tars the unrecoverable secrets, encrypts
+both (AES-256-CBC, PBKDF2 200k; key on the box AND on the owner's phone), VERIFIES before
+shipping (decrypt roundtrip byte-compare + pg_restore --list must show the projects table +
+the tar must contain the keystore — a pushed backup is a proven backup), and force-pushes a
+weekday-rotating single-commit history to the private repo naoufac/relay-vault (bounded
+forever, 7-day retention, ~6MB/night). relay-backup.timer runs it nightly at 04:44, after
+the canary; any failure rings the owner's phone via the ERR trap. backup:check is suite 16
+(9 gates) and runs the REAL script dry on every check — "suites green" now includes
+"tonight's backup will restore". PROVEN with a full box-loss drill: cloned the vault FROM
+GitHub, decrypted with the key, restored onto a scratch database — 76/76 projects, 46/46
+app schemas, all 15 secret files present. docs/RESTORE.md is the step-by-step. The
+recovery key was delivered to the owner's Telegram — the vault is useless without it and
+the box is no longer a single point of failure with it. Gotcha for posterity: `pg_restore
+--list | grep -q` dies of SIGPIPE under pipefail on first match — list to a file first.
