@@ -47,7 +47,9 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const pr = (await pool.query('select params from projects where id=$1', [projectId])).rows[0];
   if (!pr) return null;
   const params = pr.params || {};
-  if (String(params.archetype) !== 'store') return null;
+  // ANY archetype with a products table gets detail pages (a taqueria's dish page is real content —
+  // a canary caught 12 grid links 404ing because this was store-only). Cart controls stay store-only.
+  const isStore = String(params.archetype) === 'store';
   if (!params.site || !Array.isArray(params.site.pages) || !params.site.pages.length) return null;
   const row = await appdb.readRow(pool, projectId, 'products', productId);   // the deterministic store contract table
   if (!row) return null;
@@ -60,7 +62,7 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const cartPage = navPages.find((p: any) => /cart|basket|bag/.test(String(p.slug)));
   const title = String(row.title || row.name || 'Product #' + productId);
   const variants = await appdb.productVariants(pool, projectId, productId);   // PQ2 · options picker
-  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: cartPage?.slug, variants }] };
+  const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: isStore ? cartPage?.slug : undefined, variants, store: isStore }] };
   const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site) });
   return `<!--relay:cms=directus LIVE pdp=${productId} (rendered from the live product row on request)-->\n` + html;
 }

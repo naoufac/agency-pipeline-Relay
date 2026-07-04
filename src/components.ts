@@ -360,9 +360,12 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
         ${descKey ? `<p class="lead muted">${esc(String(row[descKey]))}</p>` : ''}
         ${meta ? `<ul class="pdp-meta">${meta}</ul>` : ''}
         ${isFinite(price) && row.id != null ? (() => {
-          // PQ2 · VARIANTS: with options, the shopper picks a pill first — Add-to-cart carries the
-          // chosen variant (server re-validates ownership, price and stock; the client is display-only)
+          // Non-store detail pages (a dish, a portfolio piece) are informational: options render as
+          // a plain list, never cart controls — an Add-to-cart without a checkout is a dead end.
           const vars: any[] = Array.isArray(s.variants) ? s.variants : [];
+          if (s.store === false) {
+            return vars.length ? `<ul class="pdp-meta">${vars.slice(0, 24).map((v: any) => `<li><b>${esc(String(v.name))}</b>${v.price != null ? ` · $${Number(v.price).toFixed(2)}` : ''}</li>`).join('')}</ul>` : '';
+          }
           if (vars.length) {
             const pills = vars.slice(0, 24).map((v: any) => `<button type="button" class="varpill" data-vid="${esc(String(v.id))}" data-vname="${esc(String(v.name))}" data-vprice="${v.price != null ? esc(String(v.price)) : ''}"${v.stock === 0 ? ' disabled' : ''} onclick="relayVarPick(this)">${esc(String(v.name))}${v.price != null ? ` · $${Number(v.price).toFixed(2)}` : ''}${v.stock === 0 ? ' — sold out' : ''}</button>`).join('');
             return `<div class="varpick">${pills}</div><p class="muted varmsg" hidden></p>

@@ -112,6 +112,19 @@ const pdpLowStock = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff',
 ok('pdp stock 1..5 renders low-stock note', pdpLowStock.includes('Only 3 left'));
 ok('shop-grid JS has the sold-out branch', shop.includes('p-soldout') && shop.includes('Sold out'));
 
+// non-store detail pages: informational — options listed, never cart controls (a canary caught
+// a taqueria's 12 dish links 404ing because the PDP was store-only)
+{
+  const dish = renderPage({ brand: { name: 'Taq', tokens: {} }, sections: [
+    { type: 'product', store: false, row: { id: 2, title: 'Al Pastor', price: 4.5, description: 'Trompo-style.' },
+      variants: [{ id: 1, name: 'Single', price: 4.5, stock: null }, { id: 2, name: 'Plate of 3', price: 12, stock: null }] }] },
+    { pages, slug: 'product-2', title: 'Al Pastor' });
+  // scope to the SECTION markup — the global page runtime legitimately contains the cart functions
+  const dishSec = (dish.match(/<section class="section pdp">[\s\S]*?<\/section>/) || [''])[0];
+  ok('non-store pdp renders the dish without cart controls', dishSec.includes('<h1>Al Pastor</h1>') && !dishSec.includes('onclick="relayCartAdd') && !dishSec.includes('relayCartAddVariant'));
+  ok('non-store pdp lists options informationally', dishSec.includes('Plate of 3') && dishSec.includes('$12.00') && !dishSec.includes('varpill'));
+}
+
 // store guarantee: a composed model that FORGOT the store sections gets them injected
 {
   const model = { pages: [
