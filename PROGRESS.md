@@ -619,3 +619,12 @@ Prod 6be18d5, 13 suites (pwa 38 · layout 47 · content 34). Shipped + proven:
 - CSV EXPORT: owner-gated /export/<table>.csv — sensitive stripped, RFC-quoted, BOM, formula
   injection disarmed; ownership model identical to the content admin (M4 two-user gate applies).
 - Task #7 (Content-tab image upload) locked but not started — next session's first item.
+
+## 2026-07-04 — IMAGE UPLOAD shipped: the locked five is 5/5 COMPLETE
+Prod 165441a, 13 suites (content:check 41). Owners now set their OWN photos from the Content tab:
+owner-gated POST on the content route, magic-byte typed (never the filename), 3 MB double-capped,
+stored under the site's assets, the row's image column updated to the served path — live on next
+load. Board edit form grew the upload control. PROVEN live on the hot-sauce store: PNG uploaded via
+the API → served 200 → row points at it; 'not an image' refused friendly. PQ3's listed gaps are now
+all closed (editing ✓ · image upload ✓ · CSV export ✓); richer field types remain as polish.
+The locked-five arc: iteration ✓ · SEO ✓ · upload ✓ · search ✓ · export ✓ — all gated, all proven.
