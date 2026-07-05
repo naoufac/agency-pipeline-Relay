@@ -290,6 +290,8 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
             try { const dir = fileURLToPath(new URL(projectId + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
             await replan(pool, projectId, amended);
             if (process.env.RELAY_BUILD !== '0') runLoop(pool, projectId, { cap: 4, review: true }).catch(() => {});
+            // the session hears the outcome — fire-and-forget
+            chat.announceWhenDone(pool, sidQ, projectId).catch(() => {});
             return { started: true };
           },
         });

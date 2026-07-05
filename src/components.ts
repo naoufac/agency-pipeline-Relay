@@ -439,6 +439,15 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       ${rev ? `<p style="margin-top:1.6rem"><span class="chain-pill${rev.passed ? ' pass' : ''}">${rev.passed ? T('chain_review_pass') : T('chain_review_open', { n: String(rev.issues) })}</span></p>
       <p class="muted" style="margin-top:.8rem">${T('chain_browser', { p: rev.probed ? L(o?.locale, 'chain_browser_probe') : '' })}</p>` : ''}
     </div></section>
+    ${d.policies && Number(d.policies.min_notice_hours) >= 0 ? `<section class="section"><div class="container">
+      <h2>${T('chain_rules_h')}</h2>
+      <p class="lead muted">${T('chain_rules_lead')}</p>
+      <ul class="chain-check" style="margin-top:1.6rem">
+        ${Number(d.policies.min_notice_hours) > 0 ? `<li>${T('chain_rule_notice', { n: String(d.policies.min_notice_hours) })}</li>` : ''}
+        <li>${T('chain_rule_cancel', { n: String(d.policies.cancellation_hours ?? 24) })}</li>
+        <li>${T('chain_rule_capacity', { n: String(d.policies.capacity_per_slot ?? 1) })}</li>
+      </ul>
+    </div></section>` : ''}
     ${d.android && d.android.url ? `<section class="section"><div class="container">
       <h2>${T('chain_android_h')}</h2>
       <p class="lead muted">${T('chain_android_lead')}</p>

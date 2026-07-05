@@ -211,6 +211,7 @@ export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise
     run: { total: Number(tk.total) || 0, done: Number(tk.done) || 0, wallSecs: Number(tk.wall) || 0, repairs: evn('plan_repair'), rebuilds: evn('project_retry') },
     checks,
     review: rev ? { passed: !!rev.passed, issues: Number(rev.n) || 0, probed: archetype !== 'site' } : null,
+    policies: params.policies || null,
     android: await (async () => {
       // shown ONLY when a signed APK actually exists on disk for this site — never a promise
       try {

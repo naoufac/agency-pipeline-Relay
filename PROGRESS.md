@@ -1004,3 +1004,17 @@ status, pages, live URL); the model explains, it never invents and never trigger
 enough), the first message titles the session, posting is rate-capped, routes demand a
 signed-in user + project visibility. chat:check is suite 19 (15 gates, injected hooks —
 no LLM burned proving it). 19 suites green.
+
+## 2026-07-05 — PERFECTION PASS on the two new surfaces
+
+· Chat announces outcomes: a chat-triggered rebuild now POSTS its result back into the
+  session ("✅ Done — your change is live at <url>. The independent review passed again."),
+  with honest wording on blocked builds (pages were swept — never claim the old site is
+  still live) and a taking-longer note at the deadline. Injectable intervals; gated fast.
+· Chat is phone-first: under 720px the session list becomes a horizontal strip above the
+  thread (the owner drives everything from a phone).
+· THE RULES join the chain page: the policies the system enforces render localized on the
+  production record ("Le regole che applica · almeno 2 ore di anticipo…") — client-visible
+  proof that the app has real business logic, not suggestions. Old sites unchanged (section
+  only renders when policies exist).
+19 suites green (chat 18 · i18n 43).

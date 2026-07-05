@@ -66,7 +66,10 @@ ok('bogus locale → English (closed set enforced at render)', renderPage(SPEC, 
     blueprint: { kind: 'x', theme: 'warm' }, tables: [{ name: 'reservations', isPrivate: true }, { name: 'dishes', rows: 8 }],
     run: { total: 12, wallSecs: 300, repairs: 2, rebuilds: 0 }, checks: ['privacy'], review: { passed: true, issues: 0, probed: true },
     android: { url: 'https://x.naples.agency/app.apk', qr: '<svg/>' } };
+  (data as any).policies = { min_notice_hours: 2, cancellation_hours: 24, capacity_per_slot: 1 };
   const itChain = SECTIONS.chain(data, { locale: 'it' } as any);
+  ok('chain: THE RULES render localized when policies exist', itChain.includes('Le regole che applica') && itChain.includes('almeno 2 ore di anticipo') && itChain.includes('fino a 24 ore prima'));
+  ok('chain: NO rules section without policies (old sites unchanged)', !SECTIONS.chain({ ...data, policies: null }, { locale: 'it' } as any).includes('Le regole'));
   ok('chain: Italian headings throughout', itChain.includes('Registro di produzione') && itChain.includes('Il brief') && itChain.includes('La promessa') && itChain.includes('I controlli superati'));
   ok('chain: Italian dynamic lines (records, repairs, review, android)', itChain.includes('8 voci, presentate pubblicamente') && itChain.includes('2 riparazioni automatiche') && itChain.includes('SUPERATA') && itChain.includes('È anche un’app Android'));
   const enLeaks = ['Production record', 'The brief', 'The promise', 'records, publicly presented', 'Independent review', 'It is also an Android app'].filter((l) => itChain.includes(l));

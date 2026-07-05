@@ -4,7 +4,7 @@
 // grounded answer path, the first message titles the session, cascade delete leaves no orphans.
 import { randomUUID } from 'node:crypto';
 import { makePool } from './db.ts';
-import { ensureChatTables, listSessions, createSession, sessionOf, listMessages, postMessage, CHANGE_INTENT } from './chat.ts';
+import { ensureChatTables, listSessions, createSession, sessionOf, listMessages, postMessage, CHANGE_INTENT, announceWhenDone } from './chat.ts';
 
 const pool = makePool();
 let pass = 0, fail = 0;
@@ -53,6 +53,18 @@ try {
   // intent detector sanity across locales
   ok('intent: Italian/French change verbs count', CHANGE_INTENT.test('aggiungi una pagina menu') && CHANGE_INTENT.test('ajoute une page contact'));
   ok('intent: questions do not', !CHANGE_INTENT.test('how many bookings do I have?') && !CHANGE_INTENT.test('quanto costa?'));
+
+  // the rebuild ANNOUNCES its outcome into the session (fast injected poll; project is 'done'+reviewed)
+  await pool.query(`insert into dogfood_reviews(project_id, passed, summary, issues) values ($1, true, 'ok', '[]')`, [projA]);
+  const s3 = await createSession(pool, projA, userA);
+  await announceWhenDone(pool, s3.id, projA, { intervalMs: 50, deadlineMs: 3000 });
+  const ann = await listMessages(pool, s3.id);
+  ok('a finished rebuild announces itself into the session (live url included)', ann.length === 1 && ann[0].role === 'relay' && /✅/.test(ann[0].body) && ann[0].body.includes('chat-scratch.naples.agency'), JSON.stringify(ann.map((m: any) => m.body.slice(0, 60))));
+  await pool.query('delete from dogfood_reviews where project_id=$1', [projA]);
+  const serverSrc2 = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+  ok('server: the chat rebuild hook wires the announcement', serverSrc2.includes('announceWhenDone(pool, sidQ, projectId)'));
+  const css = (await import('node:fs')).readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+  ok('chat is phone-first (session list stacks under 720px)', css.includes('.chatwrap') && css.includes('max-width: 720px'));
 
   // cascade: deleting a session leaves no orphan messages
   await pool.query('delete from chat_sessions where id=$1', [s1.id]);

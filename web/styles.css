@@ -336,3 +336,12 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
 .lay-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:var(--rpill)}
 .lay-badge.ok{background:rgba(54,179,126,.14);color:var(--st-done)} .lay-badge.wip{background:rgba(224,179,65,.16);color:var(--st-ready)}
 a.card.rv-card{display:block} a.card.rv-card:hover{border-color:var(--accent)}
+
+/* PROJECT CHAT — phone-first: the session list stacks above the thread on small screens */
+@media (max-width: 720px) {
+  .chatwrap { grid-template-columns: 1fr !important; }
+  .chatwrap > div:first-child { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; }
+  .chatwrap > div:first-child #newsess { width: auto !important; white-space: nowrap; margin-bottom: 0 !important; }
+  .chatwrap #sesslist { display: flex; gap: 6px; }
+  .chatwrap #sesslist > div { white-space: nowrap; margin-bottom: 0 !important; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+}

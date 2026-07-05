@@ -102,3 +102,37 @@ export async function postMessage(
   await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sess.id, reply.slice(0, 4000)]);
   return { ok: true, reply, rebuilding };
 }
+
+// after a chat-triggered rebuild, the SESSION hears the outcome — the client shouldn't have
+// to poll the Build tab. Fire-and-forget; intervals injectable so the gate can run it fast.
+export async function announceWhenDone(
+  pool: pg.Pool, sessionId: string, projectId: string,
+  opts: { intervalMs?: number; deadlineMs?: number } = {},
+): Promise<void> {
+  const interval = opts.intervalMs ?? 30_000;
+  const deadline = Date.now() + (opts.deadlineMs ?? 30 * 60_000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, interval));
+    try {
+      const p = (await pool.query(
+        `select p.status, p.params->>'slug' as slug,
+           (select d.passed from dogfood_reviews d where d.project_id=$1 order by d.id desc limit 1) as passed,
+           (select count(*)::int from tasks where project_id=$1 and status in ('ready','running','verifying')) as active
+         from projects p where p.id=$1`, [projectId])).rows[0];
+      if (!p) return;
+      if (p.status === 'done' && Number(p.active) === 0 && p.passed !== null) {
+        const url = p.slug ? `https://${p.slug}.naples.agency/` : '';
+        const body = p.passed
+          ? `✅ Done — your change is live${url ? ` at ${url}` : ''}. The independent review passed again.`
+          : `⚠️ The rebuild finished but the review flagged issues — I'm keeping the previous quality bar in mind. Check the Build tab or tell me what looks off.`;
+        await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sessionId, body]);
+        return;
+      }
+      if (p.status === 'blocked') {
+        await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sessionId, '⚠️ The rebuild could not finish — the operator has been alerted and your DATA is safe. Try rephrasing the change, or ask me what happened.']);
+        return;
+      }
+    } catch { /* transient poll error — keep waiting */ }
+  }
+  await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sessionId, '⏱ The rebuild is taking longer than usual — check the Build tab for live progress.']).catch(() => {});
+}
