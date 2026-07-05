@@ -29,7 +29,7 @@ process.on('uncaughtException', (e: any) => { console.error('uncaughtException',
 
 // /api/run spends real LLM tokens — guard it. Per-IP sliding window + a global concurrent-project cap
 // (the cap also protects the pg pool from the runner's pool-exhaustion failure mode).
-const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>(), APK_HITS = new Map<string, number[]>();
+const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>(), APK_HITS = new Map<string, number[]>(), CHAT_HITS = new Map<string, number[]>();
 const RATE_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, PUB_MAX_PER_IP = Number(process.env.PUB_MAX || 40), MAX_ACTIVE_PROJECTS = 6;
 function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   const now = Date.now();
@@ -260,6 +260,44 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         return;
       }
       return send(res, 404, 'text/plain', 'site not found');
+    }
+    // PROJECT CHAT (multi-session): a signed-in user converses about THEIR project. A change-
+    // intent message fires the REAL rebuild machinery; everything else gets a grounded answer.
+    if (path === '/api/chat/sessions') {
+      if (!user) return send(res, 401, 'application/json', '{"error":"sign in to chat"}');
+      const pidQ = url.searchParams.get('id') || '';
+      if (!UUID_RE.test(pidQ) || !canSee(user, await ownerOf(pidQ))) return send(res, 404, 'application/json', '{"error":"not found"}');
+      const chat = await import('./chat.ts');
+      if (req.method === 'POST') return send(res, 200, 'application/json', JSON.stringify(await chat.createSession(pool, pidQ, user.id)));
+      return send(res, 200, 'application/json', JSON.stringify({ sessions: await chat.listSessions(pool, pidQ, user.id) }));
+    }
+    if (path === '/api/chat/messages') {
+      if (!user) return send(res, 401, 'application/json', '{"error":"sign in to chat"}');
+      const sidQ = url.searchParams.get('session') || '';
+      if (!UUID_RE.test(sidQ)) return send(res, 404, 'application/json', '{"error":"not found"}');
+      const chat = await import('./chat.ts');
+      if (req.method === 'POST') {
+        if (limited(CHAT_HITS, Number(process.env.CHAT_MAX || 30), clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many messages — take a breath"}');
+        let raw = ''; for await (const c of req) raw += c;
+        let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+        const out = await chat.postMessage(pool, { sessionId: sidQ, userId: user.id, body: String(b.body || '') }, {
+          rebuild: async (projectId, changeText) => {
+            const busy = Number((await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [projectId])).rows[0].n);
+            if (busy) return { started: false, reason: 'the site is still building' };
+            const pr = (await pool.query('select brief from projects where id=$1', [projectId])).rows[0];
+            if (!pr) return { started: false, reason: 'project not found' };
+            const amended = `${pr.brief} · UPDATE: ${changeText.slice(0, 500)}`;
+            try { const dir = fileURLToPath(new URL(projectId + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
+            await replan(pool, projectId, amended);
+            if (process.env.RELAY_BUILD !== '0') runLoop(pool, projectId, { cap: 4, review: true }).catch(() => {});
+            return { started: true };
+          },
+        });
+        return send(res, out.ok ? 200 : 400, 'application/json', JSON.stringify(out));
+      }
+      const sess = await chat.sessionOf(pool, sidQ, user.id);
+      if (!sess) return send(res, 404, 'application/json', '{"error":"not found"}');
+      return send(res, 200, 'application/json', JSON.stringify({ messages: await chat.listMessages(pool, sidQ), title: sess.title }));
     }
     // OWNER CALENDAR FEED: bookings as iCalendar — paste once into Google/Apple Calendar.
     // The key is the auth (calendar apps cannot sign in), minted by the integrations step.
@@ -688,6 +726,7 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 // no lease). Release it so the page stays editable. Runs on boot + every 2 min.
 // ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
 ensureAuthTables(pool).catch((e) => console.error('auth tables', e?.message));
+import('./chat.ts').then((m) => m.ensureChatTables(pool)).catch((e) => console.error('chat tables', e?.message));
 pool.query("create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())").catch(() => {});
 
 // AUTONOMOUS BUILD RECOVERY (0-human): re-run any 'blocked' project that still has failed tasks AND resurrect

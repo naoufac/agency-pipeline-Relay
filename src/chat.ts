@@ -1,0 +1,104 @@
+// chat.ts — PROJECT CHAT, MULTI-SESSION (owner directive 2026-07-05). The client's dashboard
+// gets a conversation per project; a user can hold MANY sessions. Two reply paths, chosen
+// deterministically: a CHANGE-INTENT message triggers the real rebuild machinery (replan +
+// runLoop — the same path as tg-door / the Rebuild button, data survives by the migration
+// contract); anything else gets an LLM answer GROUNDED in the project's real facts (brief,
+// status, pages, activity) — the model explains, it never invents capabilities.
+import pg from 'pg';
+import { callLLM } from './agents.ts';
+
+export async function ensureChatTables(pool: pg.Pool): Promise<void> {
+  await pool.query(`create table if not exists chat_sessions (
+    id uuid primary key default gen_random_uuid(),
+    project_id uuid not null,
+    user_id uuid not null,
+    title text not null default 'New chat',
+    created_at timestamptz not null default now()
+  )`);
+  await pool.query(`create index if not exists chat_sessions_proj_user on chat_sessions(project_id, user_id, created_at desc)`);
+  await pool.query(`create table if not exists chat_messages (
+    id bigserial primary key,
+    session_id uuid not null references chat_sessions(id) on delete cascade,
+    role text not null check (role in ('user','relay')),
+    body text not null,
+    created_at timestamptz not null default now()
+  )`);
+  await pool.query(`create index if not exists chat_messages_session on chat_messages(session_id, id)`);
+}
+
+export async function listSessions(pool: pg.Pool, projectId: string, userId: string) {
+  return (await pool.query(
+    `select s.id, s.title, s.created_at,
+       (select count(*)::int from chat_messages m where m.session_id = s.id) as messages
+     from chat_sessions s where s.project_id=$1 and s.user_id=$2 order by s.created_at desc limit 50`,
+    [projectId, userId])).rows;
+}
+
+export async function createSession(pool: pg.Pool, projectId: string, userId: string) {
+  return (await pool.query('insert into chat_sessions(project_id, user_id) values ($1,$2) returning id, title, created_at', [projectId, userId])).rows[0];
+}
+
+// every read is scoped to the OWNING user — a session id alone is never enough
+export async function sessionOf(pool: pg.Pool, sessionId: string, userId: string): Promise<{ id: string; project_id: string; title: string } | null> {
+  return (await pool.query('select id, project_id, title from chat_sessions where id=$1 and user_id=$2', [sessionId, userId])).rows[0] || null;
+}
+
+export async function listMessages(pool: pg.Pool, sessionId: string) {
+  return (await pool.query('select id, role, body, created_at from chat_messages where session_id=$1 order by id asc limit 500', [sessionId])).rows;
+}
+
+// a message that ASKS FOR WORK — verbs in the five site locales. Deterministic: the regex
+// decides whether the rebuild machinery fires; the LLM never gets to trigger a build.
+export const CHANGE_INTENT = /\b(change|update|add|remove|replace|rename|switch|make it|set the|redo|cambia|aggiungi|rimuovi|modifica|sostituisci|modifie|ajoute|supprime|remplace|cambia el|añade|quita|reemplaza|ändere|füge|entferne|ersetze)\b/i;
+
+export type RebuildHook = (projectId: string, changeText: string) => Promise<{ started: boolean; reason?: string }>;
+export type AnswerHook = (system: string, user: string) => Promise<string>;
+
+const defaultAnswer: AnswerHook = async (system, user) => {
+  const r = await callLLM(system, user, 900, { timeoutMs: 60_000 });
+  return r.meta.ok && r.text ? r.text : 'I could not reach the model just now — please try again in a moment.';
+};
+
+export async function postMessage(
+  pool: pg.Pool,
+  args: { sessionId: string; userId: string; body: string },
+  hooks: { rebuild: RebuildHook; answer?: AnswerHook },
+): Promise<{ ok: boolean; reply?: string; rebuilding?: boolean; error?: string }> {
+  const body = String(args.body || '').trim().slice(0, 4000);
+  if (!body) return { ok: false, error: 'empty message' };
+  const sess = await sessionOf(pool, args.sessionId, args.userId);
+  if (!sess) return { ok: false, error: 'no such session' };
+
+  await pool.query("insert into chat_messages(session_id, role, body) values ($1,'user',$2)", [sess.id, body]);
+  // the first message names the session
+  if (sess.title === 'New chat') {
+    await pool.query('update chat_sessions set title=$2 where id=$1', [sess.id, body.slice(0, 60)]);
+  }
+
+  let reply: string; let rebuilding = false;
+  if (CHANGE_INTENT.test(body)) {
+    const r = await hooks.rebuild(sess.project_id, body);
+    rebuilding = r.started;
+    reply = r.started
+      ? 'On it — rebuilding your site with that change now. Your existing data and web address survive the rebuild. Watch the Build tab; this usually takes a few minutes.'
+      : `I can't start that rebuild right now: ${r.reason || 'the site is busy'}. Try again in a few minutes.`;
+  } else {
+    // GROUNDED answer: the model sees the project's REAL facts and the recent thread — nothing else
+    const proj = (await pool.query(
+      `select brief, status, params->'site'->'pages' as pages, params->>'archetype' as archetype, params->>'slug' as slug from projects where id=$1`,
+      [sess.project_id])).rows[0];
+    const recent = (await pool.query('select role, body from chat_messages where session_id=$1 order by id desc limit 8', [sess.id])).rows.reverse();
+    const facts = proj ? [
+      `brief: ${proj.brief}`,
+      `status: ${proj.status}`,
+      `kind: ${proj.archetype || 'site'}`,
+      proj.slug ? `live at: https://${proj.slug}.naples.agency (Android app at /app.apk, build record at /how-it-was-built.html)` : '',
+      Array.isArray(proj.pages) ? `pages: ${proj.pages.map((p: any) => p.title).join(', ')}` : '',
+    ].filter(Boolean).join('\n') : 'project not found';
+    const system = `You are Relay, an autonomous web agency. The user is the client of ONE project. Answer briefly and concretely from the FACTS below — never invent features or promises. If they want something changed, tell them to say the change plainly (e.g. "change: make the hero photo darker") and it will rebuild automatically. FACTS:\n${facts}`;
+    const thread = recent.map((m: any) => `${m.role === 'user' ? 'Client' : 'Relay'}: ${m.body}`).join('\n');
+    reply = await (hooks.answer || defaultAnswer)(system, thread || body);
+  }
+  await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sess.id, reply.slice(0, 4000)]);
+  return { ok: true, reply, rebuilding };
+}

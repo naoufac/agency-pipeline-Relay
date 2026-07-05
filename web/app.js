@@ -193,7 +193,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'chat','Chat',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
       </div>`;
   }
 
@@ -343,6 +343,52 @@ function project(id, tab, seq){
       const iv = setInterval(async () => { tries++; await render(); if (tries > 36) { clearInterval(iv); btn.textContent = 'Re-run review'; btn.disabled = false; } }, 5000);
     };
     await render();
+  }
+
+  // ---- Chat tab: multi-session project conversation. A change-intent message rebuilds the
+  // site through the real machinery; anything else gets an answer grounded in project facts. ----
+  if (tab === 'chat') {
+    (async () => {
+    const el = document.getElementById('pbody');
+    const me = await j('/api/me').catch(()=>({email:null}));
+    if (!me || !me.email) { el.innerHTML = `<div class="empty">Sign in (top right) to chat about this project.</div>`; return; }
+    el.innerHTML = `<div class="chatwrap" style="display:grid;grid-template-columns:220px 1fr;gap:14px;min-height:420px">
+      <div><button class="btn btn-sm" id="newsess" style="width:100%;margin-bottom:10px">+ New chat</button><div id="sesslist"></div></div>
+      <div style="display:flex;flex-direction:column"><div id="thread" style="flex:1;overflow-y:auto;padding:6px 2px;display:flex;flex-direction:column;gap:8px"></div>
+      <form id="chatform" style="display:flex;gap:8px;margin-top:10px"><input id="chatinput" type="text" placeholder="Ask about your project, or say a change…" style="flex:1" autocomplete="off"><button class="btn" type="submit">Send</button></form></div>
+    </div>`;
+    let current = null;
+    const bubble = (m) => `<div style="max-width:85%;padding:8px 12px;border-radius:12px;white-space:pre-wrap;font-size:14px;${m.role==='user'?'align-self:flex-end;background:var(--accent,#4f46e5);color:#fff':'align-self:flex-start;background:var(--surface,#f4f4f5)'}">${esc(m.body)}</div>`;
+    const loadThread = async () => {
+      if (!current) { document.getElementById('thread').innerHTML = '<div class="empty">Start a new chat.</div>'; return; }
+      const d = await j('/api/chat/messages?session='+current);
+      const t = document.getElementById('thread');
+      t.innerHTML = (d.messages||[]).map(bubble).join('') || '<div class="muted" style="padding:8px">Say hello — or say a change and the site rebuilds.</div>';
+      t.scrollTop = t.scrollHeight;
+    };
+    const loadSessions = async (pick) => {
+      const d = await j('/api/chat/sessions?id='+id);
+      const list = d.sessions || [];
+      if (pick) current = pick; else if (!current && list.length) current = list[0].id;
+      document.getElementById('sesslist').innerHTML = list.map(s0=>`<div data-sid="${esc(s0.id)}" style="padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;margin-bottom:4px;${s0.id===current?'background:var(--surface,#f4f4f5);font-weight:600':''}">${esc(s0.title)}<div class="muted" style="font-size:11px">${s0.messages} message${s0.messages===1?'':'s'}</div></div>`).join('') || '<div class="muted" style="font-size:13px">No chats yet.</div>';
+      document.getElementById('sesslist').querySelectorAll('[data-sid]').forEach(n=>n.onclick=()=>{ current=n.getAttribute('data-sid'); loadSessions(); loadThread(); });
+      await loadThread();
+    };
+    document.getElementById('newsess').onclick = async () => { const s0 = await j('/api/chat/sessions?id='+id,{method:'POST'}); await loadSessions(s0.id); };
+    document.getElementById('chatform').onsubmit = async (e) => {
+      e.preventDefault();
+      const inp = document.getElementById('chatinput'); const body = inp.value.trim(); if (!body) return;
+      if (!current) { const s0 = await j('/api/chat/sessions?id='+id,{method:'POST'}); current = s0.id; }
+      inp.value=''; const t = document.getElementById('thread');
+      t.insertAdjacentHTML('beforeend', bubble({role:'user',body})); t.scrollTop = t.scrollHeight;
+      t.insertAdjacentHTML('beforeend', `<div class="muted" id="typing" style="font-size:12px;padding:4px 8px">Relay is thinking…</div>`);
+      try { await j('/api/chat/messages?session='+current,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})}); } catch {}
+      document.getElementById('typing')?.remove();
+      await loadSessions();
+    };
+    await loadSessions();
+    })();
+    return;
   }
 
   // ---- Content tab (PQ3): edit the site's REAL content (products/menu/posts). Owner-only; the live

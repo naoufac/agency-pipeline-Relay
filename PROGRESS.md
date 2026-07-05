@@ -990,3 +990,17 @@ Owner's directive: deeper full-stack production. Three REAL steps, each verified
   site's language (mail_confirm_* ×5) — fire-and-forget, mailReady-guarded.
 App/store DAGs grow 14 → 16 verified steps, visible on the board and the chain page.
 9 new gates (app 181); 18 suites green.
+
+## 2026-07-05 — PROJECT CHAT: multi-session conversations in the client dashboard
+
+Owner's directive: 'in the user dashboard chat for the project — a user can have many chat
+session'. Shipped: chat_sessions + chat_messages (main DB, cascade delete), a Chat tab in
+the project view (session list · + New chat · thread · composer), and TWO reply paths
+chosen deterministically: a CHANGE-INTENT message (verbs in all five site locales) fires
+the REAL rebuild machinery — replan + runLoop, same contract as tg-door, data survives —
+while a plain question gets an LLM answer GROUNDED in the project's real facts (brief,
+status, pages, live URL); the model explains, it never invents and never triggers builds
+(the regex decides, not the LLM). Sessions are per-user (a session id alone is never
+enough), the first message titles the session, posting is rate-capped, routes demand a
+signed-in user + project visibility. chat:check is suite 19 (15 gates, injected hooks —
+no LLM burned proving it). 19 suites green.
