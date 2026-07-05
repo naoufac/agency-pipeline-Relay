@@ -1018,3 +1018,16 @@ no LLM burned proving it). 19 suites green.
   proof that the app has real business logic, not suggestions. Old sites unchanged (section
   only renders when policies exist).
 19 suites green (chat 18 · i18n 43).
+
+## 2026-07-05 — LIVE PROOFS of the perfection pass (all on the real continuum build)
+
+· Grounded chat, REAL model: "what pages does my site have?" → the exact four pages + the
+  correct live URL, zero invention.
+· Server-path booking → visitor confirmation mail SENT (run_events: 'lp@x.co · Your booking
+  is confirmed received') + the operator lead mail + the booking appearing as the 2nd VEVENT
+  in the live calendar feed.
+· THE RULES render on the live chain page ("The rules it enforces · Bookings need at least
+  2h notice").
+· One imperfection caught BY the proof: the QA probe's own test booking got a confirmation
+  mail (qa@example.com, every build) — one shared isQaProbe() now guards leads AND
+  confirmations. 2 gates.
