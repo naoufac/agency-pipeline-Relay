@@ -31,9 +31,12 @@ export const STATUS_SET = ['pending', 'confirmed', 'declined', 'cancelled', 'new
 // vector, and nonsense that made every booking fail its NOT NULL). When a lifecycle table references a
 // catalog carrying these, its own copies are made nullable, kept OFF the public form, and DERIVED at
 // insert from the referenced row. (live-caught on the lather barbershop flight, 2026-07-05)
-export const DERIVED_MONEY = /^(price|amount|cost|fee|subtotal|total)$/i;
-export const DERIVED_DURATION = /^(duration|duration_minutes|minutes|mins|length_minutes)$/i;
-export const DERIVED_COL = /^(price|amount|cost|fee|subtotal|total|duration|duration_minutes|minutes|mins|length_minutes)$/i;
+// word-boundary (not fully anchored): the LLM names money columns variably — price, total_price,
+// unit_price, service_cost, subtotal. A fully anchored regex let 'total_price' slip back onto a
+// booking form (live-caught on the cutline re-flight). Boundaries catch the prefixed/suffixed forms.
+export const DERIVED_MONEY = /(^|_)(price|amount|cost|fee|subtotal|total|charge)(_|$)/i;
+export const DERIVED_DURATION = /(^|_)(duration|minutes|mins)(_|$)/i;
+export const DERIVED_COL = /(^|_)(price|amount|cost|fee|subtotal|total|charge|duration|minutes|mins)(_|$)/i;
 
 // THE EVENT-TIME COLUMN of a lifecycle row (the calendar feed and reminders both need it). Picking
 // "the first date/timestamp column" is WRONG — a booking table may also carry date_of_birth, and a

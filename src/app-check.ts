@@ -498,22 +498,22 @@ try {
         { name: 'customer_name', type: 'text', required: true },
         { name: 'service', type: 'ref:services', required: true },
         { name: 'appointment_at', type: 'datetime', required: true },
-        { name: 'price', type: 'money', required: true },
+        { name: 'unit_price', type: 'money', required: true },
         { name: 'duration_minutes', type: 'int', required: true },
-        { name: 'total', type: 'money', required: true }] },
+        { name: 'total_price', type: 'money', required: true }] },
     ] }));
     const fcols = (await appdb.formColumns(pool, bid, 'bookings', 'public')).map((c: any) => c.name);
-    ok('booking form OMITS server-derived money/duration (customer never types the price)', !fcols.includes('price') && !fcols.includes('duration_minutes') && !fcols.includes('total'), fcols.join(','));
+    ok('booking form OMITS server-derived money/duration incl. PREFIXED names (total_price, unit_price)', !fcols.includes('unit_price') && !fcols.includes('duration_minutes') && !fcols.includes('total_price'), fcols.join(','));
     ok('booking form KEEPS the real customer inputs (name, service, time)', fcols.includes('customer_name') && fcols.includes('service_id') && fcols.includes('appointment_at'), fcols.join(','));
     // a booking WITHOUT price/duration in the payload still lands, and price/duration/total are derived from the service
     const ins = await appdb.insertRow(pool, bid, 'bookings', { customer_name: 'Ada', email: 'a@b.co', service_id: 1, appointment_at: new Date(Date.now() + 72 * 3_600_000).toISOString() });
-    const row = (await pool.query(`select price, duration_minutes, total from "${bsch}"."bookings" where id=$1`, [1])).rows[0];
+    const row = (await pool.query(`select unit_price, duration_minutes, total_price from "${bsch}"."bookings" where id=$1`, [1])).rows[0];
     ok('booking lands with NO price in the payload (was NOT NULL → would have blocked every booking)', ins.ok === true, JSON.stringify(ins));
-    ok('price/duration/total DERIVED from the chosen service (30 / 45 / 30)', row && Number(row.price) === 30 && Number(row.duration_minutes) === 45 && Number(row.total) === 30, JSON.stringify(row));
+    ok('unit_price/duration/total_price DERIVED from the chosen service (30 / 45 / 30)', row && Number(row.unit_price) === 30 && Number(row.duration_minutes) === 45 && Number(row.total_price) === 30, JSON.stringify(row));
     // a tampered price in the payload is IGNORED — the server re-derives from the service
-    const tamper = await appdb.insertRow(pool, bid, 'bookings', { customer_name: 'Mallory', email: 'm@b.co', service_id: 1, price: 1, total: 1, appointment_at: new Date(Date.now() + 96 * 3_600_000).toISOString() });
-    const trow = (await pool.query(`select price, total from "${bsch}"."bookings" where id=$1`, [tamper.ref ? (await pool.query(`select id from "${bsch}"."bookings" where ref_token=$1`, [tamper.ref])).rows[0].id : 2])).rows[0];
-    ok('a tampered client price is OVERRIDDEN by the derived price (anti-tamper)', trow && Number(trow.price) === 30 && Number(trow.total) === 30, JSON.stringify(trow));
+    const tamper = await appdb.insertRow(pool, bid, 'bookings', { customer_name: 'Mallory', email: 'm@b.co', service_id: 1, unit_price: 1, total_price: 1, appointment_at: new Date(Date.now() + 96 * 3_600_000).toISOString() });
+    const trow = (await pool.query(`select unit_price, total_price from "${bsch}"."bookings" where ref_token=$1`, [tamper.ref])).rows[0];
+    ok('a tampered client price is OVERRIDDEN by the derived price (anti-tamper)', trow && Number(trow.unit_price) === 30 && Number(trow.total_price) === 30, JSON.stringify(trow));
   } finally {
     await pool.query(`drop schema if exists "${bsch}" cascade`).catch(() => {});
     await pool.query('delete from projects where id=$1', [bid]).catch(() => {});
