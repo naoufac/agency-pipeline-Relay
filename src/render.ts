@@ -6,6 +6,7 @@ import { themeFor, themeFonts, themeVars } from './themes.ts';
 import { DEFAULT_LAYOUT, isHeroVariant, isCardVariant, type Layout } from './layout.ts';
 import { PRIVATE_READ } from './schema.ts';
 import { metaDescription } from './seo.ts';
+import { designVars, fontLink, hasDesign } from './design.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -40,11 +41,16 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   const text = (isHex(t.text) && contrast(t.text, bg) >= 4.5) ? t.text.trim() : pickOn(bg);
   const onPrimary = pickOn(primary);
   const accent = (isHex(t.accent) && contrast(t.accent, bg) >= 3) ? t.accent.trim() : primary;
+  // FIGMA → REALITY: an external design source (spec.brand.design) overrides the theme's identity —
+  // palette, fonts, radius — emitted AFTER the theme vars so the design wins. Absent → byte-identical.
+  const design = (spec && spec.brand && spec.brand.design) || null;
+  const dVars = hasDesign(design) ? ';' + designVars(design) : '';
+  const dFontLink = fontLink(design);
   const vars = `:root{` +
     `--primary:${primary};--on-primary:${onPrimary};--accent:${accent};--bg:${bg};` +
     `--surface:${isHex(t.surface) ? t.surface.trim() : mix(text, bg, 0.96)};--text:${text};` +
     `--muted:${mix(text, bg, 0.42)};--line:${mix(text, bg, 0.86)};` +
-    `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}}`;
+    `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}${dVars}}`;
 
   const brand = (spec && spec.brand && spec.brand.name) || 'Studio';
   // Resolve each CTA to the RIGHT page by its INTENT (never one global page, never "last page"):
@@ -101,7 +107,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="${primary}">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">${dFontLink ? '\n' + dFontLink : ''}
 ${desc ? `\n<meta name="description" content="${esc(desc)}">` : ''}
 <meta property="og:title" content="${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}">
 ${desc ? `<meta property="og:description" content="${esc(desc)}">` : ''}

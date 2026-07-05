@@ -430,13 +430,15 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
 // Every page is built by a separate agent call, so each invents its own brand name + colours -> the
 // logo and palette drift page to page. Fix: the FIRST page locks a canonical brand; every page renders
 // with it. brandIdentity() extracts it from a spec; applyBrand() forces a spec to use the canonical one.
-export type Brand = { name: string; cta: string | null; tokens: any };
+export type Brand = { name: string; cta: string | null; tokens: any; design?: any };
 export function brandIdentity(spec: any): Brand {
   const b = (spec && spec.brand && typeof spec.brand === 'object') ? spec.brand : {};
   return {
     name: (typeof b.name === 'string' && b.name.trim()) ? b.name.trim() : 'Studio',
     cta: (typeof b.cta === 'string' && b.cta.trim()) ? b.cta.trim() : null,
     tokens: (b.tokens && typeof b.tokens === 'object' && !Array.isArray(b.tokens)) ? b.tokens : {},
+    // FIGMA → REALITY: an external design source rides on the brand so it's identical on every page
+    design: (b.design && typeof b.design === 'object' && !Array.isArray(b.design)) ? b.design : undefined,
   };
 }
 // Last-resort palette — only used if a canonical brand somehow carries no tokens. Never the page's own.
@@ -451,6 +453,7 @@ export function applyBrand(spec: any, canon: Brand): void {
   // own invented colours. canon.tokens is guaranteed complete by resolveBrand(); DEFAULT_TOKENS is a floor so
   // an empty canon can't open a leak. This is what makes "one palette per site" a guarantee, not a request.
   spec.brand.tokens = (canon.tokens && Object.keys(canon.tokens).length) ? canon.tokens : { ...DEFAULT_TOKENS };
+  if (canon.design) spec.brand.design = canon.design;   // the external design identity, identical per page
 }
 
 // DOMAINS — every produced site gets a first-level subdomain: <slug>.naples.agency. The slug is
