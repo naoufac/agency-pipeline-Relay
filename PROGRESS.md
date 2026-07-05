@@ -1031,3 +1031,27 @@ no LLM burned proving it). 19 suites green.
 · One imperfection caught BY the proof: the QA probe's own test booking got a confirmation
   mail (qa@example.com, every build) — one shared isQaProbe() now guards leads AND
   confirmations. 2 gates.
+
+## 2026-07-05 — Adversarial audit of the new surfaces (chat/ICS/policies/twins), 15 findings closed + gated
+
+Ran a 7-lens find→verify workflow (3-skeptic majority) over the newest code. 15 confirmed
+findings, all fixed as CLASSES with deterministic gates. Highlights:
+
+· DESTRUCTION killed: chat/tg-door swept the live site's HTML BEFORE the build was guaranteed —
+  a paused build or a plan-throw left a permanently dead site; concurrent triggers double-swept.
+  Now ONE startRebuild(): plan → sweep → run, per-project lock, never sweeps when paused. All
+  three trigger surfaces route through it.
+· False-positive rebuilds killed: a QUESTION containing a change verb ("should we add a form?")
+  used to sweep + rebuild the live site. wantsRebuild() now fires only on imperatives / "change:".
+· Twin data-loss killed (two flaws): a genuinely-new date column mapped onto a kept column
+  (birth_date → appointment_at) AND onto the system created_at column. Twin now maps only onto a
+  column the model is DROPPING and never onto a system column. My own new gate caught the second.
+· Booking race killed: count+insert now transactional under a Postgres advisory lock — proven by
+  a real concurrency gate (3 simultaneous bookings on a capacity-2 slot land exactly 2).
+· QA probe over-match killed: marker anchored to ^, so a real customer's note that merely
+  contains the phrase keeps their confirmation email.
+· Abuse/leak: session creation rate-capped; rate-limit maps swept (no unbounded growth).
+· ICS interop: RFC 5545 line folding to ≤75 octets; date columns emit VALUE=DATE all-day events.
+
+Proof: full check (19 suites) green; app 195 / migrate 21 / chat 24; live continuum ICS feed
+validates (200, valid VCALENDAR, 0 lines >75 octets). Shipped b805057, deployed + restarted.
