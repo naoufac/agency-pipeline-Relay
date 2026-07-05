@@ -133,12 +133,34 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
         applied.push(`~"${t}"."status" default -> 'pending' (was ${cur || 'none'} — visitors must never be auto-confirmed)`);
       }
     }
+    // SEMANTIC TWINS (iteration-leg catch, M3 flight 2026-07-05): a rebuilt model renamed
+    // booking_time → appointment_at and customer_email → email; additive migration added BOTH,
+    // and the auto-form rendered duplicate required fields no visitor (or probe) could fill.
+    // On PRIVATE visitor tables, a new column whose name AND type-family match an existing
+    // column's semantic class is the SAME field wearing a new name — map, never duplicate.
+    const TWIN_CLASSES: Array<[RegExp, (fam: string) => boolean]> = [
+      [/time|date|_at$|appointment|booking|schedul|slot/i, (f) => f === 'timestamptz' || f === 'date'],
+      [/email/i, (f) => f === 'text'],
+      [/phone|mobile|\btel/i, (f) => f === 'text'],
+      [/(^|_)(customer_|client_|full_|contact_|guest_)?name$/i, (f) => f === 'text'],
+    ];
+    const twinOf = (nc: any): string | null => {
+      if (!PRIVATE_READ.test(t) || nc.ref) return null;
+      const fam = typeFamily(nc.type);
+      for (const [re, famOk] of TWIN_CLASSES) {
+        if (!re.test(nc.name) || !famOk(fam)) continue;
+        for (const [hn, hc] of have) if (hn !== nc.name && re.test(hn) && famOk(typeFamily((hc as any).type))) return hn;
+      }
+      return null;
+    };
     for (const c of resolved.cols[t]) {
       const cur = have.get(c.name);
       if (cur) {
         if (typeFamily(cur.type) !== typeFamily(c.type)) skipped.push(`~"${t}"."${c.name}": kept ${cur.type} (model wants ${c.type} — retype would risk data)`);
         continue;
       }
+      const tw = twinOf(c);
+      if (tw) { skipped.push(`~"${t}"."${c.name}": semantic twin of existing "${tw}" — mapped, not duplicated (the form must stay singular)`); continue; }
       if (c.name === 'status') {
         // FS3: status joins populated lifecycle tables with default 'pending' and NO CHECK (existing
         // rows may carry legacy values a constraint would reject — the closed set is enforced on write)

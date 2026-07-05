@@ -66,5 +66,36 @@ try {
 } finally {
   await pool.query(`drop schema if exists "${schema}" cascade`).catch(() => {});
 }
+// SEMANTIC TWINS (iteration-leg catch): a rebuilt model renames the when/email columns of a
+// PRIVATE visitor table — migration must MAP them to the existing columns, never duplicate.
+{
+  const { randomUUID } = await import('node:crypto');
+  const tid = randomUUID();
+  const tschema = 'app_' + tid.replace(/-/g, '').slice(0, 32);
+  const TV1 = JSON.stringify({ entities: [
+    { name: 'bookings', public: false, fields: [
+      { name: 'customer_name', type: 'text', required: true },
+      { name: 'customer_email', type: 'text' },
+      { name: 'booking_time', type: 'datetime' }] },
+  ] });
+  const TV2 = JSON.stringify({ entities: [
+    { name: 'bookings', public: false, fields: [
+      { name: 'customer_name', type: 'text', required: true },
+      { name: 'email', type: 'text' },                       // twin of customer_email
+      { name: 'appointment_at', type: 'datetime' },       // twin of booking_time
+      { name: 'party_size', type: 'integer' }] },            // genuinely NEW — must still be added
+  ] });
+  try {
+    await appdb.provision(pool, tid, TV1);
+    const p = await appdb.provision(pool, tid, TV2);
+    const cols = (await pool.query(`select column_name from information_schema.columns where table_schema=$1 and table_name='bookings'`, [tschema])).rows.map((r: any) => r.column_name);
+    ok('twin: the renamed when-column is MAPPED, not duplicated (email was already canonical via FS2)', !cols.includes('appointment_at') && cols.includes('booking_time') && cols.includes('customer_email'), cols.join(','));
+    ok('twin: a genuinely new column still lands', cols.includes('party_size'), cols.join(','));
+    ok('twin: the mapping is loud in skipped[]', !!p.migration && p.migration.skipped.some((x: string) => /semantic twin/.test(x)), JSON.stringify(p.migration?.skipped));
+  } finally {
+    await pool.query(`drop schema if exists "${tschema}" cascade`).catch(() => {});
+  }
+}
+
 console.log(`\nmigrate:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

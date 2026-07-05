@@ -44,6 +44,18 @@ try {
   const r0 = await callLLM('sys', 'user', 100);
   ok('PRIMARY is MiniMax-direct (12.5B tokens/month) — one call, think stripped', r0.meta.ok === true && r0.meta.provider === 'minimax-direct' && r0.text === 'dal primario' && calls.length === 1 && calls[0].url.includes('minimax'), JSON.stringify(r0.meta));
 
+  // 1b · think-headroom: the wire budget exceeds the caller's; an all-think reply retries ONCE doubled
+  calls = [];
+  let mmCalls = 0;
+  (globalThis as any).fetch = async (url: any, init: any) => {
+    record(url, init);
+    mmCalls++;
+    if (mmCalls === 1) return new Response(JSON.stringify({ choices: [{ message: { content: '<think>endless pondering that ate the whole budget…</think>' }, finish_reason: 'length' }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '<think>ok now</think>risposta vera' } }] }), { status: 200 });
+  };
+  const rh = await callLLM('sys', 'user', 1000);
+  ok('think-headroom: wire budget > caller budget, all-think reply retries once DOUBLED', rh.meta.ok === true && rh.text === 'risposta vera' && calls.length === 2 && Number(calls[0].body.max_tokens) > 1000 && Number(calls[1].body.max_tokens) > Number(calls[0].body.max_tokens), JSON.stringify(calls.map(c => c.body.max_tokens)));
+
   // 2 · MiniMax quota-dead → the SAME request rides the FREE OpenRouter model
   calls = [];
   (globalThis as any).fetch = async (url: any, init: any) => {

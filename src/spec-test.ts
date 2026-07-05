@@ -501,5 +501,14 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('resolveBrand: without a stated name the model brand stands', b2.name === 'Wick & Flame');
 }
 
+// ---- the catalog seed floor: a public catalog with zero seeds must never ship hollow ----
+{
+  const { catalogSeedErrors } = await import('./spec.ts');
+  ok('seed floor: unseeded public services table is rejected', catalogSeedErrors([{ name: 'services', public: true, seed: [] }]).length === 1);
+  ok('seed floor: seeded catalog is clean', catalogSeedErrors([{ name: 'products', public: true, seed: [{ title: 'A' }] }]).length === 0);
+  ok('seed floor: PRIVATE visitor tables are exempt (seed hygiene strips them by design)', catalogSeedErrors([{ name: 'bookings', public: false, seed: [] }, { name: 'orders', public: false }]).length === 0);
+  ok('seed floor: non-catalog public tables are exempt (an empty testimonials list is legal)', catalogSeedErrors([{ name: 'testimonials', public: true, seed: [] }]).length === 0);
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

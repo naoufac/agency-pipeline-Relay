@@ -952,3 +952,23 @@ landing page ("where brands go live") which code never stomps — env-gated rout
 (RELAY_HOME_SLUG) is deployed and gated; flipping the apex = set env + route DNS + ingress,
 strictly the owner's call. Known wart on the demo: the model invented production metrics
 (€1,200) — owner-editable via the Content tab before any flip.
+
+## 2026-07-05 — PROVIDER ORDER PER OWNER + TWO CLASSES FROM THE M3 CERTIFICATION FLIGHT
+
+Owner's directive: MiniMax-direct is the PRIMARY (coding plan ~12.5B tokens/month of M3,
+MINIMAX_MODEL=MiniMax-M3), OpenRouter drops to a FALLBACK LADDER of free/cheap models
+(gemma-4-31b:free → mistral-small-24b at $0.08/M — live probe showed free tiers congested
+and slugs rotating, so the ladder ends on a reliable rung); web-grounded calls stay
+OR-first (Exa is OR-only). M-family reasoning gets THINK-HEADROOM (+4k wire tokens over
+the caller's budget) and one doubled retry on all-think truncation — observed live: M3
+intermittently spent whole 3k budgets thinking. llm:check rewritten for the order (22).
+The M3 certification flight then caught TWO model-independent classes:
+· SEMANTIC TWINS — the rebuilt model renamed booking_time→appointment_at and
+  customer_email→email; additive migration added BOTH and the auto-form rendered duplicate
+  required fields no visitor (or probe) could fill ('form-not-persisted', HIGH). On PRIVATE
+  tables, a new column whose name AND type-family match an existing column's semantic class
+  (when/email/phone/person-name) is now MAPPED, never duplicated — proven on a live scratch
+  schema (migrate 20).
+· HOLLOW CATALOG — M3 seeded ZERO rows and the empty barbershop passed review. Floor:
+  a public catalog-ish table with no seeds is REJECTED at normalize (the LLM retries with
+  the message); private tables and non-catalog publics exempt (spec 166).

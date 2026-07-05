@@ -154,6 +154,20 @@ function pricelessProductErrors(model: any): string[] {
   return bad.length ? [`products ${bad.join(', ')} have NO price anywhere — give the product a price field, or give at least one of its variants a price`] : [];
 }
 
+// a PUBLIC catalog table (products/services/menu…) with ZERO seeds launches a hollow site —
+// an empty grid that a review can miss (M3 flight 2026-07-05 shipped a barbershop with no
+// barbers). The floor: catalog-ish public tables must carry seeds; the LLM retries with this.
+const CATALOG_TABLE = /product|service|dish|menu_item|menu|item|treatment|class|course|package|offering|scent|flavor|listing/i;
+export function catalogSeedErrors(ents: any[]): string[] {
+  const out: string[] = [];
+  for (const e of (ents || [])) {
+    if (!e || e.public !== true || !CATALOG_TABLE.test(String(e.name || ''))) continue;
+    if (!Array.isArray(e.seed) || e.seed.length === 0)
+      out.push(`public catalog "${e.name}" has NO seed rows — a live site must not launch empty; seed 4-8 realistic rows`);
+  }
+  return out;
+}
+
 export function normalizeDataModel(raw: string, archetype?: string): DataModelResult {
   const repairs: string[] = []; const errors: string[] = [];
   if (!raw) { errors.push('empty database output'); return { ok: false, errors }; }
@@ -181,7 +195,7 @@ export function normalizeDataModel(raw: string, archetype?: string): DataModelRe
         repairs.push('injected canonical order_items');
       }
     }
-    const errs = [...unseededRequiredRefs(model), ...slotInventoryErrors(model), ...pricelessProductErrors(model)];
+    const errs = [...unseededRequiredRefs(model), ...slotInventoryErrors(model), ...pricelessProductErrors(model), ...catalogSeedErrors((model as any).entities || [])];
     return errs.length ? { ok: false, errors: errs } : { ok: true, model, repairs };
   };
   // first pass: the FIRST complete, balanced JSON object (string-aware; survives fences + a trailing block).

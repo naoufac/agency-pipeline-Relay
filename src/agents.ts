@@ -181,11 +181,15 @@ async function callOpenRouterLadder(messages: any[], maxTokens: number, timeoutM
   throw last ?? new Error('fallback ladder empty');
 }
 
-async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {
+// M-family reasoning spends tokens in <think> BEFORE the answer — the caller's budget is for
+// the ANSWER, so the wire budget gets headroom on top, and an all-think truncation retries
+// ONCE with double. (Observed live on M3 2026-07-05: intermittent empty-after-strip at 3k caps.)
+const THINK_HEADROOM = Number(process.env.MINIMAX_THINK_HEADROOM || 4000);
+async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: number, web: boolean, t0: number, _retry = false): Promise<LLMResult> {
   const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
+    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens + THINK_HEADROOM }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -193,7 +197,10 @@ async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: 
   // M2-family direct API embeds reasoning as <think>…</think> INSIDE message.content
   // (OpenRouter separates it) — strip it or the site copy ships with the model's inner monologue
   const text = String(data?.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  if (!text) throw new Error('MiniMax: empty response after reasoning strip ' + JSON.stringify(data).slice(0, 200));
+  if (!text) {
+    if (!_retry) return callMiniMaxDirect(messages, (maxTokens + THINK_HEADROOM) * 2, timeoutMs, web, t0, true);
+    throw new Error('MiniMax: empty response after reasoning strip ' + JSON.stringify(data).slice(0, 200));
+  }
   return { text, meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
 }
 
