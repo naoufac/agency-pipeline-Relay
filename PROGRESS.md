@@ -920,3 +920,19 @@ MAY BE DEAD. (4) pingFallback(): the digest pings the FALLBACK provider daily wi
 tokens — a stale second key surfaces immediately, not on the day the primary lapses and
 the failover has nothing to fail over to. Tonight's digest already reports honestly:
 '🔑 FALLBACK PROVIDER DEAD' (true — both accounts empty). 6 new gates; 18 suites green.
+
+## 2026-07-05 — PROVIDERS RESTORED · ITALIAN FLIGHT GREEN · ONE MORE CLASS FROM THE DRIFT CHECK
+
+New MiniMax coding-plan key installed (M2-family only; the direct API embeds <think>
+reasoning inside content — stripped before any copy can ship with inner monologue; ping
+budgets 8→400 because a reasoning model spends its budget thinking first). OpenRouter
+remains weekly-limited; the failover carries all builds seamlessly on minimax-direct.
+FIRST FULL GREEN including the iteration leg: candle store (hearth) — built 6 min, review
+passed, subdomain + APK served, REBUILT via the public API with 17→19 rows surviving and
+identity kept. Then the ITALIAN flight: la-cucina-di-nonna.naples.agency — 5 min, lang=it,
+Italian chain page, € client dict, APK 200, iteration 15→19 rows, review re-passed. The
+provider-swap drift check (my own eyes on the QA screenshots) found NO quality drift —
+but caught a pre-existing compose class live on hearth: the M2 form-guarantee only
+recognized type==='form', so stores with a working cart+checkout still got a raw Orders
+form injected on the homepage (a second, uglier way to buy). checkoutCovers fixes it at
+the compose floor; booking apps keep the guarantee. spec 156, 18 suites green.
