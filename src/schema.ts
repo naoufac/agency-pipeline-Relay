@@ -37,12 +37,15 @@ export const STATUS_SET = ['pending', 'confirmed', 'declined', 'cancelled', 'new
 export const DERIVED_MONEY = /(^|_)(price|amount|cost|fee|subtotal|total|charge)(_|$)/i;
 export const DERIVED_DURATION = /(^|_)(duration|minutes|mins)(_|$)/i;
 export const DERIVED_COL = /(^|_)(price|amount|cost|fee|subtotal|total|charge|duration|minutes|mins)(_|$)/i;
+// the END time of a booking is DERIVED (start + service duration) — never a second time-picker the
+// customer fills. Detected among the table's time columns; excluded from the form, filled at insert.
+export const END_TIME_COL = /(^|_)(end|ends|finish|until)(_|$)/i;
 
 // THE EVENT-TIME COLUMN of a lifecycle row (the calendar feed and reminders both need it). Picking
 // "the first date/timestamp column" is WRONG — a booking table may also carry date_of_birth, and a
 // reminder keyed on that never fires (audit 2026-07-05). Exclude personal/bookkeeping dates, then
 // prefer an obvious appointment column, else fall back to the first remaining dated column.
-const WHEN_EXCLUDE = /(^|_)(birth|dob|created|updated|modified|expire[sd]?|deleted|joined|hired|since|anniversar)/i;
+const WHEN_EXCLUDE = /(^|_)(birth|dob|created|updated|modified|expire[sd]?|deleted|joined|hired|since|anniversar|end|ends|finish|until)/i;
 const WHEN_PREFER = /(scheduled|starts?_|start_at|appointment|booking|reserv|slot|due|when|_at$|_date$|_time$|^date$|^time$)/i;
 export function pickWhenColumn(cols: { name: string; type: string }[]): string | null {
   const dated = cols.filter((c) => /timestamp|date|time/.test(String(c.type)) && !WHEN_EXCLUDE.test(c.name));
@@ -290,6 +293,14 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       const pricedRef = list.some(c => c.ref && (ents.find(x => x.name === c.ref)?.fields || []).some((f: any) => DERIVED_MONEY.test(f.name) || DERIVED_DURATION.test(f.name)));
       if (pricedRef) for (const c of list) if (!c.ref && DERIVED_COL.test(c.name) && c.required) {
         c.required = false; warnings.push(`${name}.${c.name}: server-derived from a priced ref — made nullable + kept off the public form`);
+      }
+      // a booking's END time is start + duration, never a second picker the customer fills: when the
+      // table has a START event column AND an END column, the end is made nullable + derived at insert.
+      const timeCols = list.filter(c => !c.ref && /^(timestamp|date|time)/.test(String(c.type)) && c.name !== 'created_at');
+      const endCol = timeCols.find(c => END_TIME_COL.test(c.name));
+      const startCol = timeCols.find(c => c !== endCol && !END_TIME_COL.test(c.name));
+      if (endCol && startCol && endCol.required) {
+        endCol.required = false; warnings.push(`${name}.${endCol.name}: derived end time (start + duration) — made nullable + kept off the public form`);
       }
     }
     const perTableIndexes: string[] = [];

@@ -6,7 +6,7 @@ import { L, columnLabel } from './i18n.ts';
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
-import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE, pickWhenColumn, DERIVED_MONEY, DERIVED_DURATION, DERIVED_COL } from './schema.ts';
+import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE, pickWhenColumn, DERIVED_MONEY, DERIVED_DURATION, DERIVED_COL, END_TIME_COL } from './schema.ts';
 import { localRowImage } from './rowmedia.ts';
 
 // FS0 — who is reading? 'public' = the produced site's anonymous data API (private visitor-record
@@ -533,7 +533,11 @@ async function deriveActionFields(pool: pg.Pool, schema: string, table: string, 
   const moneyCols = cols.filter(c => DERIVED_MONEY.test(c.name) && !/^total$/i.test(c.name));
   const durCols = cols.filter(c => DERIVED_DURATION.test(c.name));
   const totalCol = cols.find(c => /^total$/i.test(c.name));
-  if (!moneyCols.length && !durCols.length && !totalCol) return {};
+  // the END time = start + duration: find a start (event) time column and a paired end column
+  const timeCols = cols.filter(c => /^(timestamp|date|time)/.test(c.type) && c.name !== 'created_at');
+  const endCol = timeCols.find(c => END_TIME_COL.test(c.name));
+  const startCol = timeCols.find(c => c !== endCol && !END_TIME_COL.test(c.name));
+  if (!moneyCols.length && !durCols.length && !totalCol && !(endCol && startCol)) return {};
   const fkRows = (await pool.query(
     `select kcu.column_name as col, ccu.table_name as ref
      from information_schema.table_constraints tc
@@ -557,6 +561,11 @@ async function deriveActionFields(pool: pg.Pool, schema: string, table: string, 
   if (unitPrice != null) for (const c of moneyCols) out[c.name] = unitPrice;
   if (unitDur != null) for (const c of durCols) out[c.name] = unitDur;
   if (totalCol && unitPrice != null) out[totalCol.name] = unitPrice;   // single-service booking: total = price
+  // END time = start + service duration (the customer picks only the start)
+  if (endCol && startCol && unitDur != null && (data || {})[startCol.name]) {
+    const s = new Date((data as any)[startCol.name]);
+    if (!isNaN(+s)) out[endCol.name] = new Date(+s + unitDur * 60_000).toISOString();
+  }
   return out;
 }
 
@@ -905,11 +914,20 @@ export async function formColumns(pool: pg.Pool, projectId: string, table: strin
       if (rc.some(n => DERIVED_MONEY.test(n) || DERIVED_DURATION.test(n))) { pricedRef = true; break; }
     }
   }
+  const allCols = await typedColumns(pool, schema, table);
+  // the END time is derived (start + duration) — off the public form whenever a START column exists too
+  let endColName = '';
+  if (audience !== 'owner' && LIFECYCLE_TABLE.test(table)) {
+    const timeCols = allCols.filter(c => /^(timestamp|date|time)/.test(c.type) && c.name !== 'created_at');
+    const endc = timeCols.find(c => END_TIME_COL.test(c.name));
+    if (endc && timeCols.some(c => c !== endc && !END_TIME_COL.test(c.name))) endColName = endc.name;
+  }
   const out: { name: string; type: string; nullable: boolean; ref?: string; display?: string }[] = [];
-  for (const c of await typedColumns(pool, schema, table)) {
+  for (const c of allCols) {
     if (['id', 'created_at'].includes(c.name) || SENSITIVE.test(c.name)) continue;
     if (audience !== 'owner' && SYSTEM_COLS.test(c.name)) continue;   // FS0: a visitor never fills "Status"
     if (pricedRef && !fkMap.has(c.name) && DERIVED_COL.test(c.name)) continue;   // server-derived, off the form
+    if (endColName && c.name === endColName) continue;                            // derived end time, off the form
     const ref = fkMap.get(c.name);
     // a PUBLIC form never shows a dropdown into a private table — its read is sealed, so the options
     // would always be empty (compile makes these nullable, so omitting the field keeps inserts valid)

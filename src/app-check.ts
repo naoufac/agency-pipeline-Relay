@@ -521,6 +521,35 @@ try {
   }
 }
 {
+  // DERIVED END TIME (live-caught on the cutline re-flight): a booking with start_time + end_time must
+  // not ask the CUSTOMER to pick the end — it is start + the service's duration.
+  const { randomUUID } = await import('node:crypto');
+  const eid = randomUUID(); const esch = appdb.schemaName(eid);
+  const pool = (await import('./db.ts')).makePool();
+  try {
+    await appdb.provision(pool, eid, JSON.stringify({ entities: [
+      { name: 'services', public: true, display: 'name', fields: [{ name: 'name', type: 'text', required: true }, { name: 'price', type: 'money', required: true }, { name: 'duration_minutes', type: 'int', required: true }], seed: [{ name: 'Cut', price: 25, duration_minutes: 30 }] },
+      { name: 'bookings', public: false, fields: [
+        { name: 'customer_name', type: 'text', required: true },
+        { name: 'service', type: 'ref:services', required: true },
+        { name: 'start_time', type: 'datetime', required: true },
+        { name: 'end_time', type: 'datetime', required: true }] },
+    ] }));
+    const fcols = (await appdb.formColumns(pool, eid, 'bookings', 'public')).map((c: any) => c.name);
+    ok('booking form OMITS the derived end_time (customer picks only the start)', !fcols.includes('end_time') && fcols.includes('start_time'), fcols.join(','));
+    const start = new Date(Date.now() + 72 * 3_600_000); start.setUTCSeconds(0, 0);
+    const ins = await appdb.insertRow(pool, eid, 'bookings', { customer_name: 'Ivy', email: 'i@b.co', service_id: 1, start_time: start.toISOString() });
+    ok('a booking with NO end_time in the payload still lands (was NOT NULL → would have blocked it)', ins.ok === true, JSON.stringify(ins));
+    const erow = (await pool.query(`select start_time, end_time from "${esch}"."bookings" where ref_token=$1`, [ins.ref])).rows[0];
+    const gap = erow ? (new Date(erow.end_time).getTime() - new Date(erow.start_time).getTime()) / 60000 : -1;
+    ok('end_time DERIVED = start + service duration (30 min)', gap === 30, `gap=${gap}min ${JSON.stringify(erow)}`);
+  } finally {
+    await pool.query(`drop schema if exists "${esch}" cascade`).catch(() => {});
+    await pool.query('delete from projects where id=$1', [eid]).catch(() => {});
+    await pool.end();
+  }
+}
+{
   // a lifecycle table with NO priced ref (donations) keeps its amount as a customer input
   const { randomUUID } = await import('node:crypto');
   const did = randomUUID(); const dsch = appdb.schemaName(did);
