@@ -431,6 +431,9 @@ function project(id, tab, seq){
     const IMGCOL = /image|photo|picture|cover|thumb|banner|avatar|logo/i;
     function fieldInput(c, v){
       const name = esc(c.name), label = esc(c.name.replace(/_/g,' '));
+      // a lifecycle STATUS is a closed set — a dropdown, never typo-prone free text (a bad value
+      // would fail the CHECK or ship a garbage email). The server routes the change as a real transition.
+      if (c.name==='status') { const cur=String(v??'pending'); return `<label>${label}<select name="${name}">${['pending','confirmed','declined','cancelled','completed','new'].map(s=>`<option value="${s}"${s===cur?' selected':''}>${s}</option>`).join('')}</select></label>`; }
       if (c.ref) return `<label>${label}<select name="${name}" data-cref="${esc(c.ref)}" data-cur="${esc(String(v??''))}"><option value="">— none —</option></select></label>`;
       if (/bool/.test(c.type)) return `<label class="rcheck" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="${name}" data-cbool="1"${(v===true||v==='true')?' checked':''}> ${label}</label>`;
       if (/timestamp/.test(c.type)) return `<label>${label}<input name="${name}" type="datetime-local" value="${esc(String(v??'').slice(0,16))}"></label>`;

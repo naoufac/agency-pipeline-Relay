@@ -170,6 +170,41 @@ try {
     }
   }
 
+  // ---- OWNER dashboard status change: the ONE canonical transition (localized, CAS, legal) ----
+  {
+    const { ownerSetStatus } = await import('./lifecycle.ts');
+    const oid = randomUUID(); const osch = appdb.schemaName(oid);
+    try {
+      await pool.query(`insert into projects(id, brief, status, params) values ($1,'owner status','done',$2)`,
+        [oid, JSON.stringify({ slug: 'ownerstatus-x', locale: 'fr', schema_forms: { actionTable: 'bookings' } })]);
+      await appdb.provision(pool, oid, JSON.stringify({ entities: [
+        { name: 'staff', public: true, display: 'name', fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Ola' }] },
+        { name: 'bookings', public: false, fields: [
+          { name: 'customer_name', type: 'text', required: true },
+          { name: 'staff', type: 'ref:staff', required: true },
+          { name: 'starts_at', type: 'datetime', required: true }] },
+      ] }));
+      const bk = await appdb.insertRow(pool, oid, 'bookings', { customer_name: 'Owned', email: 'owned@example.com', staff_id: 1, starts_at: new Date(Date.now() + 96 * 3_600_000).toISOString() });
+      const rid = (await pool.query(`select id from "${osch}"."bookings" where ref_token=$1`, [bk.ref])).rows[0].id;
+      // a bad status value is refused (no garbage into the CHECK / no garbage email)
+      ok('owner status: an out-of-set value is refused', (await ownerSetStatus(pool, oid, 'bookings', rid, 'confirmd')).error === 'bad_status');
+      // legal transition pending → confirmed, and the visitor is notified in the SITE locale (fr)
+      const cf = await ownerSetStatus(pool, oid, 'bookings', rid, 'confirmed');
+      const st = (await pool.query(`select status from "${osch}"."bookings" where id=$1`, [rid])).rows[0].status;
+      ok('owner status: a legal transition lands (pending → confirmed)', cf.ok === true && st === 'confirmed');
+      ok('owner status: a lifecycle transition is logged (event, not self-reported)',
+        Number((await pool.query("select count(*)::int n from run_events where project_id=$1 and type='lifecycle_confirmed' and detail like '%by owner%'", [oid])).rows[0].n) === 1);
+      // terminal states are terminal — cancelled cannot be un-cancelled
+      await ownerSetStatus(pool, oid, 'bookings', rid, 'cancelled');
+      ok('owner status: a terminal state is immutable (cancelled ✗→ confirmed)', (await ownerSetStatus(pool, oid, 'bookings', rid, 'confirmed')).error === 'illegal');
+      ok('owner status: an unknown row is not_found', (await ownerSetStatus(pool, oid, 'bookings', 999999, 'confirmed')).error === 'not_found');
+    } finally {
+      await pool.query(`drop schema if exists "${osch}" cascade`).catch(() => {});
+      await pool.query('delete from run_events where project_id=$1', [oid]).catch(() => {});
+      await pool.query('delete from projects where id=$1', [oid]).catch(() => {});
+    }
+  }
+
   // ---- source pins: routes wired, GET never mutates, links ride the lead mail ----
   const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
   ok('server: the act route exists and rides the read rate-cap', /\/act\$\/\)/.test(serverSrc) && /actM[\s\S]{0,200}readLimited/.test(serverSrc));
@@ -242,6 +277,12 @@ try {
   ok('render: the client relayCancel fn is emitted and localized', (await import('node:fs')).readFileSync(new URL('./render.ts', import.meta.url), 'utf8').includes('window.relayCancel=function'));
   const lcSrc = (await import('node:fs')).readFileSync(new URL('./lifecycle.ts', import.meta.url), 'utf8');
   ok('lifecycle: BOTH status writes are compare-and-swap (guarded on the validated status)', (lcSrc.match(/where "ref_token"=\$\d and "status"=\$\d/g) || []).length >= 2 && lcSrc.includes('upd.rowCount'));
+  ok('lifecycle: the owner status change is localized + CAS (one canonical transition, no English drift)',
+    /ownerSetStatus/.test(lcSrc) && /L\(proj\.loc, `mail_status_\$\{next\}_subject`/.test(lcSrc) && /set "status"=\$1 where id=\$2 and "status"=\$3/.test(lcSrc));
+  ok('server: the board PATCH routes status through ownerSetStatus (not a blind update + English mail)',
+    serverSrc.includes('ownerSetStatus(pool, sid, table, rid, statusChange)') && !/Your \$\{label\} is \$\{String\(b\.data\.status\)/.test(serverSrc));
+  ok('board: the Content edit form renders status as a closed dropdown (no typo-prone free text)',
+    (await import('node:fs')).readFileSync(new URL('../web/app.js', import.meta.url), 'utf8').includes("c.name==='status'") && (await import('node:fs')).readFileSync(new URL('../web/app.js', import.meta.url), 'utf8').includes("['pending','confirmed','declined','cancelled','completed','new']"));
   const { clientDict } = await import('./i18n.ts');
   ok('i18n: the cancel strings ship to the client dictionary (5 locales gated elsewhere)', !!clientDict('en').cancel_confirm_q && !!clientDict('it').cancel_done);
 } catch (e: any) {

@@ -12,7 +12,7 @@
 import pg from 'pg';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import * as appdb from './appdb.ts';
-import { LIFECYCLE_TABLE, PRIVATE_READ, pickWhenColumn } from './schema.ts';
+import { LIFECYCLE_TABLE, PRIVATE_READ, pickWhenColumn, STATUS_SET } from './schema.ts';
 import { sendMail, isQaProbe, mailReady } from './mail.ts';
 import { L, isLocale } from './i18n.ts';
 import { ev } from './db.ts';
@@ -153,6 +153,48 @@ export async function cancelByVisitor(pool: pg.Pool, projectId: string, table: s
       `A customer cancelled their ${table.replace(/s$/, '').replace(/_/g, ' ')}:\n\n${who}${when ? `\nWas: ${when.toISOString()}` : ''}\n\nThe slot is now free again.`).catch(() => {});
   }
   return { ok: true, status: 'cancelled' };
+}
+
+// what the OWNER may transition a lifecycle row to, from each current state. Terminal states stay
+// terminal (re-book instead of un-cancelling). Broader than the visitor's (owner can also complete).
+const OWNER_TRANSITIONS: Record<string, string[]> = {
+  pending: ['confirmed', 'declined', 'cancelled', 'completed'],
+  confirmed: ['declined', 'cancelled', 'completed'],
+  new: ['completed', 'cancelled'],            // store orders
+  declined: [], cancelled: [], completed: [],
+};
+
+// THE ONE owner status-change path (dashboard Content tab). Before this, the board PATCH did its own
+// blind UPDATE + a hardcoded ENGLISH email — a second, drifting implementation of the same transition
+// the email links perform. Now the board routes here: legal transitions only, compare-and-swap (no
+// race with the email links / the visitor cancel), and a LOCALIZED visitor notification. (2026-07-05)
+export async function ownerSetStatus(pool: pg.Pool, projectId: string, table: string, rowId: number, next: string): Promise<{ ok: boolean; error?: 'not_found' | 'bad_status' | 'illegal'; status?: string }> {
+  if (!LIFECYCLE_TABLE.test(table) || !IDENT.test(table)) return { ok: false, error: 'not_found' };
+  if (!STATUS_SET.includes(next)) return { ok: false, error: 'bad_status' };
+  const schema = appdb.schemaName(projectId);
+  const row = (await pool.query(`select * from "${schema}"."${table}" where id=$1`, [rowId])).rows[0];
+  if (!row) return { ok: false, error: 'not_found' };
+  const cur = String(row.status || 'pending');
+  if (cur === next) return { ok: true, status: cur };
+  if (!(OWNER_TRANSITIONS[cur] || []).includes(next)) return { ok: false, error: 'illegal', status: cur };
+  const upd = await pool.query(`update "${schema}"."${table}" set "status"=$1 where id=$2 and "status"=$3`, [next, rowId, cur]);
+  if (!upd.rowCount) {
+    const ns = String((await pool.query(`select status from "${schema}"."${table}" where id=$1`, [rowId])).rows[0]?.status || cur);
+    return { ok: ns === next, error: ns === next ? undefined : 'illegal', status: ns };
+  }
+  await ev(pool, projectId, null, 'lifecycle_' + next, `${table} · #${rowId} (by owner)`).catch(() => {});
+  // the visitor hears the verdict — LOCALIZED, with their receipt link (confirmed/declined/cancelled only)
+  if (['confirmed', 'declined', 'cancelled'].includes(next) && !isQaProbe(row)) {
+    const proj = (await pool.query("select params->>'slug' as slug, params->>'locale' as loc from projects where id=$1", [projectId])).rows[0];
+    const vmail = String(row.email || row.customer_email || '').trim();
+    if (proj && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(vmail)) {
+      const base = proj.slug ? `https://${proj.slug}.naples.agency` : `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/sites/${projectId}`;
+      const thing = table.replace(/s$/, '').replace(/_/g, ' ');
+      const link = row.ref_token ? `${base}/receipt-${table}-${row.ref_token}.html` : base;
+      sendMail(pool, projectId, vmail, L(proj.loc, `mail_status_${next}_subject`, { x: thing }), L(proj.loc, `mail_status_${next}_body`, { x: thing, link })).catch(() => {});
+    }
+  }
+  return { ok: true, status: next };
 }
 
 export async function ensureLifecycleTables(pool: pg.Pool): Promise<void> {

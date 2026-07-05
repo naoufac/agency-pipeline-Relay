@@ -642,20 +642,19 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (table && rid !== null && (req.method === 'PATCH' || req.method === 'PUT')) {
         let raw = ''; for await (const c of req) raw += c;
         let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
-        const ok = await appdb.updateRow(pool, sid, table, rid, (b && b.data) || {});
-        // FS3 · the loop closes: when the OWNER flips a lifecycle status, the VISITOR hears about it
-        // by email (with their receipt link) — recorded in the sent-mail ledger, never self-reported.
-        if (ok && b?.data && typeof b.data.status === 'string' && LIFECYCLE_TABLE.test(table)) {
-          try {
-            const c2 = await appdb.rowContact(pool, sid, table, rid);
-            if (c2) {
-              const label = table.replace(/_/g, ' ').replace(/ies$/, 'y').replace(/s$/, '');
-              const link = c2.ref ? `\n\nSee it here: ${(process.env.PUBLIC_URL || 'https://board.naples.agency')}/sites/${sid}/receipt-${table}-${c2.ref}.html` : '';
-              sendMail(pool, sid, c2.email, `Your ${label} is ${String(b.data.status).toLowerCase()}`, `Update on your ${label}: it is now ${String(b.data.status).toUpperCase()}.${link}`).catch(() => {});
-            }
-          } catch (e: any) { console.error('status notify', sid, table, rid, e?.message ?? e); }
+        const data = (b && b.data && typeof b.data === 'object') ? { ...b.data } : {};
+        // FS3 · a lifecycle STATUS change is not a plain field edit — it is a lifecycle TRANSITION.
+        // Split it out and route it through the ONE canonical path (legal transitions, compare-and-swap,
+        // LOCALIZED visitor notification) instead of a blind write + hardcoded English email.
+        const statusChange = (LIFECYCLE_TABLE.test(table) && typeof data.status === 'string') ? String(data.status) : null;
+        if (statusChange !== null) delete data.status;
+        const fieldsOk = Object.keys(data).length ? await appdb.updateRow(pool, sid, table, rid, data) : true;
+        let sres: { ok: boolean; error?: string } = { ok: true };
+        if (statusChange !== null) {
+          const lc = await import('./lifecycle.ts');
+          sres = await lc.ownerSetStatus(pool, sid, table, rid, statusChange);
         }
-        return send(res, ok ? 200 : 400, 'application/json', JSON.stringify({ ok }));
+        return send(res, (fieldsOk && sres.ok) ? 200 : 400, 'application/json', JSON.stringify({ ok: fieldsOk && sres.ok, ...(sres.error ? { error: sres.error } : {}) }));
       }
       // delete one record
       if (table && rid !== null && req.method === 'DELETE') {
