@@ -16,6 +16,8 @@ type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archety
 const verifyFor = (d: string): string => {
   if (d === 'branding') return 'wcag';
   if (/databas|schema|backend|datamodel/.test(d) || d === 'data' || d === 'sql') return 'app_db';  // provision a real, isolated per-project schema
+  if (d === 'policies') return 'policies_ok';        // closed-schema clamp → params.policies → guards enforce
+  if (d === 'integrations') return 'calendar_feed';  // mints the key and BUILDS the real ICS feed
   if (/copy|content|writ/.test(d)) return 'json';
   return 'min:280';
 };
@@ -117,6 +119,17 @@ function validate(plan: any, brief: string): Plan | null {
   if (needsData(archetype) && !tasks.some(t => verifyFor(t.department) === 'app_db')) {
     tasks.push({ seq: tasks.length + 1, title: 'Data model (database schema)', department: 'database',
       verify: 'sql_applies', depends_on: [1], artifact: null });
+  }
+  // DEEPER APP PRODUCTION (owner 2026-07-05: '14 steps are not enough'): every app/store also
+  // gets BUSINESS RULES (LLM proposes, the verify clamps, the guards enforce) and OWNER
+  // INTEGRATIONS (deterministic: calendar key + a real ICS feed built and proven).
+  if (needsData(archetype)) {
+    if (!tasks.some(t => t.department === 'policies'))
+      tasks.push({ seq: tasks.length + 1, title: 'Business rules (notice, capacity, cancellation)', department: 'policies', verify: 'policies_ok', depends_on: [1], artifact: null });
+    if (!tasks.some(t => t.department === 'integrations')) {
+      const dbSeq = tasks.find(t => verifyFor(t.department) === 'app_db')?.seq || 1;
+      tasks.push({ seq: tasks.length + 1, title: 'Owner integrations (live calendar feed)', department: 'integrations', verify: 'calendar_feed', depends_on: [dbSeq], artifact: null });
+    }
   }
 
   // bind every department to its REAL gate (database -> sql_applies, branding -> wcag, copy/content -> json);

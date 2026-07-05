@@ -394,5 +394,55 @@ try {
   await pool.query(`drop schema if exists "${schema}" cascade`).catch(() => {});
   await pool.query('delete from projects where id=$1', [id]).catch(() => {});
 }
+// ---- PIPELINE DEPTH (owner: '14 steps are not enough') — policies · calendar · confirmation ----
+{
+  const id3 = randomUUID();
+  const schema3 = 'app_' + id3.replace(/-/g, '').slice(0, 32);
+  try {
+    // a scratch booking app with a slot table + LOCKED policies (as the policies step would store)
+    await pool.query(`insert into projects(id, brief, status, params) values ($1,'depth scratch','done',$2)`,
+      [id3, JSON.stringify({ slug: 'depth-scratch-x', policies: { min_notice_hours: 24, cancellation_hours: 24, capacity_per_slot: 2, max_party_size: 8 }, schema_forms: { actionTable: 'appointments' } })]);
+    await appdb.provision(pool, id3, JSON.stringify({ entities: [
+      { name: 'barbers', public: true, display: 'name', fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Gino' }] },
+      { name: 'appointments', public: false, fields: [
+        { name: 'customer_name', type: 'text', required: true },
+        { name: 'barber', type: 'ref:barbers', required: true },
+        { name: 'starts_at', type: 'datetime', required: true }] },
+    ] }));
+    // POLICIES: min-notice rejected in the SITE's terms; far-future accepted
+    const soon = new Date(Date.now() + 60 * 60_000).toISOString();
+    const far = new Date(Date.now() + 72 * 3_600_000).toISOString();
+    const r1 = await appdb.insertRow(pool, id3, 'appointments', { customer_name: 'A', email: 'a@b.co', barber_id: 1, starts_at: soon });
+    ok('policies: a booking inside the min-notice window is REJECTED with the localized rule', !r1.ok && /24h|24 /.test(String(r1.error)), String(r1.error));
+    const r2 = await appdb.insertRow(pool, id3, 'appointments', { customer_name: 'B', email: 'b@b.co', barber_id: 1, starts_at: far });
+    ok('policies: a compliant booking lands', r2.ok === true, String(r2.error || ''));
+    // capacity_per_slot=2: the SAME slot accepts a second booking, rejects the third
+    const r3 = await appdb.insertRow(pool, id3, 'appointments', { customer_name: 'C', email: 'c@b.co', barber_id: 1, starts_at: far });
+    const r4 = await appdb.insertRow(pool, id3, 'appointments', { customer_name: 'D', email: 'd@b.co', barber_id: 1, starts_at: far });
+    ok('policies: capacity_per_slot=2 admits two, rejects the third', r3.ok === true && r4.ok === false, JSON.stringify({ r3: r3.ok, r4: r4.error }));
+    // CALENDAR: key mints once, feed carries the real bookings
+    const { calKeyFor, buildIcs } = await import('./ics.ts');
+    const k1 = await calKeyFor(pool, id3); const k2 = await calKeyFor(pool, id3);
+    ok('calendar: the key mints once and is stable', k1 === k2 && /^[0-9a-f]{32}$/.test(k1));
+    const ics = await buildIcs(pool, id3);
+    ok('calendar: the ICS feed carries exactly the two landed bookings', !!ics && ics.startsWith('BEGIN:VCALENDAR') && (ics.match(/BEGIN:VEVENT/g) || []).length === 2, `events=${(String(ics).match(/BEGIN:VEVENT/g) || []).length}`);
+  } finally {
+    await pool.query(`drop schema if exists "${schema3}" cascade`).catch(() => {});
+    await pool.query('delete from projects where id=$1', [id3]).catch(() => {});
+  }
+}
+{
+  // the DAG grows: an app plan (LLM-less fallback path) must include the two new steps
+  process.env.RELAY_PLAN_FALLBACK_TEST = '1';
+  const { planTasksForTest } = await import('./planner.ts').catch(() => ({ planTasksForTest: null } as any));
+  const server = (await import('node:fs')).readFileSync(new URL('./planner.ts', import.meta.url), 'utf8');
+  ok('planner: app plans grow the policies + integrations steps (deterministic injection)', server.includes("department: 'policies'") && server.includes("department: 'integrations'") && server.includes("verify: 'calendar_feed'"));
+  const runnerSrc = (await import('node:fs')).readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
+  ok('runner: integrations is a DETERMINISTIC department (no LLM call)', /department === 'integrations'[\s\S]{0,300}deterministic wiring/.test(runnerSrc));
+  const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+  ok('server: calendar.ics route is key-auth\'d + rate-capped', serverSrc.includes('calendar\\.ics') && /wantKey !== haveKey/.test(serverSrc) && /icsM && req\.method === 'GET'[\s\S]{0,200}readLimited/.test(serverSrc));
+  ok('server: visitor confirmation mail rides the insert (localized, receipt link)', serverSrc.includes('mail_confirm_subject') && serverSrc.includes("receipt-${dataM[2]}-${r.ref}"));
+}
+
 console.log(`\napp:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

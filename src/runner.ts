@@ -171,6 +171,12 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       content = JSON.stringify(page);
       await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
       await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+    } else if (task.department === 'integrations') {
+      // DETERMINISTIC department — no LLM: the verify (calendar_feed) does ALL the work
+      // (mints the key, builds the real feed). The content is just an honest marker.
+      content = 'integrations: deterministic wiring — see verify log';
+      await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+      await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
     } else {
       const result = await runAgentTracked(task.department, ctx);  // the agent: text in -> text + per-call meta out
       // A/B instrumentation (Task 10): record provider/model + latency BEFORE anything else (even a failed call),

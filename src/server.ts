@@ -261,6 +261,21 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       return send(res, 404, 'text/plain', 'site not found');
     }
+    // OWNER CALENDAR FEED: bookings as iCalendar — paste once into Google/Apple Calendar.
+    // The key is the auth (calendar apps cannot sign in), minted by the integrations step.
+    const icsM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/calendar\.ics$/);
+    if (icsM && req.method === 'GET') {
+      if (readLimited(clientIp(req))) return send(res, 429, 'text/plain', 'rate limited');
+      const wantKey = url.searchParams.get('key') || '';
+      const haveKey = (await pool.query("select params->>'cal_key' as k from projects where id=$1", [icsM[1]])).rows[0]?.k;
+      if (!haveKey || wantKey !== haveKey) return send(res, 404, 'text/plain', 'not found');
+      const { buildIcs } = await import('./ics.ts');
+      const ics = await buildIcs(pool, icsM[1]);
+      if (!ics) return send(res, 404, 'text/plain', 'no calendar for this site');
+      res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8', 'cache-control': 'no-cache' });
+      res.end(ics);
+      return;
+    }
     // ANDROID surface: GET = is there an app / is one being packaged; POST = package this site.
     // Owner-gated like every project API (404, never 403 — existence is not leaked).
     if (path === '/api/apk') {
@@ -356,8 +371,17 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         if (!publicWriteTables(sitep).includes(dataM[2])) return send(res, 404, 'application/json', '{"ok":false,"error":"this site has no such form"}');
         const r = await appdb.insertRow(pool, dataM[1], dataM[2], data);
         if (r.ok) {
-          const proj = (await pool.query('select brief from projects where id=$1', [dataM[1]])).rows[0];
+          const proj = (await pool.query("select brief, params->>'slug' as slug, params->>'locale' as loc from projects where id=$1", [dataM[1]])).rows[0];
           if (proj) notifyLead(pool, dataM[1], proj.brief, dataM[2], data);   // typed rows are leads too
+          // VISITOR CONFIRMATION (the notifications leg): a booking with an email gets its receipt
+          // link by mail, in the site's language — fire-and-forget, mailReady-guarded inside sendMail
+          const vmail = String(data.email || data.customer_email || '').trim();
+          if (r.ref && proj && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(vmail)) {
+            const { L } = await import('./i18n.ts');
+            const base = proj.slug ? `https://${proj.slug}.naples.agency` : `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/sites/${dataM[1]}`;
+            const thing = dataM[2].replace(/s$/, '').replace(/_/g, ' ');
+            sendMail(pool, dataM[1], vmail, L(proj.loc, 'mail_confirm_subject', { x: thing }), L(proj.loc, 'mail_confirm_body', { x: thing, link: `${base}/receipt-${dataM[2]}-${r.ref}.html` })).catch(() => {});
+          }
         }
         // FS1: the receipt ref rides back so the form can land the visitor on their receipt page
         return send(res, r.ok ? 200 : 400, 'application/json', JSON.stringify(r.ref ? { ok: r.ok, ref: r.ref, table: dataM[2] } : { ok: r.ok, ...(r.error ? { error: r.error } : {}) }));
@@ -485,7 +509,13 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const sid = contentM[1], table = contentM[2], rid = contentM[3] ? Number(contentM[3]) : null;
       // list the editable collections
       if (!table && req.method === 'GET') {
-        try { return send(res, 200, 'application/json', JSON.stringify({ collections: await appdb.contentTables(pool, sid) })); }
+        try {
+          const collections = await appdb.contentTables(pool, sid);
+          // the OWNER's calendar link rides along (key-auth'd feed from the integrations step)
+          const ck = (await pool.query("select params->>'cal_key' as k from projects where id=$1", [sid])).rows[0]?.k;
+          const calUrl = ck ? `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/api/site/${sid}/calendar.ics?key=${ck}` : null;
+          return send(res, 200, 'application/json', JSON.stringify({ collections, calUrl }));
+        }
         catch { return send(res, 200, 'application/json', '{"collections":[]}'); }
       }
       // list one collection's rows + its editable columns (for the admin table + edit form)

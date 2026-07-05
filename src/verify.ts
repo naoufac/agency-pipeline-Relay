@@ -106,6 +106,37 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     finally { c.release(); }
   }
 
+  if (rule === 'policies_ok') {
+    // BUSINESS RULES with a CLOSED schema — the LLM proposes, the clamp DECIDES. Whatever passes
+    // here is stored on the project and ENFORCED by the slot/order guards (deterministically).
+    const obj = firstJson(content);
+    if (!obj || typeof obj !== 'object') return { ok: false, log: 'policies must be a JSON object' };
+    const num = (v: any, lo: number, hi: number, dflt: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : dflt; };
+    const clamped = {
+      min_notice_hours: num((obj as any).min_notice_hours, 0, 336, 0),
+      cancellation_hours: num((obj as any).cancellation_hours, 0, 336, 24),
+      capacity_per_slot: num((obj as any).capacity_per_slot, 1, 500, 1),
+      max_party_size: num((obj as any).max_party_size, 1, 500, 12),
+    };
+    await pool.query("update projects set params = jsonb_set(params, '{policies}', $2::jsonb, true) where id=$1", [task.project_id, JSON.stringify(clamped)]);
+    return { ok: true, log: `policies locked: notice ${clamped.min_notice_hours}h · cancel ${clamped.cancellation_hours}h · capacity ${clamped.capacity_per_slot}/slot · party ≤ ${clamped.max_party_size}` };
+  }
+
+  if (rule === 'calendar_feed') {
+    // OWNER INTEGRATION, proven for real: mint the calendar key and BUILD the actual ICS feed.
+    // A site without a timestamped action table honestly has no feed — the step still passes
+    // (wired, empty) but says so; a feed that fails to build FAILS the step.
+    try {
+      const { calKeyFor, buildIcs } = await import('./ics.ts');
+      const key = await calKeyFor(pool, task.project_id);
+      const ics = await buildIcs(pool, task.project_id);
+      if (ics === null) return { ok: true, log: `calendar key minted (${key.slice(0, 6)}…) — no timestamped action table, feed not applicable` };
+      if (!ics.startsWith('BEGIN:VCALENDAR')) return { ok: false, log: 'ICS generator produced a malformed feed' };
+      const events = (ics.match(/BEGIN:VEVENT/g) || []).length;
+      return { ok: true, log: `calendar feed LIVE: /api/site/${task.project_id}/calendar.ics (${events} event(s) now)` };
+    } catch (e: any) { return { ok: false, log: 'calendar wiring failed: ' + (e?.message ?? e) }; }
+  }
+
   if (rule === 'app_db') {
     // Stronger than sql_applies: PROVISION the project's own isolated schema (app_<hex>) for real and
     // prove the tables now exist. The app runs on a live DB, not a file. Confined to its namespace.

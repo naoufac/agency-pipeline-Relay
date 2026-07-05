@@ -34,6 +34,7 @@ export type Ctx = { brief: string; upstream: { seq: number; department: string; 
 
 // One-line role per department — the only thing that differs between agents.
 const ROLE: Record<string, string> = {
+  policies:    'You are the Operations department. From the brief, decide the REAL business rules for this specific business and output ONLY a JSON object (no prose): {"min_notice_hours":<int 0-336, how many hours ahead a visitor must book>,"cancellation_hours":<int 0-336>,"capacity_per_slot":<int 1-500, simultaneous bookings per time slot>,"max_party_size":<int 1-500>}. Ground every number in the business type (a barber: notice 1-2h, capacity 1; a restaurant: notice 2-4h, capacity = tables, party up to 10; a store: notice 0). JSON only.',
   research:    'You are the Research department of an automated creative agency. From the brief, output concise market & positioning research. Plain text.',
   branding:    'You are the Branding department. Invent ONE real, specific brand/business name for this brief, then a palette. Output ONLY a JSON object: {"name":"<the brand name>","palette":{"primary":"#hex","accent":"#hex","bg":"#hex","text":"#hex"},"type":{"display":"Font","body":"Font"},"radius":"12px"}. The "name" is the site\'s SINGLE identity — it becomes the logo and must be the only business name used across every page. CRITICAL: text vs bg MUST meet WCAG AA contrast (>=4.5:1) — dark text on a light bg or vice-versa. JSON only, no prose.',
   stack:       'You are the Stack department. Decide the tech stack and state it in one short paragraph.',

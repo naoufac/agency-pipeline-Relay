@@ -972,3 +972,21 @@ The M3 certification flight then caught TWO model-independent classes:
 · HOLLOW CATALOG — M3 seeded ZERO rows and the empty barbershop passed review. Floor:
   a public catalog-ish table with no seeds is REJECTED at normalize (the LLM retries with
   the message); private tables and non-catalog publics exempt (spec 166).
+
+## 2026-07-05 — PIPELINE DEPTH: '14 steps are not enough' — apps now ship RULES, a CALENDAR, and CONFIRMATIONS
+
+Owner's directive: deeper full-stack production. Three REAL steps, each verified:
+· POLICIES (new LLM dept, closed-schema verify): the model proposes {min_notice_hours,
+  cancellation_hours, capacity_per_slot, max_party_size} grounded in the business; the
+  verify CLAMPS into params.policies; the guards ENFORCE — a booking inside the notice
+  window is rejected in the site's language (err_too_soon ×5 locales), capacity_per_slot
+  floors the slot guard. Proven live in-suite: 1h-ahead rejected, 72h lands, third booking
+  on a capacity-2 slot refused.
+· INTEGRATIONS (new deterministic dept, no LLM): mints a per-project calendar key and
+  BUILDS the real ICS feed as its verify. GET /api/site/:id/calendar.ics?key= — the owner
+  pastes ONE link into Google/Apple Calendar and every booking lands on their phone, live.
+  📅 button in the board's Content tab copies it.
+· CONFIRMATIONS: a booking with an email now mails the visitor their receipt link, in the
+  site's language (mail_confirm_* ×5) — fire-and-forget, mailReady-guarded.
+App/store DAGs grow 14 → 16 verified steps, visible on the board and the chain page.
+9 new gates (app 181); 18 suites green.

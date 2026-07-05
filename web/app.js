@@ -355,7 +355,8 @@ function project(id, tab, seq){
       let d; try { d = await j(`/api/site/${id}/content`); } catch { d = { collections: [] }; }
       const el = document.getElementById('cbody');
       if (!d.collections || !d.collections.length){ el.innerHTML = `<div class="empty">This site has no editable content collections${me?'':' — sign in as the owner to edit'}.</div>`; return; }
-      el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:18px">${d.collections.map((c,i)=>`<button class="btn btn-sm ${i?'btn-ghost':''}" data-coll="${esc(c.table)}">${esc(c.label)} <span class="muted">· ${c.rows}</span></button>`).join('')}</div><div id="coll"></div>`;
+      el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:18px">${d.collections.map((c,i)=>`<button class="btn btn-sm ${i?'btn-ghost':''}" data-coll="${esc(c.table)}">${esc(c.label)} <span class="muted">· ${c.rows}</span></button>`).join('')}${d.calUrl?`<button class="btn btn-sm btn-ghost" id="calbtn" title="Paste this link into Google/Apple Calendar — your bookings appear on your phone, live">📅 Calendar feed</button>`:''}</div><div id="coll"></div>`;
+      if (d.calUrl){ const cb=el.querySelector('#calbtn'); if(cb) cb.onclick=()=>{ navigator.clipboard?.writeText(d.calUrl); cb.textContent='📅 Link copied ✓'; setTimeout(()=>cb.textContent='📅 Calendar feed',1800); }; }
       el.querySelectorAll('[data-coll]').forEach(bt=>bt.onclick=()=>{ el.querySelectorAll('[data-coll]').forEach(x=>x.classList.add('btn-ghost')); bt.classList.remove('btn-ghost'); openCollection(bt.getAttribute('data-coll')); });
       openCollection(d.collections[0].table);
     }

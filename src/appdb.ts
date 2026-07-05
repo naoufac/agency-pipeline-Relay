@@ -567,13 +567,24 @@ async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table
     (/^(date|timestamp|time)/.test(c.type) && c.name !== 'created_at'));
   const used = coord.filter(c => data[c.name] !== undefined && data[c.name] !== null && data[c.name] !== '');
   if (used.length < 2 || !used.some(c => /^(date|timestamp|time)/.test(c.type))) return null;   // not slot-shaped — never wrongly forced
+  // BUSINESS RULES (the policies step): min-notice is enforced HERE, deterministically — the
+  // clamped params.policies decide, never the model at request time.
+  const pol = (await pool.query("select params->'policies' as p from projects where id=$1", [projectId])).rows[0]?.p || {};
+  const notice = Number(pol.min_notice_hours) || 0;
+  if (notice > 0) {
+    const whenCol = used.find(c => /^(date|timestamp)/.test(c.type));
+    const when = whenCol ? new Date(coerce(data[whenCol.name], whenCol.type)) : null;
+    if (when && !isNaN(+when) && +when < Date.now() + notice * 3_600_000) {
+      return L(await localeOf(pool, projectId), 'err_too_soon', { n: notice });
+    }
+  }
   const hasStatus = cols.some(c => c.name === 'status');
   const where = used.map((c, i) => `"${c.name}"=$${i + 1}`).join(' and ');
   const taken = Number((await pool.query(
     `select count(*)::int n from "${schema}"."${table}" where ${where}${hasStatus ? ` and coalesce("status",'pending') not in ('declined','cancelled')` : ''}`,
     used.map(c => coerce(data[c.name], c.type)))).rows[0].n);
-  // capacity: the first booked-resource row that declares one
-  let capacity = 1;
+  // capacity: the first booked-resource row that declares one; the policies step sets the floor
+  let capacity = Math.max(1, Number(pol.capacity_per_slot) || 1);
   try {
     const fks = (await pool.query(
       `select kcu.column_name as col, ccu.table_name as ref
