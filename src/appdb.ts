@@ -144,12 +144,20 @@ export async function migrate(pool: pg.Pool, projectId: string, content: string,
       [/phone|mobile|\btel/i, (f) => f === 'text'],
       [/(^|_)(customer_|client_|full_|contact_|guest_)?name$/i, (f) => f === 'text'],
     ];
+    // a new column is a semantic TWIN only of an existing column the model is DROPPING — i.e. a
+    // rename (booking_time → appointment_at). If the model STILL wants the existing column, the new
+    // one is a genuinely distinct field (appointment_at kept + birth_date added) and must NOT collapse
+    // into it, or real data lands in the wrong column. (adversarial audit 2026-07-05)
+    const wanted = new Set(resolved.cols[t].map((c: any) => c.name));
+    // never twin ONTO a system-managed column — created_at matches the when-class via `_at$`, so a genuine
+    // new date field (date_of_birth) would silently map to the row's timestamp. (adversarial audit 2026-07-05)
+    const isSysCol = (n: string) => /^(id|created_at|updated_at|ref_token)$/i.test(n) || SENSITIVE.test(n);
     const twinOf = (nc: any): string | null => {
       if (!PRIVATE_READ.test(t) || nc.ref) return null;
       const fam = typeFamily(nc.type);
       for (const [re, famOk] of TWIN_CLASSES) {
         if (!re.test(nc.name) || !famOk(fam)) continue;
-        for (const [hn, hc] of have) if (hn !== nc.name && re.test(hn) && famOk(typeFamily((hc as any).type))) return hn;
+        for (const [hn, hc] of have) if (hn !== nc.name && !wanted.has(hn) && !isSysCol(hn) && re.test(hn) && famOk(typeFamily((hc as any).type))) return hn;
       }
       return null;
     };
@@ -537,19 +545,38 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
       const m = String(data[c.name] ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
       if (m && m[1] < today) { const l2 = await localeOf(pool, projectId); return { ok: false, error: L(l2, 'err_past_date', { f: columnLabel(l2, c.name, c.name.replace(/_/g, ' ')).toLowerCase() }) }; }
     }
-    if (SLOT_TABLE.test(table)) {
-      const slotErr = await slotGuard(pool, projectId, schema, table, cols, data);
-      if (slotErr) return { ok: false, error: slotErr };
-    }
   }
+  const isSlot = audience !== 'owner' && PRIVATE_READ.test(table) && SLOT_TABLE.test(table);
   const names = use.map(c => `"${c.name}"`); const vals: any[] = use.map(c => coerce(data[c.name], c.type));
   let ref: string | undefined;
   if (PRIVATE_READ.test(table) && cols.some(c => c.name === 'ref_token')) {
     ref = randomBytes(16).toString('hex');
     names.push('"ref_token"'); vals.push(ref);
   }
+  const insertSql = `insert into "${schema}"."${table}" (${names.join(',')}) values (${vals.map((_, i) => '$' + (i + 1)).join(',')})`;
+  // SLOT PATH: the capacity check (count) and the insert must be ATOMIC or two concurrent bookings both
+  // see an open slot and both land. A transaction + advisory lock on the table serializes same-table
+  // bookings (human-paced, so the lock is held microseconds); the guard's count now reads the locked view.
+  if (isSlot) {
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [`${schema}.${table}`]);
+      const slotErr = await slotGuard(pool, projectId, schema, table, cols, data, client);
+      if (slotErr) { await client.query('rollback'); return { ok: false, error: slotErr }; }
+      await client.query(insertSql, vals);
+      await client.query('commit');
+      return { ok: true, ref };
+    } catch (e: any) {
+      await client.query('rollback').catch(() => {});
+      if (e?.code === '23505') return { ok: false, error: L(await localeOf(pool, projectId), 'err_slot_taken') };   // unique race
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
   try {
-    await pool.query(`insert into "${schema}"."${table}" (${names.join(',')}) values (${vals.map((_, i) => '$' + (i + 1)).join(',')})`, vals);
+    await pool.query(insertSql, vals);
   } catch (e: any) {
     if (e?.code === '23505') return { ok: false, error: L(await localeOf(pool, projectId), 'err_slot_taken') };   // unique race
     throw e;
@@ -561,7 +588,10 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
 // coordinates are the booked resource FKs (never the customer-ish ones) plus the date/time columns
 // actually submitted; a slot holds ONE booking unless the booked resource row declares a `capacity`
 // (a class with 12 spots books 12 times). Cancelled/declined rows free their slot.
-async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table: string, cols: { name: string; type: string }[], data: Record<string, any>): Promise<string | null> {
+// `q` is the queryable the CONTENDED count runs on — the caller passes a transaction client holding an
+// advisory lock so count-then-insert can't race two bookings into one slot. Metadata reads stay on the
+// pool (schema shape is stable). Defaults to the pool for non-transactional callers (freeSlots preview).
+async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table: string, cols: { name: string; type: string }[], data: Record<string, any>, q: { query: pg.Pool['query'] } = pool): Promise<string | null> {
   const coord = cols.filter(c =>
     (c.name.endsWith('_id') && !/customer|client|user|visitor|member|guest/.test(c.name)) ||
     (/^(date|timestamp|time)/.test(c.type) && c.name !== 'created_at'));
@@ -580,7 +610,7 @@ async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table
   }
   const hasStatus = cols.some(c => c.name === 'status');
   const where = used.map((c, i) => `"${c.name}"=$${i + 1}`).join(' and ');
-  const taken = Number((await pool.query(
+  const taken = Number((await q.query(
     `select count(*)::int n from "${schema}"."${table}" where ${where}${hasStatus ? ` and coalesce("status",'pending') not in ('declined','cancelled')` : ''}`,
     used.map(c => coerce(data[c.name], c.type)))).rows[0].n);
   // capacity: the first booked-resource row that declares one; the policies step sets the floor

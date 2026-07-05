@@ -38,7 +38,10 @@ export async function sendMail(pool: pg.Pool | null, projectId: string | null, t
 // Lead notification — a produced site's form was submitted; the operator hears about it in minutes,
 // not when they next open a dashboard. Fire-and-forget from the submission handlers.
 // Returns whether a mail was queued (false for QA probes) so the gate can assert the guard.
-const QA_MARKER = /Automated QA check — please ignore|^QA Test \d/;
+// Both alternatives are START-ANCHORED: the interaction reviewer writes the marker as the ENTIRE
+// field value (textarea → "Automated QA check — please ignore.", text → "QA Test 0"), so anchoring
+// is exact for probes yet a REAL customer whose note merely CONTAINS the phrase keeps their mail.
+const QA_MARKER = /^(Automated QA check — please ignore|QA Test \d)/;
 // the interaction reviewer's test submissions must never generate REAL email — not leads,
 // not visitor confirmations (they'd spam qa@example.com on every single build)
 export const isQaProbe = (data: Record<string, any>): boolean =>

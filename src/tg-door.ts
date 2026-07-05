@@ -1,9 +1,7 @@
 import pg from 'pg';
-import { readdirSync, rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { plan, replan } from './planner.ts';
+import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
-import { SITES } from './verify.ts';
+import { startRebuild } from './rebuild.ts';
 
 const TOKEN = process.env.TG_DOOR_TOKEN;
 const ALLOWLIST = new Set(
@@ -106,13 +104,10 @@ async function poll(pool: pg.Pool, offset: number): Promise<number> {
       try {
         const pr = (await pool.query("select id, brief from projects where id::text like $1 || '%' order by created_at desc limit 1", [short8])).rows[0];
         if (!pr) { await reply(chatId, `No build found for id ${short8}.`); continue; }
-        const busy = Number((await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [pr.id])).rows[0].n);
-        if (busy) { await reply(chatId, 'That site is still building — send the change once it finishes.'); continue; }
         const amended = `${pr.brief} · UPDATE: ${changeText}`;
-        // sweep the previous generation's pages (stale slugs would mix two navigations); assets stay
-        try { const dir = fileURLToPath(new URL(pr.id + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
-        await replan(pool, pr.id, amended);
-        if (process.env.RELAY_BUILD !== '0') runLoop(pool, pr.id, { cap: 4, review: true }).catch(() => {});
+        // ONE safe path: plan → sweep (only after a successful plan) → run, per-project lock
+        const rb = await startRebuild(pool, pr.id, amended);
+        if (!rb.started) { await reply(chatId, `Can't update ${short8} right now — ${rb.reason || 'the site is busy'}.`); continue; }
         await reply(chatId, `Updating ${short8} — ${changeText}\nYour existing data survives the rebuild.`);
         watchUntilDone(pool, chatId, pr.id, amended).catch(() => {});
       } catch (e: any) { console.error('tg-door change', e?.message ?? e); await reply(chatId, 'Could not start the update — please try again.'); }

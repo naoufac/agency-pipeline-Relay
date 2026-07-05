@@ -4,7 +4,7 @@
 // grounded answer path, the first message titles the session, cascade delete leaves no orphans.
 import { randomUUID } from 'node:crypto';
 import { makePool } from './db.ts';
-import { ensureChatTables, listSessions, createSession, sessionOf, listMessages, postMessage, CHANGE_INTENT, announceWhenDone } from './chat.ts';
+import { ensureChatTables, listSessions, createSession, sessionOf, listMessages, postMessage, CHANGE_INTENT, wantsRebuild, announceWhenDone } from './chat.ts';
 
 const pool = makePool();
 let pass = 0, fail = 0;
@@ -53,6 +53,15 @@ try {
   // intent detector sanity across locales
   ok('intent: Italian/French change verbs count', CHANGE_INTENT.test('aggiungi una pagina menu') && CHANGE_INTENT.test('ajoute une page contact'));
   ok('intent: questions do not', !CHANGE_INTENT.test('how many bookings do I have?') && !CHANGE_INTENT.test('quanto costa?'));
+  // wantsRebuild is the ACTUAL gate on the destructive path — a question that merely CONTAINS a change
+  // verb must NOT sweep the live site (adversarial audit 2026-07-05). Imperatives still fire.
+  ok('rebuild: an imperative change fires ("add a menu page")', wantsRebuild('add a menu page') === true);
+  ok('rebuild: an explicit "change:" prefix always fires', wantsRebuild('change: make the hero darker') === true);
+  ok('rebuild: a QUESTION with a change verb does NOT ("should we add a booking form?")', wantsRebuild('should we add a booking form?') === false);
+  ok('rebuild: a hypothetical does NOT ("what would it take to change the colors?")', wantsRebuild('what would it take to change the colors?') === false);
+  ok('rebuild: an Italian imperative fires, an Italian question does not', wantsRebuild('aggiungi una pagina menu') === true && wantsRebuild('puoi aggiungere una pagina contatti?') === false);
+  const chatSrc = (await import('node:fs')).readFileSync(new URL('./chat.ts', import.meta.url), 'utf8');
+  ok('chat: postMessage routes the destructive path through wantsRebuild (not the raw regex)', /if \(wantsRebuild\(body\)\)/.test(chatSrc));
 
   // the rebuild ANNOUNCES its outcome into the session (fast injected poll; project is 'done'+reviewed)
   await pool.query(`insert into dogfood_reviews(project_id, passed, summary, issues) values ($1, true, 'ok', '[]')`, [projA]);

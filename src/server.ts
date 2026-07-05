@@ -1,11 +1,12 @@
 // Relay — the live web app. One cohesive frontend (web/) served here, plus the JSON API.
 // The website IS the product: submit a brief, watch the agency build it live.
 import http from 'node:http';
-import { readFileSync, existsSync, statSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
-import { plan, replan } from './planner.ts';
+import { plan } from './planner.ts';
 import { runLoop } from './runner.ts';
+import { startRebuild } from './rebuild.ts';
 import { computeKpi } from './kpi.ts';
 import { SITES } from './verify.ts';
 import { publicWriteTables } from './spec.ts';
@@ -38,6 +39,17 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   arr.push(now); map.set(ip, arr); return false;
 }
 const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>(), AUTH_HITS = new Map<string, number[]>();
+// the hit maps prune stale TIMESTAMPS on access but never drop the IP KEYS themselves — over months a
+// long-lived process accumulates a key per unique visitor IP (unbounded memory). Sweep empty/all-expired
+// entries every window so the maps track only recently-active IPs. (adversarial audit 2026-07-05)
+const RATE_MAPS = [RUN_HITS, PUB_HITS, APK_HITS, CHAT_HITS, QA_HITS, FORM_HITS, READ_HITS, AUTH_HITS];
+function purgeRateMaps(): void {
+  const now = Date.now();
+  for (const m of RATE_MAPS) for (const [ip, arr] of m) {
+    if (!arr.some((t) => now - t < RATE_WINDOW_MS)) m.delete(ip);
+  }
+}
+setInterval(purgeRateMaps, RATE_WINDOW_MS).unref?.();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
 const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
 const formLimited = (ip: string) => limited(FORM_HITS, 30, ip);               // produced-site form submissions, anti-spam
@@ -265,6 +277,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     // intent message fires the REAL rebuild machinery; everything else gets a grounded answer.
     if (path === '/api/chat/sessions') {
       if (!user) return send(res, 401, 'application/json', '{"error":"sign in to chat"}');
+      if (limited(CHAT_HITS, Number(process.env.CHAT_MAX || 30), clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many requests — take a breath"}');
       const pidQ = url.searchParams.get('id') || '';
       if (!UUID_RE.test(pidQ) || !canSee(user, await ownerOf(pidQ))) return send(res, 404, 'application/json', '{"error":"not found"}');
       const chat = await import('./chat.ts');
@@ -282,17 +295,12 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
         const out = await chat.postMessage(pool, { sessionId: sidQ, userId: user.id, body: String(b.body || '') }, {
           rebuild: async (projectId, changeText) => {
-            const busy = Number((await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [projectId])).rows[0].n);
-            if (busy) return { started: false, reason: 'the site is still building' };
             const pr = (await pool.query('select brief from projects where id=$1', [projectId])).rows[0];
             if (!pr) return { started: false, reason: 'project not found' };
             const amended = `${pr.brief} · UPDATE: ${changeText.slice(0, 500)}`;
-            try { const dir = fileURLToPath(new URL(projectId + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
-            await replan(pool, projectId, amended);
-            if (process.env.RELAY_BUILD !== '0') runLoop(pool, projectId, { cap: 4, review: true }).catch(() => {});
-            // the session hears the outcome — fire-and-forget
-            chat.announceWhenDone(pool, sidQ, projectId).catch(() => {});
-            return { started: true };
+            const r = await startRebuild(pool, projectId, amended);   // ONE safe path: plan → sweep → run, per-project lock
+            if (r.started) chat.announceWhenDone(pool, sidQ, projectId).catch(() => {});   // the session hears the outcome
+            return r;
           },
         });
         return send(res, out.ok ? 200 : 400, 'application/json', JSON.stringify(out));
@@ -670,13 +678,11 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!/^[0-9a-f-]{36}$/i.test(id)) return send(res, 400, 'application/json', '{"error":"id required"}');
       const pr = (await pool.query('select brief, status, owner_id from projects where id=$1', [id])).rows[0];
       if (!pr || !canSee(user, pr.owner_id)) return send(res, 404, 'application/json', '{"error":"project not found"}');
-      const active = (await pool.query("select count(*)::int n from tasks where project_id=$1 and status in ('ready','running','verifying')", [id])).rows[0].n;
-      if (active) return send(res, 409, 'application/json', '{"error":"this project is still building"}');
-      await replan(pool, id, brief || pr.brief);
-      // sweep the previous generation's pages — stale slugs would mix two navigations and (rightly)
-      // fail the site_consistent gate. Assets stay (renders re-download what the new pages need).
-      try { const dir = fileURLToPath(new URL(id + '/', SITES)); for (const f of readdirSync(dir)) if (f.endsWith('.html')) rmSync(dir + '/' + f); } catch {}
-      if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('rebuild', id, e?.message));
+      // ONE safe path: plans first, sweeps the previous generation's pages ONLY after the plan
+      // succeeds (stale slugs would mix two navigations and fail site_consistent), never sweeps when
+      // builds are paused, and a per-project lock serializes concurrent triggers.
+      const rb = await startRebuild(pool, id, brief || pr.brief);
+      if (!rb.started) return send(res, 409, 'application/json', JSON.stringify({ error: rb.reason || 'this project is still building' }));
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
 

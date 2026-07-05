@@ -96,6 +96,33 @@ try {
     await pool.query(`drop schema if exists "${tschema}" cascade`).catch(() => {});
   }
 }
+// TWIN COLLISION (adversarial audit 2026-07-05): a new date column must NOT collapse into an existing
+// date column the model STILL wants. Model keeps appointment_at AND adds date_of_birth — both are real,
+// distinct fields; the twin logic must add date_of_birth, not map it onto appointment_at (data loss).
+{
+  const { randomUUID } = await import('node:crypto');
+  const cid = randomUUID();
+  const cschema = 'app_' + cid.replace(/-/g, '').slice(0, 32);
+  const CV1 = JSON.stringify({ entities: [
+    { name: 'appointments', public: false, fields: [
+      { name: 'customer_name', type: 'text', required: true },
+      { name: 'appointment_at', type: 'datetime' }] },
+  ] });
+  const CV2 = JSON.stringify({ entities: [
+    { name: 'appointments', public: false, fields: [
+      { name: 'customer_name', type: 'text', required: true },
+      { name: 'appointment_at', type: 'datetime' },     // KEPT — the model still wants this exact column
+      { name: 'date_of_birth', type: 'date' }] },        // genuinely distinct date — must NOT swallow into appointment_at
+  ] });
+  try {
+    await appdb.provision(pool, cid, CV1);
+    await appdb.provision(pool, cid, CV2);
+    const cols = (await pool.query(`select column_name from information_schema.columns where table_schema=$1 and table_name='appointments'`, [cschema])).rows.map((r: any) => r.column_name);
+    ok('twin: a distinct date column is ADDED, not swallowed, when the model keeps the original', cols.includes('appointment_at') && cols.includes('date_of_birth'), cols.join(','));
+  } finally {
+    await pool.query(`drop schema if exists "${cschema}" cascade`).catch(() => {});
+  }
+}
 
 console.log(`\nmigrate:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

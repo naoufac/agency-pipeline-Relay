@@ -50,6 +50,21 @@ export async function listMessages(pool: pg.Pool, sessionId: string) {
 // a message that ASKS FOR WORK — verbs in the five site locales. Deterministic: the regex
 // decides whether the rebuild machinery fires; the LLM never gets to trigger a build.
 export const CHANGE_INTENT = /\b(change|update|add|remove|replace|rename|switch|make it|set the|redo|cambia|aggiungi|rimuovi|modifica|sostituisci|modifie|ajoute|supprime|remplace|cambia el|añade|quita|reemplaza|ändere|füge|entferne|ersetze)\b/i;
+// …but a QUESTION that merely CONTAINS a change verb ("should we add a booking form?", "what would
+// it take to change the colors?") must NOT sweep the live site and rebuild. A rebuild is destructive
+// (pages regenerate, minutes of build) so we only fire on IMPERATIVE phrasing: not ending in '?' and
+// not opening with an interrogative/modal across the five locales. Ambiguous polite requests fall to
+// the grounded answer, which coaches the client to say the change plainly — a confirmation step, by
+// design. An explicit "change:/update:/rebuild:" prefix always counts. (adversarial audit 2026-07-05)
+const QUESTION_LEAD = /^\s*(what|whats|when|where|why|who|how|which|is|are|am|do|does|did|can|could|would|should|will|shall|may|might|cosa|quando|dove|perch[eé]|chi|come|quale|puoi|potresti|dovrei|dovremmo|posso|quoi|quand|o[uù]|pourquoi|comment|quel|quelle|peux|pourrais|est-ce|dois|devrait|qu[eé]|cu[aá]ndo|d[oó]nde|por qu[eé]|qui[eé]n|c[oó]mo|cu[aá]l|puedo|puedes|podr[ií]a|deber[ií]a|was|wann|wo|warum|wer|wie|welche|kann|k[oö]nnte|soll|sollte|darf)\b/i;
+export function wantsRebuild(body: string): boolean {
+  const b = String(body || '').trim();
+  if (/^\s*(change|update|rebuild)\s*[:\-—]/i.test(b)) return true;   // explicit directive prefix — always a command
+  if (!CHANGE_INTENT.test(b)) return false;
+  if (b.endsWith('?')) return false;                                  // a question, never a command
+  if (QUESTION_LEAD.test(b)) return false;                            // opens like a question / modal
+  return true;
+}
 
 export type RebuildHook = (projectId: string, changeText: string) => Promise<{ started: boolean; reason?: string }>;
 export type AnswerHook = (system: string, user: string) => Promise<string>;
@@ -76,7 +91,7 @@ export async function postMessage(
   }
 
   let reply: string; let rebuilding = false;
-  if (CHANGE_INTENT.test(body)) {
+  if (wantsRebuild(body)) {
     const r = await hooks.rebuild(sess.project_id, body);
     rebuilding = r.started;
     reply = r.started

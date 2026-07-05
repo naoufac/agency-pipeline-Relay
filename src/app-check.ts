@@ -426,6 +426,19 @@ try {
     ok('calendar: the key mints once and is stable', k1 === k2 && /^[0-9a-f]{32}$/.test(k1));
     const ics = await buildIcs(pool, id3);
     ok('calendar: the ICS feed carries exactly the two landed bookings', !!ics && ics.startsWith('BEGIN:VCALENDAR') && (ics.match(/BEGIN:VEVENT/g) || []).length === 2, `events=${(String(ics).match(/BEGIN:VEVENT/g) || []).length}`);
+    // CAPACITY RACE (adversarial audit 2026-07-05): three CONCURRENT bookings on one capacity-2 slot must
+    // land EXACTLY two — the advisory-locked transaction serializes count-then-insert. Without the lock all
+    // three count queries interleave, see room, and all insert (over-booking).
+    const raceAt = new Date(Date.now() + 96 * 3_600_000).toISOString();
+    const conc = await Promise.all([1, 2, 3].map((n) =>
+      appdb.insertRow(pool, id3, 'appointments', { customer_name: 'Race' + n, email: `race${n}@b.co`, barber_id: 1, starts_at: raceAt })));
+    ok('capacity race: 3 concurrent bookings on a capacity-2 slot land exactly 2 (advisory lock)', conc.filter((x) => x.ok).length === 2, `landed=${conc.filter((x) => x.ok).length}`);
+    // ICS RFC 5545 folding: a long value must fold to ≤75-octet lines with space-prefixed continuations
+    const longName = 'Verylongcustomernameengineeredtoforceicalendarcontentlinefoldingpastseventyfiveoctets Smith';
+    await appdb.insertRow(pool, id3, 'appointments', { customer_name: longName, email: 'ln@b.co', barber_id: 1, starts_at: new Date(Date.now() + 120 * 3_600_000).toISOString() });
+    const ics2 = String(await buildIcs(pool, id3)).split('\r\n');
+    ok('ics: every content line is folded to ≤75 octets (RFC 5545 §3.1)', ics2.every((l) => Buffer.byteLength(l, 'utf8') <= 75), 'max=' + Math.max(...ics2.map((l) => Buffer.byteLength(l, 'utf8'))));
+    ok('ics: long values continue on space-prefixed fold lines', ics2.some((l) => l.startsWith(' ')));
   } finally {
     await pool.query(`drop schema if exists "${schema3}" cascade`).catch(() => {});
     await pool.query('delete from projects where id=$1', [id3]).catch(() => {});
@@ -445,6 +458,30 @@ try {
   ok('server: QA probes never receive real email (caught live: qa@example.com got a confirmation)', serverSrc.includes('!isQaProbe(data)'));
   const mailSrc = (await import('node:fs')).readFileSync(new URL('./mail.ts', import.meta.url), 'utf8').toString();
   ok('mail: ONE probe detector shared by leads and confirmations', mailSrc.includes('export const isQaProbe'));
+
+  // ---- ADVERSARIAL AUDIT 2026-07-05: the newest surfaces (chat rebuild, ICS, twins, probe, race) ----
+  const { isQaProbe } = await import('./mail.ts');
+  ok('probe: the exact QA marker (probe fields) is caught', isQaProbe({ message: 'Automated QA check — please ignore.' }) === true && isQaProbe({ customer: 'QA Test 3' }) === true);
+  ok('probe: a REAL note that only CONTAINS the phrase mid-string is NOT a probe (anchored)', isQaProbe({ notes: 'Loved it — this was not an automated QA check — please ignore situation' }) === false);
+
+  const rebuildSrc = (await import('node:fs')).readFileSync(new URL('./rebuild.ts', import.meta.url), 'utf8');
+  ok('rebuild: ONE safe helper — plan BEFORE sweep, never sweep when paused, per-project lock',
+    rebuildSrc.includes('REBUILDING.add') && /RELAY_BUILD === '0'[\s\S]{0,80}started: false/.test(rebuildSrc) &&
+    rebuildSrc.indexOf('await replan(') < rebuildSrc.indexOf('sweepHtml(projectId)') && rebuildSrc.indexOf('await replan(') > 0);
+  ok('rebuild: all three trigger surfaces route through startRebuild (chat, /api/rebuild, tg-door)',
+    serverSrc.includes('startRebuild(pool, projectId, amended)') && serverSrc.includes('startRebuild(pool, id, brief || pr.brief)') &&
+    (await import('node:fs')).readFileSync(new URL('./tg-door.ts', import.meta.url), 'utf8').includes('startRebuild(pool, pr.id, amended)'));
+  ok('server: session creation is rate-capped (no unbounded row spam)', /chat\/sessions'[\s\S]{0,160}limited\(CHAT_HITS/.test(serverSrc));
+  ok('server: the rate-limit maps are swept so they cannot grow unbounded', serverSrc.includes('purgeRateMaps') && serverSrc.includes('setInterval(purgeRateMaps'));
+
+  const appdbSrc = (await import('node:fs')).readFileSync(new URL('./appdb.ts', import.meta.url), 'utf8');
+  ok('appdb: the slot insert is transactional + advisory-locked (count/insert cannot race)',
+    appdbSrc.includes('pg_advisory_xact_lock') && appdbSrc.includes("client.query('commit')") &&
+    appdbSrc.indexOf('pg_advisory_xact_lock') < appdbSrc.indexOf("client.query('commit')") &&
+    /pg_advisory_xact_lock[\s\S]{0,300}slotGuard\(/.test(appdbSrc));
+  ok('appdb: a new column only twins an existing one the model is DROPPING (not one it keeps)', appdbSrc.includes('!wanted.has(hn)'));
+  const icsSrc = (await import('node:fs')).readFileSync(new URL('./ics.ts', import.meta.url), 'utf8');
+  ok('ics: date-only columns emit VALUE=DATE all-day events', icsSrc.includes('VALUE=DATE') && icsSrc.includes('foldLine'));
 }
 
 console.log(`\napp:check — ${pass} passed, ${fail} failed`);
