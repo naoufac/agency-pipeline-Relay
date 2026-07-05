@@ -129,6 +129,40 @@ try {
       const st2 = (await pool.query(`select status from "${csch}"."bookings" where ref_token=$1`, [b2.ref])).rows[0].status;
       ok('cancel: the endpoint REFUSES past the deadline (window enforced, not just hidden)', late.ok === false && late.error === 'too_late' && st2 !== 'cancelled');
       ok('cancel: an unknown ref is not_found', (await cancelByVisitor(pool, cid, 'bookings', 'f'.repeat(32))).error === 'not_found');
+
+      // AUDIT 2026-07-05: compare-and-swap — a visitor cancel must NOT clobber an owner confirm that
+      // lands first (blind UPDATE would overwrite confirmed→cancelled).
+      const { applyAction } = await import('./lifecycle.ts');
+      const b3 = await appdb.insertRow(pool, cid, 'bookings', { customer_name: 'Race', email: 'race@example.com', staff_id: 1, starts_at: new Date(Date.now() + 96 * 3_600_000).toISOString() });
+      await pool.query(`update "${csch}"."bookings" set status='confirmed' where ref_token=$1`, [b3.ref]);   // owner confirmed first
+      const raced = await cancelByVisitor(pool, cid, 'bookings', b3.ref!);
+      const st3 = (await pool.query(`select status from "${csch}"."bookings" where ref_token=$1`, [b3.ref])).rows[0].status;
+      // (confirmed IS a legal from-state for cancel, so this SUCCEEDS — but via CAS, not a blind write)
+      ok('cancel uses compare-and-swap (confirmed→cancelled is atomic, not a blind overwrite)', raced.ok === true && st3 === 'cancelled');
+      // now the reverse: a stale cancel against a row that moved to a NON-cancellable state loses cleanly
+      const b4 = await appdb.insertRow(pool, cid, 'bookings', { customer_name: 'Stale', email: 'stale@example.com', staff_id: 1, starts_at: new Date(Date.now() + 96 * 3_600_000).toISOString() });
+      await pool.query(`update "${csch}"."bookings" set status='completed' where ref_token=$1`, [b4.ref]);   // moved past the CAS precondition
+      const stale = await cancelByVisitor(pool, cid, 'bookings', b4.ref!);
+      ok('cancel loses cleanly when the row already moved on (no blind clobber)', stale.ok === false && stale.error === 'illegal');
+
+      // NULL EVENT TIME: a lifecycle row with no event column is NOT self-cancellable (mirrors the
+      // hidden button) — consistent contract between cancelWindow and cancelByVisitor.
+      const nid = randomUUID(); const nsch = appdb.schemaName(nid);
+      try {
+        await pool.query(`insert into projects(id, brief, status, params) values ($1,'no-event','done',$2)`, [nid, JSON.stringify({ slug: 'noevent-x', locale: 'en', schema_forms: { actionTable: 'requests' } })]);
+        await appdb.provision(pool, nid, JSON.stringify({ entities: [
+          { name: 'requests', public: false, fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'note', type: 'text' }] },
+        ] }));
+        const nb = await appdb.insertRow(pool, nid, 'requests', { customer_name: 'NoTime', email: 'nt@example.com', note: 'call me' });
+        const nrow = (await appdb.readScoped(pool, nid, 'requests', 'ref_token', nb.ref!, 1))[0];
+        ok('cancel window: a row with no event time is NONE (button hidden)', (await cancelWindow(pool, nid, 'requests', nrow)) === 'none');
+        const nc = await cancelByVisitor(pool, nid, 'requests', nb.ref!);
+        const nst = (await pool.query(`select status from "${nsch}"."requests" where ref_token=$1`, [nb.ref])).rows[0].status;
+        ok('cancel endpoint mirrors the hidden button for a time-less row (refuses, status untouched)', nc.ok === false && nst !== 'cancelled');
+      } finally {
+        await pool.query(`drop schema if exists "${nsch}" cascade`).catch(() => {});
+        await pool.query('delete from projects where id=$1', [nid]).catch(() => {});
+      }
     } finally {
       await pool.query(`drop schema if exists "${csch}" cascade`).catch(() => {});
       await pool.query('delete from run_events where project_id=$1', [cid]).catch(() => {});
@@ -206,6 +240,8 @@ try {
   ok('server: the cancel endpoint exists (POST, re-enforced server-side)', /\/cancel\$\/\)/.test(serverSrc) && serverSrc.includes('cancelByVisitor(pool, cancelM[1]'));
   ok('components: the receipt renders a Cancel button only when the window is open', (await import('node:fs')).readFileSync(new URL('./components.ts', import.meta.url), 'utf8').includes("s.cancel.state === 'open'") && (await import('node:fs')).readFileSync(new URL('./components.ts', import.meta.url), 'utf8').includes('relayCancel('));
   ok('render: the client relayCancel fn is emitted and localized', (await import('node:fs')).readFileSync(new URL('./render.ts', import.meta.url), 'utf8').includes('window.relayCancel=function'));
+  const lcSrc = (await import('node:fs')).readFileSync(new URL('./lifecycle.ts', import.meta.url), 'utf8');
+  ok('lifecycle: BOTH status writes are compare-and-swap (guarded on the validated status)', (lcSrc.match(/where "ref_token"=\$\d and "status"=\$\d/g) || []).length >= 2 && lcSrc.includes('upd.rowCount'));
   const { clientDict } = await import('./i18n.ts');
   ok('i18n: the cancel strings ship to the client dictionary (5 locales gated elsewhere)', !!clientDict('en').cancel_confirm_q && !!clientDict('it').cancel_done);
 } catch (e: any) {

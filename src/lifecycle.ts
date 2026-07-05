@@ -60,7 +60,14 @@ export async function applyAction(pool: pg.Pool, projectId: string, ref: string,
   if (cur === next) return { ok: true, already: cur, table: hit.table };
   if (!legal) return { ok: false, already: cur, table: hit.table };
   const schema = appdb.schemaName(projectId);
-  await pool.query(`update "${schema}"."${hit.table}" set "status"=$1 where "ref_token"=$2`, [next, ref]);
+  // COMPARE-AND-SWAP on the status we validated — a concurrent visitor cancel (or a double-click)
+  // cannot be clobbered by a blind write, and the visitor email fires ONCE. (audit 2026-07-05)
+  const upd = await pool.query(`update "${schema}"."${hit.table}" set "status"=$1 where "ref_token"=$2 and "status"=$3`, [next, ref, cur]);
+  if (!upd.rowCount) {
+    const now = await findByRef(pool, projectId, ref);
+    const ns = now ? String(now.row.status || 'pending') : cur;
+    return { ok: ns === next, already: ns, table: hit.table };
+  }
   await ev(pool, projectId, null, 'lifecycle_' + next, `${hit.table} · ref ${String(ref).slice(0, 8)}…`).catch(() => {});
   // the VISITOR hears the verdict — localized, with their receipt link (never for QA probes)
   const proj = (await pool.query("select params->>'slug' as slug, params->>'locale' as loc from projects where id=$1", [projectId])).rows[0];
@@ -120,11 +127,22 @@ export async function cancelByVisitor(pool: pg.Pool, projectId: string, table: s
   if (cur === 'cancelled') return { ok: true, error: 'already', status: cur };
   if (cur !== 'pending' && cur !== 'confirmed') return { ok: false, error: 'illegal', status: cur };
   const when = await eventTimeOf(pool, projectId, table, hit.row);
+  // a booking with no event time is NOT self-cancellable — cancelWindow() hides the button for it, so
+  // the endpoint mirrors that (the contract must be identical to what the receipt offered). (audit 2026-07-05)
+  if (!when) return { ok: false, error: 'too_late', status: cur };
   const cancelH = await cancellationHours(pool, projectId);
-  if (when && +when < Date.now()) return { ok: false, error: 'too_late', status: cur };
-  if (when && cancelH > 0 && +when - cancelH * 3_600_000 < Date.now()) return { ok: false, error: 'too_late', status: cur };
+  if (+when < Date.now()) return { ok: false, error: 'too_late', status: cur };
+  if (cancelH > 0 && +when - cancelH * 3_600_000 < Date.now()) return { ok: false, error: 'too_late', status: cur };
   const schema = appdb.schemaName(projectId);
-  await pool.query(`update "${schema}"."${table}" set "status"='cancelled' where "ref_token"=$1`, [ref]);
+  // COMPARE-AND-SWAP: guard the write on the status we validated. A blind UPDATE would clobber a
+  // concurrent owner confirm/decline; guarding on "status"=$cur makes it atomic, and the owner email
+  // + event fire ONCE, only on a real transition (no duplicate notice on a lost race). (audit 2026-07-05)
+  const upd = await pool.query(`update "${schema}"."${table}" set "status"='cancelled' where "ref_token"=$1 and "status"=$2`, [ref, cur]);
+  if (!upd.rowCount) {
+    const now = await findByRef(pool, projectId, ref);
+    const ns = now ? String(now.row.status || 'pending') : cur;
+    return ns === 'cancelled' ? { ok: true, error: 'already', status: ns } : { ok: false, error: 'illegal', status: ns };
+  }
   await ev(pool, projectId, null, 'lifecycle_cancelled', `${table} · ref ${String(ref).slice(0, 8)}… (by visitor)`).catch(() => {});
   // the OWNER hears about it — a freed slot they may want to refill
   const to = process.env.OPERATOR_EMAIL;
