@@ -473,5 +473,20 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('slug: capped at DNS-label length', brandSlug('A'.repeat(200)).length <= 40 && /[a-z0-9]$/.test(brandSlug('A'.repeat(200))));
 }
 
+
+// ---- M2 refinement: a checkout IS the orders form — no redundant raw form for stores ----
+{
+  const store = normalizeSite({ pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Shop candles' }, { type: 'products', table: 'products', title: 'Shop' }, { type: 'features', items: [{ title: 'A', body: 'b' }, { title: 'C', body: 'd' }] }] },
+    { slug: 'checkout', title: 'Checkout', sections: [{ type: 'hero', headline: 'Checkout' }, { type: 'cart', title: 'Cart' }, { type: 'checkout', title: 'Checkout' }] },
+  ] } as any, [{ slug: 'index', title: 'Home' }, { slug: 'checkout', title: 'Checkout' }], { forms: { orders: [{ name: 'customer_name', type: 'text' }] }, primaryTable: 'orders', actionTable: 'orders' } as any);
+  const injected = (store.repairs || []).some((x: string) => /injected the missing typed form/.test(x));
+  ok('store with a checkout gets NO redundant raw Orders form injected', !injected, JSON.stringify(store.repairs));
+  const booking = normalizeSite({ pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Book now' }, { type: 'features', items: [{ title: 'A', body: 'b' }, { title: 'C', body: 'd' }] }] },
+  ] } as any, [{ slug: 'index', title: 'Home' }], { forms: { appointments: [{ name: 'customer_name', type: 'text' }] }, primaryTable: 'appointments', actionTable: 'appointments' } as any);
+  ok('booking app without any form still gets the injection (the guarantee stands)', (booking.repairs || []).some((x: string) => /injected the missing typed form/.test(x)), JSON.stringify(booking.repairs));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

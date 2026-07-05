@@ -568,7 +568,11 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     const hasTypedForm = at
       ? out.some(p => p.sections.some((s: any) => s.type === 'form' && str(s.table) === at))
       : out.some(p => p.sections.some((s: any) => s.type === 'form' && nonEmpty(s.table)));
-    if (!hasTypedForm) {
+    // a STORE's core action is the CHECKOUT — relayCheckout writes the orders row server-side.
+    // Injecting a raw "Orders" form next to a working cart+checkout stacked a second, uglier
+    // way to buy onto the homepage (seen live on the hearth canary — a real drift catch).
+    const checkoutCovers = /^orders?$/i.test(pt) && out.some(p => p.sections.some((s: any) => s.type === 'checkout'));
+    if (!hasTypedForm && !checkoutCovers) {
       const ACTION_PAGE = /book|reserv|order|sign|apply|join|start|quote|contact/;
       // never stack a second form onto a page that already has one (dogfood tests one form per page)
       const noForm = (p: any) => !p.sections.some((s: any) => s.type === 'form');
