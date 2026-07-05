@@ -37,11 +37,11 @@ try {
   const orDead = async (url: any) => {
     calls.push(String(url));
     if (String(url).includes('openrouter')) return new Response('{"error":{"message":"Key limit exceeded (weekly limit)","code":403}}', { status: 403 });
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'ciao dal fallback' } }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '<think>the user wants a greeting, I will provide one</think>ciao dal fallback' } }] }), { status: 200 });
   };
   (globalThis as any).fetch = orDead;
   const r = await callLLM('sys', 'user', 100);
-  ok('failover: OpenRouter quota-dead → the SAME request rides MiniMax-direct', r.meta.ok === true && r.meta.provider === 'minimax-direct' && r.text === 'ciao dal fallback', JSON.stringify(r.meta));
+  ok('failover: OpenRouter quota-dead → the SAME request rides MiniMax-direct (reasoning <think> stripped)', r.meta.ok === true && r.meta.provider === 'minimax-direct' && r.text === 'ciao dal fallback', JSON.stringify(r.meta));
   ok('failover: exactly two calls — primary once, fallback once', calls.length === 2 && calls[0].includes('openrouter') && calls[1].includes('minimax'), calls.join(' | '));
 
   calls = [];

@@ -175,9 +175,11 @@ async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: 
   });
   if (!res.ok) throw new Error(`MiniMax ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data: any = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text || !String(text).trim()) throw new Error('MiniMax: empty response ' + JSON.stringify(data).slice(0, 200));
-  return { text: String(text), meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
+  // M2-family direct API embeds reasoning as <think>…</think> INSIDE message.content
+  // (OpenRouter separates it) — strip it or the site copy ships with the model's inner monologue
+  const text = String(data?.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  if (!text) throw new Error('MiniMax: empty response after reasoning strip ' + JSON.stringify(data).slice(0, 200));
+  return { text, meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
 }
 
 // one 8-token ping of the FALLBACK provider (MiniMax-direct) — used by the daily digest so a
