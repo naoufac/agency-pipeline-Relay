@@ -1099,3 +1099,20 @@ lifecycle:check = suite 20 (24 gates). Full check green. Shipped 0f7c379.
 lifecycle:check 24→32; full check (20 suites) green. Shipped 60c5add.
 Process note: I briefly committed through a stale source-pin (functional fix was fine); caught it,
 fixed the pin, re-ran full check green, redeployed. Never leave a red gate shipped.
+
+## 2026-07-05 — Visitor self-cancel: the advertised cancellation policy now has teeth
+
+Gap found: policies.cancellation_hours was proposed by the LLM, clamped by verify, and ADVERTISED
+on the chain page ("can be cancelled up to Nh before") — but nothing enforced it and a customer
+had no way to cancel. A stated rule with no enforcement is a lie (force-invariants principle).
+Closed it:
+· Receipt page shows a Cancel button while inside the window; a "contact us" note past it; nothing
+  for already-cancelled/past bookings. cancelWindow() decides render state.
+· POST /api/site/:id/cancel RE-ENFORCES the window server-side (button is only UX). ref_token is
+  the auth (receipt capability model). Cancel → status 'cancelled' (frees the slot) + owner email.
+· Localized ×5; client relayCancel fn shipped in the site runtime.
+LIVE PROOF on continuum (policy cancellation_hours=24): booked 10d out → Cancel button rendered →
+POST cancelled (status flipped, owner emailed "Cancellation") → repeat idempotent 'already'. And
+the ENFORCEMENT: booked 5h out → no button, "Cancellations are closed" note, endpoint refused
+too_late, status stayed pending.
+lifecycle:check 32→43; full check (20 suites) green. Shipped 6a36a7f.
