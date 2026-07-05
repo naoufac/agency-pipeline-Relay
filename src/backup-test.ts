@@ -47,6 +47,10 @@ try {
   ok('digest: renders every section from live data', out2.includes('RELAY — daily brief') && out2.includes('Builds 24h:') && out2.includes('Canary:') && out2.includes('Vault:') && out2.includes('Surfaces:'), out2.slice(0, 200));
   const src = readFileSync(new URL('./digest.ts', import.meta.url), 'utf8');
   ok('digest: client activity counts PRIVATE tables only (seeds can never inflate it)', src.includes('PRIVATE_READ.test(t.table_name)'));
+  ok('digest: a stale vault is an ALARM, never a calm statistic', src.includes('ageH > 30') && src.includes('STALE'));
+  ok('digest: the fallback provider gets a daily ping (a stale second key surfaces early)', src.includes('pingFallback'));
+  const cms = readFileSync(new URL('../deploy/relay-cms-up.sh', import.meta.url), 'utf8');
+  ok('directus image is PINNED (an upgrade is a decision, not a docker-pull surprise)', /directus\/directus:\d+\.\d+\.\d+/.test(cms) && !cms.includes('directus:latest'));
 }
 
 console.log(`\nbackup:check — ${pass} passed, ${fail} failed`);

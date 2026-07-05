@@ -49,11 +49,20 @@ async function main() {
     order by created_at desc limit 1`)).rows[0];
   const act = await activity24h();
 
-  let backup = 'no vault manifest';
+  let backup = '🔴 no vault manifest — BACKUPS MAY BE DEAD';
   try {
     const m = JSON.parse(readFileSync('/root/relay-vault/manifest-latest.json', 'utf8'));
     const ageH = Math.round((Date.now() - Date.parse(m.stamp)) / 3_600_000);
-    backup = `${ageH}h ago · ${Math.round(m.dump_bytes / 1e6)}MB · ${m.projects} projects`;
+    // >30h = last night's run did NOT ship — say it like the alarm it is, never a calm statistic
+    backup = ageH > 30 ? `🔴 STALE — last shipped ${ageH}h ago. Check relay-backup.service.` : `${ageH}h ago · ${Math.round(m.dump_bytes / 1e6)}MB · ${m.projects} projects`;
+  } catch {}
+  // the FALLBACK provider gets a daily 8-token ping — a stale second key must surface NOW,
+  // not on the day the primary lapses and the failover silently has nothing to fail over to
+  let fallback = '';
+  try {
+    const { pingFallback } = await import('./agents.ts');
+    const f = await pingFallback();
+    if (f !== null) fallback = f ? '' : '🔑 FALLBACK PROVIDER DEAD — failover has nothing to fail over to';
   } catch {}
   let disk = '?';
   try { disk = execSync("df -h / | tail -1 | awk '{print $4}'", { encoding: 'utf8' }).trim(); } catch {}
@@ -77,6 +86,7 @@ async function main() {
     `Vault: ${backup}`,
     `Surfaces: ${surfaces.trim()} · Disk free: ${disk}`,
     stalled > 0 ? `⏸ ${stalled} build(s) quota-stalled — top up a provider to resume` : '',
+    fallback,
   ].filter(Boolean).join('\n');
 
   if (process.env.DIGEST_DRY === '1') console.log(msg);

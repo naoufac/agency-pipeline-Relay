@@ -180,6 +180,14 @@ async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: 
   return { text: String(text), meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
 }
 
+// one 8-token ping of the FALLBACK provider (MiniMax-direct) — used by the daily digest so a
+// stale second key surfaces before the day the primary lapses. null = no fallback configured.
+export async function pingFallback(): Promise<boolean | null> {
+  if (!OR_KEY || !KEY) return null;   // fallback only exists when BOTH are configured
+  try { const r = await callMiniMaxDirect([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], 8, 30000, false, Date.now()); return !!r.meta.ok; }
+  catch { return false; }
+}
+
 export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;

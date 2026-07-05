@@ -908,3 +908,15 @@ a deterministic floor + gated:
   → (^|\P{L}) unicode boundary, kills the whole dead-marker class.
 All 18 suites green. The audit's own leniency notes (single-provider landmine, unpinned
 directus:latest) recorded for follow-up.
+
+## 2026-07-05 — AUDIT FOLLOW-UPS CLOSED: the leniency notes, actioned
+
+The audit's own "double-check these" list, all four closed: (1) directus image PINNED to
+the running 12.0.2 — an upgrade renaming the health route can no longer silently false-
+green the probe; takes effect at the next container recreation. (2) GET /api/apk carries
+the public-read cap (same class as every read). (3) the daily brief treats a stale vault
+(>30h) as an ALARM line, never a calm statistic — and 'no manifest' now reads as BACKUPS
+MAY BE DEAD. (4) pingFallback(): the digest pings the FALLBACK provider daily with 8
+tokens — a stale second key surfaces immediately, not on the day the primary lapses and
+the failover has nothing to fail over to. Tonight's digest already reports honestly:
+'🔑 FALLBACK PROVIDER DEAD' (true — both accounts empty). 6 new gates; 18 suites green.

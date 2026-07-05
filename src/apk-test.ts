@@ -127,6 +127,7 @@ ok('server: subdomain Host-routing exists (the APK origin resolves)', server.inc
   ok('server: /api/apk exists and is ownership-gated (404, never leaked)', i >= 0 && route.includes('canSee') && route.includes('ownerOf'));
   ok('server: POST /api/apk requires the OWNER + an IP cap (a WRITE that spawns a 25-min gradle, never anon)', route.includes("user.id !== owner") && route.includes('APK_HITS'));
   ok('server: POST /api/apk goes through packageProjectAsync (in-flight capped)', route.includes('packageProjectAsync'));
+  ok('server: GET /api/apk carries the public-read cap', route.includes('readLimited'));
 }
 {
   const appjs = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');

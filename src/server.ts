@@ -270,6 +270,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         const r = packageProjectAsync(pool, aid);
         return send(res, r.started ? 202 : 409, 'application/json', JSON.stringify(r));
       }
+      if (readLimited(clientIp(req))) return send(res, 429, 'application/json', '{"error":"rate limited"}');
       return send(res, 200, 'application/json', JSON.stringify(await apkStatus(pool, aid, SITES)));
     }
     if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(user, url.searchParams.get('id') || undefined)));

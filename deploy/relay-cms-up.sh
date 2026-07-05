@@ -21,7 +21,7 @@ else
     -e KEY="$DIRECTUS_KEY" -e SECRET="$DIRECTUS_SECRET" \
     -e DB_CLIENT=pg -e DB_HOST="$APIP" -e DB_PORT=5432 -e DB_DATABASE=directus -e DB_USER="$USER" -e DB_PASSWORD="$PW" \
     -e ADMIN_EMAIL="$DIRECTUS_ADMIN_EMAIL" -e ADMIN_PASSWORD="$DIRECTUS_ADMIN_PASSWORD" \
-    -e PUBLIC_URL="${DIRECTUS_PUBLIC_URL:-https://cms.naples.agency}" -e WEBSOCKETS_ENABLED=false directus/directus:latest
+    -e PUBLIC_URL="${DIRECTUS_PUBLIC_URL:-https://cms.naples.agency}" -e WEBSOCKETS_ENABLED=false directus/directus:12.0.2
 fi
 
 echo "› wait for health + ensure an admin user with a static token"
