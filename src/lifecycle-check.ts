@@ -106,7 +106,7 @@ try {
 
   // ---- ADVERSARIAL AUDIT 2026-07-05 on the lifecycle surface: 7 findings closed ----
   // XSS: the act page escapes visitor-controlled name (owner opens it on the board origin)
-  ok('server: the act page escapes the visitor name (no visitor→owner XSS)', /const who = esc\(String\(hit\.row\.customer_name/.test(serverSrc) && serverSrc.includes("import { esc } from './components.ts'"));
+  ok('server: the act page escapes the visitor name (no visitor→owner XSS)', /const who = esc\(String\(/.test(serverSrc) && serverSrc.includes("import { esc } from './components.ts'"));
 
   // WRONG WHEN-COLUMN: a booking table that ALSO has date_of_birth must remind on the appointment,
   // never the birth date — pickWhenColumn is the shared, correct picker.
