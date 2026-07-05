@@ -1116,3 +1116,16 @@ POST cancelled (status flipped, owner emailed "Cancellation") → repeat idempot
 the ENFORCEMENT: booked 5h out → no button, "Cancellations are closed" note, endpoint refused
 too_late, status stayed pending.
 lifecycle:check 32→43; full check (20 suites) green. Shipped 6a36a7f.
+
+## 2026-07-05 — Cancel-surface audit: 7 findings → 2 root causes closed (compare-and-swap)
+
+Adversarial audit of the visitor self-cancel shipped earlier today. 7 confirmed, both roots fixed:
+· TOCTOU/blind UPDATE (5 findings): cancelByVisitor AND applyAction read-then-blind-wrote status —
+  a concurrent owner-confirm + visitor-cancel raced and clobbered each other, and the owner email
+  fired non-idempotently. Both writes now compare-and-swap ('...and status=$validated' + rowCount
+  check); a lost race re-reads and reports the real state; email/event fire once, only on a real
+  transition. Also kills the cancelled-slot-resurrection gap (confirm CAS requires from='pending').
+· Inconsistent contract: cancelWindow() hid the button for a time-less booking but the endpoint
+  still cancelled it. The endpoint now mirrors the button (time-less rows not self-cancellable).
+lifecycle:check 43→48; full check green. Shipped feb7133. LIVE: continuum book → owner-confirm
+(act) → visitor-cancel → confirmed→cancelled atomically, final status cancelled.
