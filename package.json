@@ -6,7 +6,7 @@
   "description": "Autonomous agency pipeline: brief -> planner -> dependency DAG of AI calls, stage-by-stage, zero-trust verification, Supabase/Postgres board.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s app:check && npm run -s scope:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check && npm run -s pwa:check && npm run -s chain:check && npm run -s apk:check && npm run -s i18n:check && npm run -s backup:check && npm run -s llm:check && npm run -s chat:check",
+    "check": "npm run -s build && npm run -s spec:check && npm run -s cms:check && npm run -s layout:check && npm run -s ecom:check && npm run -s app:check && npm run -s scope:check && npm run -s content:check && npm run -s leak:check && npm run -s migrate:check && npm run -s theme:check && npm run -s pwa:check && npm run -s chain:check && npm run -s apk:check && npm run -s i18n:check && npm run -s backup:check && npm run -s llm:check && npm run -s chat:check && npm run -s lifecycle:check",
     "app:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/app-check.ts",
     "scope:check": "tsx src/scope-check.ts",
     "serve": "set -a; . ./.env 2>/dev/null; set +a; tsx src/server.ts",
@@ -37,7 +37,8 @@
     "pwa:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/pwa-check.ts",
     "chain:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/chain-check.ts",
     "digest": "set -a; . ./.env 2>/dev/null; set +a; tsx src/digest.ts",
-    "canary": "set -a; . ./.env 2>/dev/null; set +a; tsx src/canary.ts"
+    "canary": "set -a; . ./.env 2>/dev/null; set +a; tsx src/canary.ts",
+    "lifecycle:check": "node --experimental-strip-types src/lifecycle-check.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

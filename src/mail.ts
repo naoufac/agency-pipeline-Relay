@@ -46,15 +46,17 @@ const QA_MARKER = /^(Automated QA check — please ignore|QA Test \d)/;
 // not visitor confirmations (they'd spam qa@example.com on every single build)
 export const isQaProbe = (data: Record<string, any>): boolean =>
   Object.values(data || {}).some((v) => QA_MARKER.test(String(v)));
-export function notifyLead(pool: pg.Pool, projectId: string, brief: string, form: string, data: Record<string, any>): boolean {
+export function notifyLead(pool: pg.Pool, projectId: string, brief: string, form: string, data: Record<string, any>, actions?: { confirm: string; decline: string } | null): boolean {
   const to = process.env.OPERATOR_EMAIL;
   if (!to || !mailReady()) return false;
   // the interaction reviewer submits test rows on every build — those are probes, not leads
   if (isQaProbe(data)) return false;
   const lines = Object.entries(data || {}).slice(0, 12).map(([k, v]) => `${k}: ${String(v).slice(0, 200)}`).join('\n');
   const site = String(brief || '').slice(0, 80);
+  // lifecycle tables ride with ONE-TAP action links — confirm/decline without opening the dashboard
+  const act = actions ? `\n\n✓ Confirm: ${actions.confirm}\n✗ Decline: ${actions.decline}` : '';
   sendMail(pool, projectId, to, `New lead — ${site}`,
-    `A visitor just submitted the "${form}" form on your produced site:\n\n${lines}\n\nProject: https://board.naples.agency/#/p/${projectId}/data\nSite: https://board.naples.agency/sites/${projectId}/`)
+    `A visitor just submitted the "${form}" form on your produced site:\n\n${lines}${act}\n\nProject: https://board.naples.agency/#/p/${projectId}/data\nSite: https://board.naples.agency/sites/${projectId}/`)
     .catch(() => {});
   return true;
 }

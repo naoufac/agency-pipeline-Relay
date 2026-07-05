@@ -19,6 +19,7 @@ import { mailReady, notifyLead, sendMail, isQaProbe } from './mail.ts';
 import { apkStatus, packageProjectAsync } from './apk.ts';
 import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
 import { startTgDoor } from './tg-door.ts';
+import { L } from './i18n.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -309,6 +310,35 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!sess) return send(res, 404, 'application/json', '{"error":"not found"}');
       return send(res, 200, 'application/json', JSON.stringify({ messages: await chat.listMessages(pool, sidQ), title: sess.title }));
     }
+    // ONE-TAP OWNER ACTIONS: the lead email carries signed Confirm/Decline links. GET shows a
+    // button page and NEVER mutates (mail scanners prefetch GETs); POST performs. The HMAC token
+    // is the auth — same trust model as the calendar key.
+    const actM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/act$/);
+    if (actM) {
+      if (readLimited(clientIp(req))) return send(res, 429, 'text/plain', 'rate limited');
+      const lc = await import('./lifecycle.ts');
+      const refQ = url.searchParams.get('ref') || '';
+      const aQ = url.searchParams.get('a') === 'decline' ? 'decline' as const : 'confirm' as const;
+      const tQ = url.searchParams.get('t') || '';
+      const projA = (await pool.query("select params->>'locale' as loc from projects where id=$1", [actM[1]])).rows[0];
+      const loc = projA?.loc;
+      const page = (body: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><body style="font-family:system-ui;max-width:480px;margin:12vh auto;padding:0 20px;text-align:center">${body}</body>`;
+      if (!projA || !lc.verifyAct(actM[1], refQ, aQ, tQ)) return send(res, 404, 'text/html; charset=utf-8', page(`<p>${L(loc, 'act_invalid')}</p>`));
+      if (req.method === 'POST') {
+        const r = await lc.applyAction(pool, actM[1], refQ, aQ);
+        if (!r.ok && !r.already) return send(res, 404, 'text/html; charset=utf-8', page(`<p>${L(loc, 'act_invalid')}</p>`));
+        const msg = r.ok && !r.already ? L(loc, aQ === 'confirm' ? 'act_done_confirmed' : 'act_done_declined') : L(loc, 'act_already', { s: String(r.already) });
+        return send(res, 200, 'text/html; charset=utf-8', page(`<p style="font-size:18px">${msg}</p>`));
+      }
+      const hit = await lc.findByRef(pool, actM[1], refQ);
+      if (!hit) return send(res, 404, 'text/html; charset=utf-8', page(`<p>${L(loc, 'act_invalid')}</p>`));
+      const thing = hit.table.replace(/s$/, '').replace(/_/g, ' ');
+      const label = aQ === 'confirm' ? L(loc, 'act_confirm_btn', { x: thing }) : L(loc, 'act_decline_btn');
+      const tone = aQ === 'confirm' ? '#16a34a' : '#dc2626';
+      return send(res, 200, 'text/html; charset=utf-8', page(
+        `<p style="color:#666">${String(hit.row.customer_name || hit.row.name || '#' + hit.row.id)} · ${L(loc, 'act_already', { s: String(hit.row.status || 'pending') }).replace(/^[^—–:]*[—–:]\s*/, '')}</p>
+         <form method="post"><button style="font-size:17px;padding:12px 28px;border:0;border-radius:10px;background:${tone};color:#fff;cursor:pointer">${label}</button></form>`));
+    }
     // OWNER CALENDAR FEED: bookings as iCalendar — paste once into Google/Apple Calendar.
     // The key is the auth (calendar apps cannot sign in), minted by the integrations step.
     const icsM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/calendar\.ics$/);
@@ -420,7 +450,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         const r = await appdb.insertRow(pool, dataM[1], dataM[2], data);
         if (r.ok) {
           const proj = (await pool.query("select brief, params->>'slug' as slug, params->>'locale' as loc from projects where id=$1", [dataM[1]])).rows[0];
-          if (proj) notifyLead(pool, dataM[1], proj.brief, dataM[2], data);   // typed rows are leads too
+          // lifecycle rows get ONE-TAP confirm/decline links in the lead mail (signed; ref is the row address)
+          let actLinks: { confirm: string; decline: string } | null = null;
+          if (r.ref && LIFECYCLE_TABLE.test(dataM[2])) {
+            const { actToken } = await import('./lifecycle.ts');
+            const tc = actToken(dataM[1], r.ref, 'confirm'), td = actToken(dataM[1], r.ref, 'decline');
+            const actBase = `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/api/site/${dataM[1]}/act`;
+            if (tc && td) actLinks = { confirm: `${actBase}?ref=${r.ref}&a=confirm&t=${tc}`, decline: `${actBase}?ref=${r.ref}&a=decline&t=${td}` };
+          }
+          if (proj) notifyLead(pool, dataM[1], proj.brief, dataM[2], data, actLinks);   // typed rows are leads too
           // VISITOR CONFIRMATION (the notifications leg): a booking with an email gets its receipt
           // link by mail, in the site's language — fire-and-forget, mailReady-guarded inside sendMail
           const vmail = String(data.email || data.customer_email || '').trim();
@@ -735,6 +773,16 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 // ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
 ensureAuthTables(pool).catch((e) => console.error('auth tables', e?.message));
 import('./chat.ts').then((m) => m.ensureChatTables(pool)).catch((e) => console.error('chat tables', e?.message));
+// BOOKING REMINDERS: sweep every 30 min (idempotent via reminder_log — a restart never double-sends).
+// First run 3 min after boot so a crash-loop can't hammer the mailer.
+import('./lifecycle.ts').then((m) => {
+  m.ensureLifecycleTables(pool).catch((e) => console.error('lifecycle tables', e?.message));
+  if (mailReady()) {
+    const run = () => m.sweepReminders(pool).then((n) => { if (n) console.log(`reminders: ${n} sent`); }).catch((e) => console.error('reminders', e?.message));
+    setTimeout(run, 3 * 60_000).unref?.();
+    setInterval(run, 30 * 60_000).unref?.();
+  }
+}).catch((e) => console.error('lifecycle', e?.message));
 pool.query("create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())").catch(() => {});
 
 // AUTONOMOUS BUILD RECOVERY (0-human): re-run any 'blocked' project that still has failed tasks AND resurrect
