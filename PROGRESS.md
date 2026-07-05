@@ -1065,3 +1065,19 @@ hour). Re-flown manually at 20:34 on the new provider chain + today's 15 audit f
   survived (5→23 rows), identity kept, review re-passed — plan-before-sweep + twin mapping
   proven on a real live rebuild, not just gates.
 · casa-mirella.naples.agency routed; 1 old canary swept. Nightly timer next fires 03:38.
+
+## 2026-07-05 — LIFECYCLE LOOP: one-tap owner confirm/decline + booking reminders (suite 20)
+
+Every produced app's booking loop now closes without a dashboard:
+· Lead mail carries SIGNED Confirm/Decline links (HMAC project.ref.action, RELAY_SECRET minted).
+  GET = button page, never mutates (mail scanners prefetch GETs); POST performs. Legal transitions
+  only; finals immutable; declined frees the slot; the visitor hears the verdict by localized mail.
+· 30-min reminder sweep: bookings inside 24h get ONE localized nudge — claim-first reminder_log
+  (concurrent-safe), failed sends release the claim, probes/mail-less skipped, cap logged.
+LIVE PROOF on continuum: booking → lead mail with links → GET stayed pending → POST flipped to
+confirmed ("the customer has been notified") → second POST idempotent → tampered token 404 →
+visitor got "Your booking is confirmed ✓" → first real sweep sent EXACTLY 1 reminder (the proof
+booking); 18 pre-existing test rows grandfathered so no stale reminders fired.
+Ops lesson (memory updated): dev .env shares the PROD DB — sweep-style gates must scope to their
+scratch project; injectable senders are mandatory for anything that mails.
+lifecycle:check = suite 20 (24 gates). Full check green. Shipped 0f7c379.
