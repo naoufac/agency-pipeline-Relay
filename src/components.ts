@@ -506,6 +506,8 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     <div class="receipt-ref"><code>${esc(String(s.refCode || ''))}</code><span class="muted">${esc(L(o?.locale, 'receipt_save_ref'))}</span></div>
     ${meta ? `<ul class="receipt-meta">${meta}</ul>` : ''}
     ${Array.isArray(s.payinfo) && s.payinfo.length ? `<div class="payopts"><h3>${esc(L(o?.locale, 'how_to_pay'))}</h3>${s.payinfo.slice(0, 6).map((o: any) => `<div class="payopt"><b>${esc(String(o.name).slice(0, 80))}</b>${o.details ? `<p>${esc(String(o.details).slice(0, 300))}</p>` : ''}</div>`).join('')}</div>` : ''}
+    ${s.cancel && s.cancel.state === 'open' ? `<div class="receipt-cancel"><button class="btn btn-ghost" type="button" onclick="relayCancel(this,'${esc(String(s.cancel.table))}','${esc(String(s.cancel.ref))}','${esc(String(s.cancel.thing))}')">${esc(L(o?.locale, 'cancel_booking', { x: s.cancel.thing }))}</button><p class="rform-msg" hidden></p></div>` : ''}
+    ${s.cancel && s.cancel.state === 'closed' ? `<p class="muted">${esc(L(o?.locale, 'cancel_closed', { x: s.cancel.thing }))}</p>` : ''}
     ${s.findSlug ? `<p class="muted">${esc(L(o?.locale, 'receipt_lost'))}<a href="${esc(String(s.findSlug))}.html">${esc(String(s.findTitle || L(o?.locale, 'find_my_booking')))}</a>.</p>` : ''}
   </div></div></section>`;
   },

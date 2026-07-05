@@ -117,8 +117,13 @@ export async function renderLiveReceipt(pool: pg.Pool, projectId: string, table:
   if (/^orders?$/i.test(table)) {
     try { payinfo = (await appdb.readRows(pool, projectId, 'payment_options', 6)).filter((o: any) => o && o.name && o.active !== false); } catch {}
   }
+  // VISITOR CANCELLATION: a lifecycle booking still inside its cancellation window gets a live Cancel
+  // button on its own receipt; past the window it shows a "contact us" note. The endpoint re-enforces.
+  const { cancelWindow } = await import('../lifecycle.ts');
+  const cancelState = await cancelWindow(pool, projectId, table, rows[0]).catch(() => 'none' as const);
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [
-    { type: 'record', row: rows[0], refCode: token, back, findSlug: 'find', findTitle: L(params.locale, 'find_my_booking'), eyebrow: L(params.locale, 'receipt_dyn_eyebrow', { x: singular(table) }), title: L(params.locale, 'receipt_dyn_title', { x: singular(table).toLowerCase() }), payinfo }] };
+    { type: 'record', row: rows[0], refCode: token, back, findSlug: 'find', findTitle: L(params.locale, 'find_my_booking'), eyebrow: L(params.locale, 'receipt_dyn_eyebrow', { x: singular(table) }), title: L(params.locale, 'receipt_dyn_title', { x: singular(table).toLowerCase() }), payinfo,
+      cancel: cancelState !== 'none' ? { state: cancelState, table, ref: token, thing: singular(table).toLowerCase() } : null }] };
   const html = renderPage(spec, { pages: navPages, slug: 'receipt', title: L(params.locale, 'receipt_dyn_title', { x: singular(table).toLowerCase() }), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale });
   return `<!--relay:cms=directus LIVE receipt (rendered from the visitor's own row on request)-->\n` + html;
 }

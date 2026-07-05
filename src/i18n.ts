@@ -183,6 +183,13 @@ export const STRINGS: Record<string, Record<Locale, string>> = {
   act_done_declined: { en: 'Declined — the customer has been notified and the slot is free again.', it: 'Rifiutata — il cliente è stato avvisato e l’orario è di nuovo libero.', fr: 'Refusée — le client a été prévenu et le créneau est de nouveau libre.', es: 'Rechazada — el cliente ha sido avisado y la hora queda libre.', de: 'Abgelehnt — der Kunde wurde benachrichtigt und der Termin ist wieder frei.' },
   act_already: { en: 'Already handled — current status: {s}.', it: 'Già gestita — stato attuale: {s}.', fr: 'Déjà traitée — statut actuel : {s}.', es: 'Ya gestionada — estado actual: {s}.', de: 'Bereits erledigt — aktueller Status: {s}.' },
   act_invalid: { en: 'This link is not valid.', it: 'Questo link non è valido.', fr: 'Ce lien n’est pas valide.', es: 'Este enlace no es válido.', de: 'Dieser Link ist ungültig.' },
+  // VISITOR self-service cancellation from the receipt (enforces the advertised cancellation window)
+  cancel_booking: { en: 'Cancel this {x}', it: 'Annulla questa {x}', fr: 'Annuler cette {x}', es: 'Cancelar esta {x}', de: 'Diese {x} stornieren' },
+  cancel_confirm_q: { en: 'Cancel this {x}? This cannot be undone.', it: 'Annullare questa {x}? L’operazione è irreversibile.', fr: 'Annuler cette {x} ? Cette action est irréversible.', es: '¿Cancelar esta {x}? Esta acción no se puede deshacer.', de: 'Diese {x} stornieren? Das kann nicht rückgängig gemacht werden.' },
+  cancel_done: { en: 'Your {x} has been cancelled.', it: 'La tua {x} è stata annullata.', fr: 'Votre {x} a été annulée.', es: 'Tu {x} ha sido cancelada.', de: 'Deine {x} wurde storniert.' },
+  cancel_closed: { en: 'Cancellations are closed for this {x} — please contact us.', it: 'Le cancellazioni per questa {x} sono chiuse — contattaci.', fr: 'Les annulations sont closes pour cette {x} — contactez-nous.', es: 'Las cancelaciones están cerradas para esta {x} — contáctanos.', de: 'Stornierungen für diese {x} sind geschlossen — bitte kontaktiere uns.' },
+  cancel_already: { en: 'This {x} is already cancelled.', it: 'Questa {x} è già stata annullata.', fr: 'Cette {x} est déjà annulée.', es: 'Esta {x} ya está cancelada.', de: 'Diese {x} ist bereits storniert.' },
+  cancel_failed: { en: 'Could not cancel — please try again or contact us.', it: 'Impossibile annullare — riprova o contattaci.', fr: 'Impossible d’annuler — réessayez ou contactez-nous.', es: 'No se pudo cancelar — inténtalo de nuevo o contáctanos.', de: 'Stornierung fehlgeschlagen — bitte erneut versuchen oder uns kontaktieren.' },
   err_not_image: { en: 'not a valid image', it: 'immagine non valida', fr: 'image non valide', es: 'imagen no válida', de: 'kein gültiges Bild' },
   err_image_big: { en: 'image too large (max 3 MB)', it: 'immagine troppo grande (max 3 MB)', fr: 'image trop lourde (max 3 Mo)', es: 'imagen demasiado grande (máx. 3 MB)', de: 'Bild zu groß (max. 3 MB)' },
   err_bad_filetype: { en: 'unsupported file type — use JPG, PNG, WebP or GIF', it: 'formato non supportato — usa JPG, PNG, WebP o GIF', fr: 'format non pris en charge — utilisez JPG, PNG, WebP ou GIF', es: 'formato no compatible — usa JPG, PNG, WebP o GIF', de: 'Dateityp nicht unterstützt — nutze JPG, PNG, WebP oder GIF' },
@@ -202,7 +209,8 @@ export function L(locale: string | undefined, key: string, args?: Record<string,
 // (never string-spliced into code: JSON.stringify is the escaping)
 const CLIENT_KEYS = ['added_ok', 'thanks_msg', 'error_retry', 'generic_error', 'no_receipt_code', 'check_inbox', 'links_on_way',
   'search_ph', 'search_aria', 'from_price', 'choose_options', 'only_n_left', 'add_to_cart', 'no_times', 'pick_option',
-  'cart_empty', 'remove', 'total', 'proceed_checkout', 'cart_empty_add', 'order_placed', 'total_sep', 'sold_out'] as const;
+  'cart_empty', 'remove', 'total', 'proceed_checkout', 'cart_empty_add', 'order_placed', 'total_sep', 'sold_out',
+  'cancel_confirm_q', 'cancel_done', 'cancel_closed', 'cancel_already', 'cancel_failed'] as const;
 export function clientDict(locale: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of CLIENT_KEYS) out[k] = L(locale, k);

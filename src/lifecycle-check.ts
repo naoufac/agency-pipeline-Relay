@@ -95,6 +95,47 @@ try {
   const n4 = await sweepReminders(pool, { hours: 24, send: sender, projectIds: [id] });
   ok('a failed send is retried on the next sweep (claim released)', n3 === 0 && n4 === 1 && outbox[1].to === 'retry@example.com', JSON.stringify({ n3, n4 }));
 
+  // ---- VISITOR SELF-CANCEL: enforces the advertised cancellation window ----
+  {
+    const { cancelWindow, cancelByVisitor } = await import('./lifecycle.ts');
+    const cid = randomUUID(); const csch = appdb.schemaName(cid);
+    try {
+      // policy: cancellations allowed up to 24h before the event
+      await pool.query(`insert into projects(id, brief, status, params) values ($1,'cancel scratch','done',$2)`,
+        [cid, JSON.stringify({ slug: 'cancel-scratch-x', locale: 'en', policies: { cancellation_hours: 24 }, schema_forms: { actionTable: 'bookings' } })]);
+      await appdb.provision(pool, cid, JSON.stringify({ entities: [
+        { name: 'staff', public: true, display: 'name', fields: [{ name: 'name', type: 'text', required: true }], seed: [{ name: 'Rae' }] },
+        { name: 'bookings', public: false, fields: [
+          { name: 'customer_name', type: 'text', required: true },
+          { name: 'staff', type: 'ref:staff', required: true },
+          { name: 'starts_at', type: 'datetime', required: true }] },
+      ] }));
+      // FAR future (72h) — inside the cancellable window → 'open'; then cancel succeeds and frees the slot
+      const farAt = new Date(Date.now() + 72 * 3_600_000).toISOString();
+      const b1 = await appdb.insertRow(pool, cid, 'bookings', { customer_name: 'Far', email: 'far@example.com', staff_id: 1, starts_at: farAt });
+      const rowFar = (await appdb.readScoped(pool, cid, 'bookings', 'ref_token', b1.ref!, 1))[0];
+      ok('cancel window: a booking well before the deadline is OPEN (button shown)', (await cancelWindow(pool, cid, 'bookings', rowFar)) === 'open');
+      const cx = await cancelByVisitor(pool, cid, 'bookings', b1.ref!);
+      const st = (await pool.query(`select status from "${csch}"."bookings" where ref_token=$1`, [b1.ref])).rows[0].status;
+      ok('cancel: a visitor can cancel in-window; status → cancelled', cx.ok === true && st === 'cancelled');
+      ok('cancel frees the slot (same coordinates re-bookable)', (await appdb.insertRow(pool, cid, 'bookings', { customer_name: 'Refill', email: 'r@example.com', staff_id: 1, starts_at: farAt })).ok === true);
+      ok('cancel again is idempotent (already, no error)', (await cancelByVisitor(pool, cid, 'bookings', b1.ref!)).error === 'already');
+      // SOON (6h < 24h window) — CLOSED, and the endpoint refuses
+      const soonAt = new Date(Date.now() + 6 * 3_600_000).toISOString();
+      const b2 = await appdb.insertRow(pool, cid, 'bookings', { customer_name: 'Soon', email: 'soon@example.com', staff_id: 1, starts_at: soonAt });
+      const rowSoon = (await appdb.readScoped(pool, cid, 'bookings', 'ref_token', b2.ref!, 1))[0];
+      ok('cancel window: inside the 24h deadline is CLOSED (no button)', (await cancelWindow(pool, cid, 'bookings', rowSoon)) === 'closed');
+      const late = await cancelByVisitor(pool, cid, 'bookings', b2.ref!);
+      const st2 = (await pool.query(`select status from "${csch}"."bookings" where ref_token=$1`, [b2.ref])).rows[0].status;
+      ok('cancel: the endpoint REFUSES past the deadline (window enforced, not just hidden)', late.ok === false && late.error === 'too_late' && st2 !== 'cancelled');
+      ok('cancel: an unknown ref is not_found', (await cancelByVisitor(pool, cid, 'bookings', 'f'.repeat(32))).error === 'not_found');
+    } finally {
+      await pool.query(`drop schema if exists "${csch}" cascade`).catch(() => {});
+      await pool.query('delete from run_events where project_id=$1', [cid]).catch(() => {});
+      await pool.query('delete from projects where id=$1', [cid]).catch(() => {});
+    }
+  }
+
   // ---- source pins: routes wired, GET never mutates, links ride the lead mail ----
   const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
   ok('server: the act route exists and rides the read rate-cap', /\/act\$\/\)/.test(serverSrc) && /actM[\s\S]{0,200}readLimited/.test(serverSrc));
@@ -161,6 +202,12 @@ try {
   ok('lifecycle: one project error is isolated, never aborts the whole sweep', (await import('node:fs')).readFileSync(new URL('./lifecycle.ts', import.meta.url), 'utf8').includes('project skipped after error'));
   ok('server: the reminder scheduler has an in-flight guard (no overlapping sweeps)', /let sweeping = false[\s\S]{0,200}if \(sweeping\) return/.test(serverSrc));
   ok('ics: the calendar feed uses the same event-column picker', (await import('node:fs')).readFileSync(new URL('./ics.ts', import.meta.url), 'utf8').includes('pickWhenColumn(cols'));
+  // cancel wiring: endpoint re-enforces (never trusts the button), receipt renders it, client fn + strings ship
+  ok('server: the cancel endpoint exists (POST, re-enforced server-side)', /\/cancel\$\/\)/.test(serverSrc) && serverSrc.includes('cancelByVisitor(pool, cancelM[1]'));
+  ok('components: the receipt renders a Cancel button only when the window is open', (await import('node:fs')).readFileSync(new URL('./components.ts', import.meta.url), 'utf8').includes("s.cancel.state === 'open'") && (await import('node:fs')).readFileSync(new URL('./components.ts', import.meta.url), 'utf8').includes('relayCancel('));
+  ok('render: the client relayCancel fn is emitted and localized', (await import('node:fs')).readFileSync(new URL('./render.ts', import.meta.url), 'utf8').includes('window.relayCancel=function'));
+  const { clientDict } = await import('./i18n.ts');
+  ok('i18n: the cancel strings ship to the client dictionary (5 locales gated elsewhere)', !!clientDict('en').cancel_confirm_q && !!clientDict('it').cancel_done);
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.stack || e?.message || e);
 } finally {

@@ -13,7 +13,7 @@ import pg from 'pg';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import * as appdb from './appdb.ts';
 import { LIFECYCLE_TABLE, PRIVATE_READ, pickWhenColumn } from './schema.ts';
-import { sendMail, isQaProbe } from './mail.ts';
+import { sendMail, isQaProbe, mailReady } from './mail.ts';
 import { L, isLocale } from './i18n.ts';
 import { ev } from './db.ts';
 
@@ -74,6 +74,67 @@ export async function applyAction(pool: pg.Pool, projectId: string, ref: string,
       L(proj.loc, `mail_status_${next}_body`, { x: thing, link })).catch(() => {});
   }
   return { ok: true, table: hit.table };
+}
+
+// the number of hours before the event a booking may still be cancelled online (the policies step
+// proposes it, verify clamps it, the chain page ADVERTISES it — so it must be ENFORCED, not decorative)
+async function cancellationHours(pool: pg.Pool, projectId: string): Promise<number> {
+  const params = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
+  return Math.max(0, Number(params?.policies?.cancellation_hours) || 0);
+}
+
+async function eventTimeOf(pool: pg.Pool, projectId: string, table: string, row: any): Promise<Date | null> {
+  const schema = appdb.schemaName(projectId);
+  const cols = (await pool.query('select column_name as name, data_type as type from information_schema.columns where table_schema=$1 and table_name=$2', [schema, table])).rows;
+  const whenName = pickWhenColumn(cols as any);
+  const v = whenName ? row[whenName] : null;
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(+d) ? null : d;
+}
+
+// what the RECEIPT should show for cancellation. 'open' → a live Cancel button; 'closed' → the window
+// has passed (or the booking is in the past), show a "contact us" note; 'none' → not cancellable
+// (already cancelled/declined/completed, no event time, or no policy). Render-only — the endpoint
+// re-checks authoritatively, never trusting the client.
+export async function cancelWindow(pool: pg.Pool, projectId: string, table: string, row: any): Promise<'open' | 'closed' | 'none'> {
+  if (!LIFECYCLE_TABLE.test(table)) return 'none';
+  const status = String(row?.status || 'pending');
+  if (status !== 'pending' && status !== 'confirmed') return 'none';
+  const when = await eventTimeOf(pool, projectId, table, row);
+  if (!when) return 'none';
+  if (+when < Date.now()) return 'closed';               // the event has already happened
+  const cancelH = await cancellationHours(pool, projectId);
+  if (cancelH <= 0) return 'open';                        // no window rule → cancellable until it happens
+  return (+when - cancelH * 3_600_000 < Date.now()) ? 'closed' : 'open';
+}
+
+// VISITOR self-service cancellation from their receipt. The ref_token IS the auth (the receipt link
+// is the capability, same trust model as the calendar key). Enforces the cancellation window, flips
+// status to 'cancelled' (which frees the slot — the guard ignores cancelled rows), tells the owner.
+export async function cancelByVisitor(pool: pg.Pool, projectId: string, table: string, ref: string): Promise<{ ok: boolean; error?: 'not_found' | 'already' | 'illegal' | 'too_late'; status?: string }> {
+  if (!LIFECYCLE_TABLE.test(table)) return { ok: false, error: 'not_found' };
+  const hit = await findByRef(pool, projectId, ref);
+  if (!hit || hit.table !== table) return { ok: false, error: 'not_found' };
+  const cur = String(hit.row.status || 'pending');
+  if (cur === 'cancelled') return { ok: true, error: 'already', status: cur };
+  if (cur !== 'pending' && cur !== 'confirmed') return { ok: false, error: 'illegal', status: cur };
+  const when = await eventTimeOf(pool, projectId, table, hit.row);
+  const cancelH = await cancellationHours(pool, projectId);
+  if (when && +when < Date.now()) return { ok: false, error: 'too_late', status: cur };
+  if (when && cancelH > 0 && +when - cancelH * 3_600_000 < Date.now()) return { ok: false, error: 'too_late', status: cur };
+  const schema = appdb.schemaName(projectId);
+  await pool.query(`update "${schema}"."${table}" set "status"='cancelled' where "ref_token"=$1`, [ref]);
+  await ev(pool, projectId, null, 'lifecycle_cancelled', `${table} · ref ${String(ref).slice(0, 8)}… (by visitor)`).catch(() => {});
+  // the OWNER hears about it — a freed slot they may want to refill
+  const to = process.env.OPERATOR_EMAIL;
+  if (to && mailReady() && !isQaProbe(hit.row)) {
+    const proj = (await pool.query("select brief from projects where id=$1", [projectId])).rows[0];
+    const who = hit.row.customer_name || hit.row.name || hit.row.patient_name || '#' + hit.row.id;
+    sendMail(pool, projectId, to, `Cancellation — ${String(proj?.brief || '').slice(0, 60)}`,
+      `A customer cancelled their ${table.replace(/s$/, '').replace(/_/g, ' ')}:\n\n${who}${when ? `\nWas: ${when.toISOString()}` : ''}\n\nThe slot is now free again.`).catch(() => {});
+  }
+  return { ok: true, status: 'cancelled' };
 }
 
 export async function ensureLifecycleTables(pool: pg.Pool): Promise<void> {

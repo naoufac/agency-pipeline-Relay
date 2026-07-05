@@ -347,6 +347,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         `<p style="color:#666">${who} · ${statusNote}</p>
          <form method="post"><button style="font-size:17px;padding:12px 28px;border:0;border-radius:10px;background:${tone};color:#fff;cursor:pointer">${esc(label)}</button></form>`));
     }
+    // VISITOR SELF-CANCEL: from their receipt page. The receipt's ref_token IS the auth (same
+    // capability model as the receipt itself). The endpoint RE-ENFORCES the cancellation window —
+    // the button on the page is only UX. Frees the slot and notifies the owner.
+    const cancelM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/cancel$/);
+    if (cancelM && req.method === 'POST') {
+      if (formLimited(clientIp(req))) return send(res, 429, 'application/json', '{"ok":false,"error":"rate_limited"}');
+      let raw = ''; for await (const c of req) raw += c;
+      let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch {}
+      const lc = await import('./lifecycle.ts');
+      const out = await lc.cancelByVisitor(pool, cancelM[1], String(b.table || ''), String(b.ref || ''));
+      return send(res, out.ok ? 200 : (out.error === 'not_found' ? 404 : 200), 'application/json', JSON.stringify(out));
+    }
     // OWNER CALENDAR FEED: bookings as iCalendar — paste once into Google/Apple Calendar.
     // The key is the auth (calendar apps cannot sign in), minted by the integrations step.
     const icsM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/calendar\.ics$/);
