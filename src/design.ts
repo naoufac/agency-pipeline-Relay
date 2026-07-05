@@ -83,7 +83,19 @@ export function fontLink(design: Design | undefined | null): string {
   const fams = [design?.fonts?.display, design?.fonts?.body].map(safeFont).filter((v, i, a) => v && a.indexOf(v) === i) as string[];
   if (!fams.length) return '';
   const q = fams.map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:wght@400;500;600;700`).join('&');
-  return `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?${q}&display=swap">`;
+  // referrerpolicy=no-referrer: don't leak the visitor's page URL to Google on the font request.
+  return `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" referrerpolicy="no-referrer" href="https://fonts.googleapis.com/css2?${q}&display=swap">`;
+}
+
+// the design tokens that DON'T affect legibility — fonts + radius. The PALETTE is folded into the
+// renderer's contrast-guaranteed derivation instead (see render.ts), so it is NOT emitted here.
+export function designTypeVars(design: Design | undefined | null): string {
+  if (!design) return '';
+  const out: string[] = [];
+  if (safeFont(design.fonts?.display)) out.push(`--font-display:'${safeFont(design.fonts!.display)}'`);
+  if (safeFont(design.fonts?.body)) out.push(`--font-body:'${safeFont(design.fonts!.body)}'`);
+  if (design.radius && /^[0-9.]+(px|rem|em|%)$/.test(design.radius)) out.push(`--radius:${design.radius}`);
+  return out.join(';');
 }
 
 // the CSS-var overrides a Design contributes (only the tokens it actually carries). Empty string when

@@ -6,7 +6,7 @@ import { themeFor, themeFonts, themeVars } from './themes.ts';
 import { DEFAULT_LAYOUT, isHeroVariant, isCardVariant, type Layout } from './layout.ts';
 import { PRIVATE_READ } from './schema.ts';
 import { metaDescription } from './seo.ts';
-import { designVars, fontLink, hasDesign } from './design.ts';
+import { designTypeVars, fontLink, hasDesign } from './design.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -31,26 +31,32 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   // back to the safe default. Independent of THEME (tokens) — together they make sites distinct.
   const lay: Layout = (ctx.layout && isHeroVariant(ctx.layout.hero)) ? ctx.layout : DEFAULT_LAYOUT;
   const t = (spec && spec.brand && spec.brand.tokens) || {};
-  const bg = isHex(t.bg) ? t.bg.trim() : '#ffffff';
-  const primary = isHex(t.primary) ? t.primary.trim() : '#4f46e5';
-  // The brief roots the visual identity: a deterministic THEME owns typography, rhythm and shape
-  // (fonts/scale/spacing/radius/border) — the model never authors any of it.
+  // FIGMA → REALITY: an external design's PALETTE feeds the SAME contrast-guaranteed derivation as the
+  // theme (never a blind CSS append) — a design that sets only a dark bg still gets legible text and
+  // button labels, re-derived here. A design text/accent that FAILS contrast is dropped for the safe
+  // derived value. Fonts + radius (which don't affect legibility) are appended after. (audit 2026-07-05)
+  const design = (spec && spec.brand && spec.brand.design) || null;
+  const dp: any = (hasDesign(design) && design && design.palette) || {};
+  const bg = isHex(dp.bg) ? dp.bg.trim() : (isHex(t.bg) ? t.bg.trim() : '#ffffff');
+  const primary = isHex(dp.primary) ? dp.primary.trim() : (isHex(t.primary) ? t.primary.trim() : '#4f46e5');
+  // The brief roots the visual identity: a deterministic THEME owns typography, rhythm and shape.
   const theme = themeFor(ctx.theme, '');
   const tf = themeFonts(theme);
-  // GUARANTEE legibility deterministically (no guessing): derive the whole palette from bg + primary.
-  const text = (isHex(t.text) && contrast(t.text, bg) >= 4.5) ? t.text.trim() : pickOn(bg);
+  // GUARANTEE legibility deterministically (no guessing): derive the whole palette from bg + primary,
+  // preferring a design-supplied colour ONLY when it clears the contrast bar.
+  const text = (isHex(dp.text) && contrast(dp.text, bg) >= 4.5) ? dp.text.trim()
+    : (isHex(t.text) && contrast(t.text, bg) >= 4.5) ? t.text.trim() : pickOn(bg);
   const onPrimary = pickOn(primary);
-  const accent = (isHex(t.accent) && contrast(t.accent, bg) >= 3) ? t.accent.trim() : primary;
-  // FIGMA → REALITY: an external design source (spec.brand.design) overrides the theme's identity —
-  // palette, fonts, radius — emitted AFTER the theme vars so the design wins. Absent → byte-identical.
-  const design = (spec && spec.brand && spec.brand.design) || null;
-  const dVars = hasDesign(design) ? ';' + designVars(design) : '';
+  const accent = (isHex(dp.accent) && contrast(dp.accent, bg) >= 3) ? dp.accent.trim()
+    : (isHex(t.accent) && contrast(t.accent, bg) >= 3) ? t.accent.trim() : primary;
+  const surface = isHex(dp.surface) ? dp.surface.trim() : (isHex(t.surface) ? t.surface.trim() : mix(text, bg, 0.96));
+  const dTypeVars = hasDesign(design) ? designTypeVars(design) : '';   // fonts + radius only (palette is derived above)
   const dFontLink = fontLink(design);
   const vars = `:root{` +
     `--primary:${primary};--on-primary:${onPrimary};--accent:${accent};--bg:${bg};` +
-    `--surface:${isHex(t.surface) ? t.surface.trim() : mix(text, bg, 0.96)};--text:${text};` +
+    `--surface:${surface};--text:${text};` +
     `--muted:${mix(text, bg, 0.42)};--line:${mix(text, bg, 0.86)};` +
-    `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}${dVars}}`;
+    `--font-display:'${tf.display}';--font-body:'${tf.body}';${themeVars(theme)}${dTypeVars ? ';' + dTypeVars : ''}}`;
 
   const brand = (spec && spec.brand && spec.brand.name) || 'Studio';
   // Resolve each CTA to the RIGHT page by its INTENT (never one global page, never "last page"):
