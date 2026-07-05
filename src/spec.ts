@@ -462,12 +462,27 @@ export function navCtaFor(archetype?: string): string {
 // the theme's hand-built BRAND POOL (brief-hash rotated, colour-word aware) — LLM-invented palettes
 // CLUSTER (a law firm and a skate shop drew twin greens the same day). The LLM still names the brand
 // and may propose an accent (the renderer AA-validates it); it never owns the identity colours.
+// THE CLIENT NAMES THE BUSINESS — a brief that opens "Relay — an autonomous web agency…" or
+// "Mario's Pizzeria — a family restaurant…" has STATED the name; the model may only style
+// around it, never invent a new one (a real dogfood catch: the agency's own site shipped
+// branded "Passa"). Conservative extraction: the leading Name-—-description pattern, valid
+// only when every word is capitalized (so "A barbershop booking app — …" stays a sentence).
+export function briefStatedName(brief: any): string | null {
+  const m = String(brief || '').match(/^\s*([A-Za-z0-9][\w&'’.\- ]{0,40}?)\s+—\s+/u);
+  if (!m) return null;
+  const cand = m[1].trim();
+  if (cand.length < 2 || cand.length > 40) return null;
+  if (!/^([A-Z0-9][\w&'’.]*)( (?:[A-Z0-9&][\w&'’.]*|[&+]))*$/u.test(cand)) return null;   // every word capitalized = a NAME, not a sentence
+  return cand;
+}
+
 export function resolveBrand(brandingContent: string, fallbackName = 'Studio', archetype?: string, theme?: string, brief?: string): Brand {
   let o: any = null;
   try { o = extractFirstJson(brandingContent); } catch {}
   const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
   const p = (o && (o.palette || o)) || {};
-  const name = (o && typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : (fallbackName || 'Studio');
+  const stated = briefStatedName(brief);
+  const name = stated || ((o && typeof o.name === 'string' && o.name.trim()) ? o.name.trim() : (fallbackName || 'Studio'));
   let bg: string, primary: string;
   if (isTheme(theme)) {
     const pal = paletteFor(theme, String(brief || ''));

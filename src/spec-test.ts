@@ -488,5 +488,18 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('booking app without any form still gets the injection (the guarantee stands)', (booking.repairs || []).some((x: string) => /injected the missing typed form/.test(x)), JSON.stringify(booking.repairs));
 }
 
+// ---- THE CLIENT NAMES THE BUSINESS: a stated name is locked, never re-invented ----
+{
+  const { briefStatedName } = await import('./spec.ts');
+  ok('stated name: "Relay — an autonomous web agency…" locks Relay', briefStatedName('Relay — an autonomous web agency in Naples that turns briefs into sites') === 'Relay');
+  ok("stated name: multi-word possessive works", briefStatedName("Mario's Pizzeria — a family restaurant with weekend bookings") === "Mario's Pizzeria");
+  ok('stated name: a SENTENCE before the dash is NOT a name', briefStatedName('A barbershop booking app — customers pick a barber and a slot') === null && briefStatedName('an online store for candles — three sizes') === null);
+  ok('stated name: no leading pattern → null (model may brand freely)', briefStatedName('una trattoria di quartiere con prenotazioni') === null);
+  const b = resolveBrand('{"name":"Passa","palette":{"bg":"#fff","primary":"#123456"}}', undefined, 'site', 'modern', 'Relay — an autonomous web agency in Naples');
+  ok('resolveBrand: the STATED name beats the model-invented one', b.name === 'Relay', b.name);
+  const b2 = resolveBrand('{"name":"Wick & Flame","palette":{"bg":"#fff","primary":"#123456"}}', undefined, 'store', 'warm', 'an online store for a candle maker');
+  ok('resolveBrand: without a stated name the model brand stands', b2.name === 'Wick & Flame');
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
