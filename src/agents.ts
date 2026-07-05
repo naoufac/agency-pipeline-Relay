@@ -14,9 +14,11 @@
 const OR_KEY = process.env.OPENROUTER_API_KEY;
 const OR_BASE = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
 const OR_MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m2.7'; // used for WEB-grounded calls (Exa plugin is OR-only)
-// the FALLBACK when MiniMax-direct is quota-dead: a FREE/cheap OpenRouter model — the owner's
-// call ('as fallback use free models / really cheap one'); override via env.
-const OR_FALLBACK_MODEL = process.env.OPENROUTER_FALLBACK_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+// the FALLBACK LADDER when MiniMax-direct is quota-dead: free first, then a really-cheap paid
+// model — free tiers are congested/flaky by nature (probed live 2026-07-05), so the ladder ends
+// on a reliable $0.08/M rung. Owner's directive: 'as fallback use free models / really cheap one'.
+const OR_FALLBACK_MODELS = (process.env.OPENROUTER_FALLBACK_MODELS || 'google/gemma-4-31b-it:free,mistralai/mistral-small-24b-instruct-2501')
+  .split(',').map((m) => m.trim()).filter(Boolean);
 const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
@@ -169,6 +171,16 @@ export function isBadKey(msg: any): boolean {
   return /\b401\b/.test(s2) && /(unauthorized|invalid.*key|no auth|authentication)/i.test(s2);
 }
 
+// try each rung in order — we are already in degraded mode, so ANY failure moves down the ladder
+async function callOpenRouterLadder(messages: any[], maxTokens: number, timeoutMs: number, t0: number): Promise<LLMResult> {
+  let last: any = null;
+  for (const m of OR_FALLBACK_MODELS) {
+    try { return await callOpenRouter(messages, m, maxTokens, timeoutMs, false, t0); }
+    catch (e: any) { last = e; }
+  }
+  throw last ?? new Error('fallback ladder empty');
+}
+
 async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {
   const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
@@ -190,7 +202,7 @@ async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: 
 export async function pingFallback(): Promise<boolean | null> {
   if (!OR_KEY || !KEY) return null;   // fallback only exists when BOTH are configured
   // 400 tokens — enough even for a reasoning model to close its think block
-  try { const r = await callOpenRouter([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], OR_FALLBACK_MODEL, 400, 30000, false, Date.now()); return !!r.meta.ok; }
+  try { const r = await callOpenRouterLadder([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], 400, 45000, Date.now()); return !!r.meta.ok; }
   catch { return false; }
 }
 
@@ -232,19 +244,19 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
   const primary: 'openrouter' | 'minimax-direct' = (web && OR_KEY) ? 'openrouter' : (KEY ? 'minimax-direct' : 'openrouter');
   try {
-    if (primary === 'openrouter') return await callOpenRouter(messages, web ? OR_MODEL : OR_FALLBACK_MODEL, maxTokens, timeoutMs, web, t0);
+    if (primary === 'openrouter') return web ? await callOpenRouter(messages, OR_MODEL, maxTokens, timeoutMs, true, t0) : await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0);
     return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0);
   } catch (e: any) {
     if (isQuotaExhausted(e?.message) && OR_KEY && KEY) {
       try {
         return primary === 'minimax-direct'
-          ? await callOpenRouter(messages, OR_FALLBACK_MODEL, maxTokens, timeoutMs, false, t0)
+          ? await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0)
           : await callMiniMaxDirect(messages, maxTokens, timeoutMs, false, t0);
       } catch (e2: any) {
-        return { text: '', meta: { provider: primary === 'minimax-direct' ? 'openrouter' : 'minimax-direct', model: primary === 'minimax-direct' ? OR_FALLBACK_MODEL : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `failover after [${String(e?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
+        return { text: '', meta: { provider: primary === 'minimax-direct' ? 'openrouter' : 'minimax-direct', model: primary === 'minimax-direct' ? OR_FALLBACK_MODELS[OR_FALLBACK_MODELS.length - 1] : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `failover after [${String(e?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
       }
     }
-    return { text: '', meta: { provider: primary, model: primary === 'openrouter' ? (web ? OR_MODEL : OR_FALLBACK_MODEL) : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
+    return { text: '', meta: { provider: primary, model: primary === 'openrouter' ? (web ? OR_MODEL : OR_FALLBACK_MODELS[0]) : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
   }
 }
 

@@ -52,8 +52,20 @@ try {
     return new Response(JSON.stringify({ choices: [{ message: { content: 'dal fallback gratuito' } }] }), { status: 200 });
   };
   const r = await callLLM('sys', 'user', 100);
-  ok('failover: MiniMax quota-dead → OpenRouter FREE model carries the request', r.meta.ok === true && r.meta.provider === 'openrouter' && /:free$|flash|llama/i.test(String(r.meta.model)) && r.text === 'dal fallback gratuito', JSON.stringify(r.meta));
-  ok('failover order: minimax first, openrouter second, fallback model in the wire body', calls.length === 2 && calls[0].url.includes('minimax') && calls[1].url.includes('openrouter') && /:free$|flash|llama/i.test(String(calls[1].body.model)), calls.map(c => c.url).join(' | '));
+  ok('failover: MiniMax quota-dead → the OpenRouter ladder carries the request (free rung first)', r.meta.ok === true && r.meta.provider === 'openrouter' && r.text === 'dal fallback gratuito', JSON.stringify(r.meta));
+  ok('failover order: minimax first, then the ladder, first rung is the FREE model', calls.length === 2 && calls[0].url.includes('minimax') && calls[1].url.includes('openrouter') && /:free$/.test(String(calls[1].body.model)), calls.map(c => `${c.url}:${c.body.model}`).join(' | '));
+
+  // 2b · the LADDER: a congested free rung falls through to the cheap reliable one
+  calls = [];
+  (globalThis as any).fetch = async (url: any, init: any) => {
+    record(url, init);
+    if (String(url).includes('minimax')) return new Response('{"error":{"message":"your current token plan not enough"}}', { status: 500 });
+    const body = JSON.parse(String(init?.body || '{}'));
+    if (/:free$/.test(String(body.model))) return new Response('{"error":{"message":"temporarily rate-limited upstream","code":429}}', { status: 429 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'dal gradino economico' } }] }), { status: 200 });
+  };
+  const rl = await callLLM('sys', 'user', 100);
+  ok('ladder: congested free rung → the really-cheap rung answers', rl.meta.ok === true && rl.text === 'dal gradino economico' && calls.length === 3 && !/:free$/.test(String(calls[2].body.model)), JSON.stringify({ n: calls.length, models: calls.map(c => c.body.model) }));
 
   // 3 · transient MiniMax 500 (no billing words) does NOT fail over — upstream retries handle it
   calls = [];
@@ -82,7 +94,7 @@ try {
     return new Response('{"error":{"message":"Key limit exceeded (weekly limit)","code":403}}', { status: 403 });
   };
   const r3 = await callLLM('sys', 'user', 100);
-  ok('both providers dead: honest compound error, ok:false', r3.meta.ok === false && String(r3.meta.error).includes('failover after') && calls.length === 2, String(r3.meta.error));
+  ok('both providers dead: honest compound error after the FULL ladder (minimax + every rung)', r3.meta.ok === false && String(r3.meta.error).includes('failover after') && calls.length === 3, JSON.stringify({ n: calls.length }));
 } finally {
   (globalThis as any).fetch = realFetch;
 }
