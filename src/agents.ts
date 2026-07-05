@@ -186,7 +186,9 @@ async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: 
 // stale second key surfaces before the day the primary lapses. null = no fallback configured.
 export async function pingFallback(): Promise<boolean | null> {
   if (!OR_KEY || !KEY) return null;   // fallback only exists when BOTH are configured
-  try { const r = await callMiniMaxDirect([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], 8, 30000, false, Date.now()); return !!r.meta.ok; }
+  // 400 tokens, not 8 — a REASONING model spends its budget in <think> first; a tiny cap starves
+  // the answer and false-flags a healthy provider as dead
+  try { const r = await callMiniMaxDirect([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], 400, 30000, false, Date.now()); return !!r.meta.ok; }
   catch { return false; }
 }
 

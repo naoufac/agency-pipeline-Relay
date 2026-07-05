@@ -57,7 +57,7 @@ async function main() {
     // time out — skip quietly (the quota_stall alert already told the operator; the watchdog
     // covers serving). Transient ping failures still fly: the build path retries those.
     const { callLLM, isQuotaExhausted } = await import('./agents.ts');
-    const ping = await callLLM('Answer with the single word: ok', 'ping', 8, { timeoutMs: 30000 });
+    const ping = await callLLM('Answer with the single word: ok', 'ping', 400, { timeoutMs: 30000 });
     if (!ping.meta.ok && isQuotaExhausted(ping.meta.error)) {
       console.log('canary SKIPPED — LLM providers exhausted (quota); builds are stalled and resume on refill.');
       process.exit(0);
