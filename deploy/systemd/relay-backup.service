@@ -1,6 +1,7 @@
 [Unit]
 Description=Relay vault backup — encrypted DB + secrets to relay-vault (verified before shipping)
 After=network-online.target
+OnFailure=relay-alert@%n.service
 
 [Service]
 Type=oneshot

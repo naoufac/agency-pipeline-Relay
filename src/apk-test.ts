@@ -49,7 +49,8 @@ ok('twa: versionCode is a parameter — repackaging ships a HIGHER code (Android
 ok('twa: garbage versionCode floors to 1, never 0 or negative', twaManifestFor('x', {}, 0).appVersionCode === 1 && twaManifestFor('x', {}, -3 as any).appVersionCode === 1);
 {
   const src = readFileSync(new URL('./apk.ts', import.meta.url), 'utf8');
-  ok('buildApk: counter reads params.apk_version + 1 and persists ONLY after a verified artifact', src.includes("(params->>'apk_version')::int, 0") && src.indexOf('apk_version}') > src.indexOf("copyFileSync(built"));
+  ok('buildApk: versionCode is an ATOMIC UPDATE ... RETURNING (no cross-process lost-update / duplicate code)', src.includes('returning params->>') && src.includes("jsonb_set(params, '{apk_version}'") && !src.includes('const versionCode = Number(row.v) + 1'));
+  ok('FIFO finish() is fully guarded — a throw never strands running (queue-freeze forever)', /const finish = async[\s\S]{0,320}try \{[\s\S]{0,600}catch[\s\S]{0,220}running = null/.test(src));
 }
 
 // ---- secrets: the password never rides argv ----
@@ -122,8 +123,9 @@ ok('server: .apk has the android MIME type', server.includes("apk: 'application/
 ok('server: subdomain Host-routing exists (the APK origin resolves)', server.includes('.naples.agency') && server.includes("path = '/sites/'"));
 {
   const i = server.indexOf("path === '/api/apk'");
-  const route = i >= 0 ? server.slice(i, i + 700) : '';
+  const route = i >= 0 ? server.slice(i, i + 1200) : '';
   ok('server: /api/apk exists and is ownership-gated (404, never leaked)', i >= 0 && route.includes('canSee') && route.includes('ownerOf'));
+  ok('server: POST /api/apk requires the OWNER + an IP cap (a WRITE that spawns a 25-min gradle, never anon)', route.includes("user.id !== owner") && route.includes('APK_HITS'));
   ok('server: POST /api/apk goes through packageProjectAsync (in-flight capped)', route.includes('packageProjectAsync'));
 }
 {

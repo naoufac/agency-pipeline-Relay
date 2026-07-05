@@ -290,14 +290,23 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     // the defect budget, never block the project. Park with a long lease (reclaim() revives it);
     // the build STALLS and resumes BY ITSELF the moment quota returns. One alert per project.
     if (isQuotaExhausted(e?.message)) {
-      await pool.query("update tasks set status='running', claimed_by=null, lease_expires_at=now() + interval '15 minutes', attempts=greatest(attempts-1,0), updated_at=now() where id=$1", [task.id]);
-      const stalls = await evCount(pool, 'project_id', task.project_id, 'quota_stall');
-      await ev(pool, task.project_id, task.id, 'quota_stall', `#${task.seq}: provider quota exhausted — task parked, auto-resumes when quota returns`);
-      if (stalls === 0) {
-        const { telegramAlert } = await import('./alert.ts');
-        telegramAlert(`⏸ LLM QUOTA EXHAUSTED — builds are STALLED, not failed. They auto-resume when quota returns.\n${String(e?.message ?? '').slice(0, 180)}`).catch(() => {});
+      // a genuine quota stall auto-resumes on refill — BUT it must not park FOREVER (a mis-read
+      // permanent condition would loop with refunded attempts and never surface). After a ceiling
+      // of reparks (~this task alone), let it fall through to the normal failed path so the project
+      // blocks and the operator is escalated. RELAY_MAX_QUOTA_REPARKS ~ 48 ≈ 12h at a 15-min lease.
+      const reparks = await evCount(pool, 'task_id', task.id, 'quota_stall');
+      if (reparks < Number(process.env.RELAY_MAX_QUOTA_REPARKS || 48)) {
+        await pool.query("update tasks set status='running', claimed_by=null, lease_expires_at=now() + interval '15 minutes', attempts=greatest(attempts-1,0), updated_at=now() where id=$1", [task.id]);
+        const stalls = await evCount(pool, 'project_id', task.project_id, 'quota_stall');
+        await ev(pool, task.project_id, task.id, 'quota_stall', `#${task.seq}: provider quota exhausted — task parked, auto-resumes when quota returns`);
+        if (stalls === 0) {
+          const { telegramAlert } = await import('./alert.ts');
+          telegramAlert(`⏸ LLM QUOTA EXHAUSTED — builds are STALLED, not failed. They auto-resume when quota returns.\n${String(e?.message ?? '').slice(0, 180)}`).catch(() => {});
+        }
+        return;
       }
-      return;
+      // ceiling hit — stop pretending it's transient; fall through to the failed path below
+      await ev(pool, task.project_id, task.id, 'agent_error', `#${task.seq}: quota stall exceeded ${reparks} reparks — failing (a provider top-up never arrived)`);
     }
     const errs = await evCount(pool, 'task_id', task.id, 'agent_error');   // includes the one just logged
     // TRANSIENT infra blip → back off + retry WITHOUT burning the defect budget (a flaky provider must not

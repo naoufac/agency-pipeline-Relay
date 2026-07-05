@@ -29,7 +29,7 @@ process.on('uncaughtException', (e: any) => { console.error('uncaughtException',
 
 // /api/run spends real LLM tokens — guard it. Per-IP sliding window + a global concurrent-project cap
 // (the cap also protects the pg pool from the runner's pool-exhaustion failure mode).
-const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>();
+const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>(), APK_HITS = new Map<string, number[]>();
 const RATE_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, PUB_MAX_PER_IP = Number(process.env.PUB_MAX || 40), MAX_ACTIVE_PROJECTS = 6;
 function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   const now = Date.now();
@@ -261,6 +261,12 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!/^[0-9a-f-]{36}$/.test(aid)) return send(res, 404, 'application/json', '{"error":"not found"}');
       if (!canSee(user, await ownerOf(aid))) return send(res, 404, 'application/json', '{"error":"not found"}');
       if (req.method === 'POST') {
+        // packaging is a 25-min gradle run (a core + memory) — a resource-consuming WRITE, so it
+        // needs the OWNER (canSee admits anon on ownerless legacy projects, fine for reads, NOT for
+        // spawning builds) AND an IP cap. GET status stays on canSee.
+        const owner = await ownerOf(aid);
+        if (!user || owner == null || user.id !== owner) return send(res, 404, 'application/json', '{"error":"not found"}');
+        if (limited(APK_HITS, Number(process.env.APK_MAX || 4), clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many packaging requests — try again shortly"}');
         const r = packageProjectAsync(pool, aid);
         return send(res, r.started ? 202 : 409, 'application/json', JSON.stringify(r));
       }

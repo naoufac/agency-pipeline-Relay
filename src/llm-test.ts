@@ -14,7 +14,7 @@ const ok = (name: string, cond: boolean, extra = '') => {
   else { fail++; console.error('  ✗', name, extra); }
 };
 
-const { callLLM, isQuotaExhausted } = await import('./agents.ts');
+const { callLLM, isQuotaExhausted, isBadKey } = await import('./agents.ts');
 
 // ---- the classifier: quota-class vs transient — the whole design hinges on this line ----
 ok('quota: the exact 2026-07-04 message classifies as exhausted',
@@ -24,6 +24,11 @@ ok('quota: a plain 5xx is NOT quota (it retries as transient)', !isQuotaExhauste
 ok('quota: timeouts are NOT quota', !isQuotaExhausted('The operation was aborted due to timeout') && !isQuotaExhausted('fetch failed'));
 ok('quota: a 429 rate limit without account words is NOT quota (transient handles bursts)', !isQuotaExhausted('OpenRouter 429: slow down'));
 ok('quota: MiniMax bills via 500 — "token plan" classifies as exhausted (observed live)', isQuotaExhausted('MiniMax 500: {"type":"error","error":{"type":"server_error","message":"your current token plan not enough"}}'));
+// a REVOKED/INVALID key is permanent config, NOT transient quota — it must FAIL fast, never park forever
+ok('bad key: 401 unauthorized is a config error, not quota (would loop forever if parked)', isBadKey('OpenRouter 401: Unauthorized') && !isQuotaExhausted('OpenRouter 401: Unauthorized'));
+ok('bad key: 401 invalid api key is not quota', isBadKey('MiniMax 401: invalid api key') && !isQuotaExhausted('MiniMax 401: invalid api key'));
+ok('bad key: the failover composite carrying a 401 unauthorized is NOT parked', !isQuotaExhausted('failover after [OpenRouter 401: Unauthorized]: MiniMax 401: Unauthorized'));
+ok('quota still parks the real thing: weekly limit / credits (402/429 billing words)', isQuotaExhausted('OpenRouter 403: Key limit exceeded (weekly limit)') && isQuotaExhausted('MiniMax 402: insufficient balance'));
 
 // ---- failover: same request, second provider, real answer ----
 const realFetch = globalThis.fetch;
@@ -64,8 +69,9 @@ try {
 import { readFileSync } from 'node:fs';
 const runner = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
 ok('runner: quota-stall branch exists BEFORE the transient branch', runner.indexOf('quota_stall') > 0 && runner.indexOf('quota_stall') < runner.indexOf('isTransient(e?.message)'));
-ok('runner: stalled tasks refund the attempt (a days-long condition never burns the defect budget)', /isQuotaExhausted[\s\S]{0,400}attempts=greatest\(attempts-1,0\)/.test(runner));
+ok('runner: stalled tasks refund the attempt (a days-long condition never burns the defect budget)', /isQuotaExhausted[\s\S]{0,900}attempts=greatest\(attempts-1,0\)/.test(runner));
 ok('runner: the operator is alerted ONCE per project, not per retry', /stalls === 0[\s\S]{0,200}telegramAlert/.test(runner));
+ok('runner: a repark CEILING makes an eternal stall eventually FAIL (never loops forever)', runner.includes('RELAY_MAX_QUOTA_REPARKS') && /reparks < Number/.test(runner) && runner.includes('quota stall exceeded'));
 
 console.log(`\nllm:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

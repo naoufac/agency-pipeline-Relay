@@ -31,6 +31,11 @@ try {
   ok('failure in push mode rings the phone (Telegram ERR trap)', sh.includes('RELAY BACKUP FAILED') && sh.includes("trap 'alarm $LINENO' ERR"));
   ok('suspiciously small dump refuses to ship', sh.includes('suspiciously small'));
   ok('vault history stays bounded (weekday rotation + single-commit force push)', sh.includes('date -u +%a') && sh.includes('push -q --force'));
+  ok('integrity guards route through the ALARM (exit 1 in a || group bypasses the ERR trap)', sh.includes('die() {') && sh.includes('|| die $LINENO') && !/\|\| \{ echo[^}]*exit 1; \}/.test(sh));
+  ok('the ERR trap is installed BEFORE cd + .env source (a broken .env must still alert)', sh.indexOf("trap 'alarm $LINENO' ERR") < sh.indexOf('. ./.env'));
+  ok('the alarm has a fallback token source (survives a broken /srv/relay/.env)', sh.includes('/root/.relay-monitor.env'));
+  const svc = readFileSync(new URL('../deploy/systemd/relay-backup.service', import.meta.url), 'utf8');
+  ok('backup service has an external OnFailure alert (never trusts the failing script)', svc.includes('OnFailure=relay-alert@'));
 } finally {
   rmSync(out, { recursive: true, force: true });
 }

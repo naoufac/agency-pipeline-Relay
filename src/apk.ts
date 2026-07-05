@@ -103,10 +103,16 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   const pass = process.env.RELAY_KS_PASS;
   if (!pass) throw new Error('RELAY_KS_PASS not set');
   if (!existsSync(KEYSTORE)) throw new Error('signing keystore missing at ' + KEYSTORE + ' — without it bubblewrap would PROMPT to create a new (wrong) identity');
-  const row = (await pool.query("select params->>'slug' as slug, coalesce((params->>'apk_version')::int, 0) as v from projects where id=$1", [projectId])).rows[0];
+  // ATOMIC increment RETURNING the new value — two builds racing (worker + owner click, canary +
+  // auto-hook) across PROCESSES can't both read the same v and stamp a duplicate versionCode
+  // (Android refuses an update with an equal code). Reserved up front; a failed build leaves a
+  // harmless gap (gaps update fine; collisions don't).
+  const row = (await pool.query(
+    "update projects set params = jsonb_set(params, '{apk_version}', to_jsonb(coalesce((params->>'apk_version')::int,0)+1), true) where id=$1 returning params->>'slug' as slug, (params->>'apk_version')::int as v",
+    [projectId])).rows[0];
   const slug = row?.slug;
   if (!slug) throw new Error('project has no slug — subdomain identity is the APK origin');
-  const versionCode = Number(row.v) + 1;
+  const versionCode = Number(row.v);
   assertCleanSlug(slug);
   const siteDir = fileURLToPath(new URL(projectId + '/', sitesUrl));
   if (!existsSync(siteDir + 'manifest.webmanifest'))
@@ -129,8 +135,6 @@ export async function buildApk(pool: pg.Pool, projectId: string, sitesUrl: URL):
   mkdirSync(siteDir + '.well-known', { recursive: true });
   writeFileSync(siteDir + '.well-known/assetlinks.json', JSON.stringify(assetlinksFor(pkg, sha), null, 1));
   copyFileSync(built, siteDir + 'app.apk');
-  // the counter moves ONLY after a verified artifact exists — a failed build never skips versions
-  await pool.query("update projects set params = jsonb_set(params, '{apk_version}', to_jsonb($2::int), true) where id=$1", [projectId, versionCode]);
   return { apk: siteDir + 'app.apk', packageId: pkg, sha256: sha, slug };
 }
 
@@ -186,10 +190,14 @@ function launchPackager(pool: pg.Pool, projectId: string): void {
   const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 25 * 60_000);
   const finish = async (code: number | null) => {
     clearTimeout(killer);
-    const tail = out.trim().split('\n').slice(-3).join(' · ').slice(0, 400);
-    const { ev } = await import('./db.ts');
-    await ev(pool, projectId, null, code === 0 ? 'apk_built' : 'apk_failed', tail).catch(() => {});
-    if (code !== 0) console.error('apk package failed', projectId, tail);
+    // the whole body is guarded: a throw here (a failed db import, a dead pool) must NEVER strand
+    // `running` — that would freeze the packaging queue for the life of the process.
+    try {
+      const tail = out.trim().split('\n').slice(-3).join(' · ').slice(0, 400);
+      const { ev } = await import('./db.ts');
+      await ev(pool, projectId, null, code === 0 ? 'apk_built' : 'apk_failed', tail).catch(() => {});
+      if (code !== 0) console.error('apk package failed', projectId, tail);
+    } catch (e: any) { console.error('apk finish', projectId, e?.message ?? e); }
     running = null;
     const next = queue.shift();
     if (next) { running = next.projectId; launchPackager(next.pool, next.projectId); }

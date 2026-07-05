@@ -28,6 +28,7 @@ ok('interpolation fills {n} slots', L('it', 'only_n_left', { n: 3 }) === 'Solo 3
 ok('it: taqueria brief in Italian', detectLocale('una taqueria di quartiere con prenotazioni per il weekend e un blog di ricette di famiglia') === 'it');
 ok('it: barber brief in Italian', detectLocale('app di prenotazione per un parrucchiere — i clienti scelgono il barbiere, il servizio e l’orario') === 'it');
 ok('fr: boutique brief in French', detectLocale('une boutique en ligne pour une créatrice de bougies artisanales avec des parfums classiques') === 'fr');
+ok('fr: accent-initial marker matches (unicode boundary — \\b is ASCII-only)', detectLocale('nous voulons être une entreprise où être bien est la règle chez nous') === 'fr');
 ok('es: restaurant brief in Spanish', detectLocale('una tienda online para una pastelería con recetas de la semana y reservas') === 'es');
 ok('de: booking brief in German', detectLocale('eine Buchungs-App für einen Friseur — Kunden wählen den Service und die Zeit, mit Terminen') === 'de');
 ok('en: English brief stays English', detectLocale('a barbershop booking app — customers pick a barber, a service and a time slot') === 'en');

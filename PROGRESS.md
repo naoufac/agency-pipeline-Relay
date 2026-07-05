@@ -880,3 +880,31 @@ the page title. English stays byte-compatible (chain-check + apk-check untouched
 leak canary now includes the chain strings. Proven: the Italian production record renders
 "Registro di produzione · Il brief · La promessa · I controlli superati · È anche un'app
 Android" with zero English residue.
+
+## 2026-07-04 — ADVERSARIAL SELF-AUDIT: 7 confirmed bugs killed (2 HIGH), each gated
+
+Ran a 4-dimension adversarial audit workflow over the session's new code (26 agents, every
+finding independently verified before it counted). 21 raised → 7 confirmed → all 7 fixed at
+a deterministic floor + gated:
+· [HIGH] /api/apk POST was a canSee-gated WRITE with no rate limit — an anon caller could
+  spawn a 25-min gradle on any ownerless project and hog the queue. Now owner-only
+  (user.id === owner, not canSee) + APK_HITS IP cap. (apk:check)
+· [HIGH] a revoked/invalid key (401 unauthorized) was mis-classified as transient quota and
+  re-parked FOREVER with refunded attempts — a build that never surfaces. isBadKey() routes
+  it out of quota (fail fast), and a repark CEILING (RELAY_MAX_QUOTA_REPARKS≈48) makes even a
+  genuine stall eventually fail + escalate. (llm:check)
+· [HIGH] backup.sh integrity guards used `|| { echo; exit 1; }` — an explicit exit in a ||
+  group does NOT fire the ERR trap, so the four checks worth hearing about (missing key,
+  undersized dump, no projects table, keystore missing) failed SILENTLY. Now die() routes
+  every guard through the alarm; the trap installs BEFORE cd/.env (a broken .env alerts too);
+  a fallback token source + a systemd OnFailure= unit give an external signal. (backup:check)
+· [MED] uptime probe treated 4xx as up (a renamed Directus health route on :latest would
+  false-green forever) → only 2xx is up.
+· [LOW] versionCode read-modify-write raced across processes (worker + owner click) →
+  atomic UPDATE … RETURNING; two concurrent builds get distinct codes.
+· [LOW] the FIFO finish() could strand `running` on a throw (queue frozen for the process
+  life) → fully guarded.
+· [LOW] detectLocale used ASCII \b so the accent-initial French marker 'être' never matched
+  → (^|\P{L}) unicode boundary, kills the whole dead-marker class.
+All 18 suites green. The audit's own leniency notes (single-provider landmine, unpinned
+directus:latest) recorded for follow-up.

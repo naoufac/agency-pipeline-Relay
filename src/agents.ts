@@ -155,8 +155,15 @@ export type LLMResult = { text: string; meta: { provider: 'openrouter' | 'minima
 // key sat unused — callLLM now fails over on exactly this class.
 export function isQuotaExhausted(msg: any): boolean {
   const s2 = String(msg ?? '');
+  if (isBadKey(s2)) return false;   // a revoked/invalid key is PERMANENT config, not transient quota — must fail, never park
   if (/your current token plan|token plan (?:is )?(?:expired|exhausted|used up)/i.test(s2)) return true;  // MiniMax bills via 500 (observed live 2026-07-04)
-  return /\b(401|402|403|429)\b/.test(s2) && /(key limit|quota|credit|exceeded|insufficient|billing|payment required|unauthorized|invalid.*key)/i.test(s2);
+  return /\b(401|402|403|429)\b/.test(s2) && /(key limit|quota|credit|exceeded|insufficient|billing|payment required)/i.test(s2);
+}
+// a 401 unauthorized / invalid-key is a MISCONFIGURATION that never self-heals — parking it as
+// 'quota' loops the build forever. Classify it out of quota so the runner fails it fast.
+export function isBadKey(msg: any): boolean {
+  const s2 = String(msg ?? '');
+  return /\b401\b/.test(s2) && /(unauthorized|invalid.*key|no auth|authentication)/i.test(s2);
 }
 
 async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {

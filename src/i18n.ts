@@ -27,7 +27,8 @@ const EN_W1 = ['the', 'a', 'an', 'and', 'with', 'for', 'of', 'to', 'that', 'wher
 
 export function detectLocale(text: string): Locale {
   const t = ' ' + String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ') + ' ';
-  const hits = (w: string) => (t.match(new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, ''), 'gu')) || []).length;
+  // (^|\\P{L}) unicode boundary — JS \\b is ASCII-only, so an accent-initial marker like 'être' never matched
+  const hits = (w: string) => (t.match(new RegExp('(?:^|\\P{L})' + w.replace(/[.*+?^${}()|[\]\\]/g, ''), 'gu')) || []).length;
   const en = EN_W1.reduce((n, w) => n + hits(w), 0);
   let best: Locale = 'en', bestScore = 0;
   for (const loc of Object.keys(MARKERS) as Array<Exclude<Locale, 'en'>>) {

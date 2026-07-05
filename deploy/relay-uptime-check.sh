@@ -24,7 +24,9 @@ echo "$CHECKS" | while IFS='|' read -r name url mode; do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 "$url" 2>/dev/null || echo 000)
   case "$mode" in
     200) [ "$code" = "200" ] && now=up || now=down ;;
-    *)   case "$code" in 000|5??) now=down ;; *) now=up ;; esac ;;
+    # a health probe: ONLY 2xx is up. 4xx (a renamed Directus health route on :latest, a WAF 403,
+    # an auth wall) is NOT healthy — treating it as up false-greens a broken surface.
+    *)   case "$code" in 2??) now=up ;; *) now=down ;; esac ;;
   esac
   prev=$(cat "$STATE" 2>/dev/null || echo up)
   if [ "$now" = "up" ] && [ "$prev" = "down" ]; then
