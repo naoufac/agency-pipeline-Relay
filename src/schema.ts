@@ -26,6 +26,15 @@ export const PRIVATE_READ = /^(_relay_\w+|orders?|order_items|bookings?|appointm
 export const LIFECYCLE_TABLE = /^(bookings?|appointments?|reservations?|reservation_requests?|orders?|rsvps?|requests?|applications?|registrations?|preorders?|pre_orders?|deliveries|enquir(?:y|ies)|inquir(?:y|ies))$/i;
 export const STATUS_SET = ['pending', 'confirmed', 'declined', 'cancelled', 'new', 'completed'];
 
+// SERVER-DERIVED action-table columns. A booking's price/duration/total are attributes of the chosen
+// SERVICE, never a visitor input — a produced barber form asked customers to TYPE the price (a tamper
+// vector, and nonsense that made every booking fail its NOT NULL). When a lifecycle table references a
+// catalog carrying these, its own copies are made nullable, kept OFF the public form, and DERIVED at
+// insert from the referenced row. (live-caught on the lather barbershop flight, 2026-07-05)
+export const DERIVED_MONEY = /^(price|amount|cost|fee|subtotal|total)$/i;
+export const DERIVED_DURATION = /^(duration|duration_minutes|minutes|mins|length_minutes)$/i;
+export const DERIVED_COL = /^(price|amount|cost|fee|subtotal|total|duration|duration_minutes|minutes|mins|length_minutes)$/i;
+
 // THE EVENT-TIME COLUMN of a lifecycle row (the calendar feed and reminders both need it). Picking
 // "the first date/timestamp column" is WRONG — a booking table may also carry date_of_birth, and a
 // reminder keyed on that never fires (audit 2026-07-05). Exclude personal/bookkeeping dates, then
@@ -271,6 +280,14 @@ export function compile(model: DataModel): { ddl: string; tables: string[]; warn
       const st = list.find(c => c.name === 'status');
       if (st) { st.type = 'text'; st.def = 'pending'; st.required = true; }
       else list.push({ name: 'status', type: 'text', required: true, unique: false, def: 'pending' });
+      // a lifecycle table that references a PRICED catalog (a service/product with price or duration)
+      // derives its own money/duration/total from that catalog at insert — so they must be nullable
+      // (the public form omits them; the server fills them). Otherwise a NOT NULL price blocks every
+      // booking a customer can't type. (live-caught, 2026-07-05)
+      const pricedRef = list.some(c => c.ref && (ents.find(x => x.name === c.ref)?.fields || []).some((f: any) => DERIVED_MONEY.test(f.name) || DERIVED_DURATION.test(f.name)));
+      if (pricedRef) for (const c of list) if (!c.ref && DERIVED_COL.test(c.name) && c.required) {
+        c.required = false; warnings.push(`${name}.${c.name}: server-derived from a priced ref — made nullable + kept off the public form`);
+      }
     }
     const perTableIndexes: string[] = [];
     const lines = ['  id serial primary key'];

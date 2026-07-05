@@ -6,7 +6,7 @@ import { L, columnLabel } from './i18n.ts';
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
-import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE, pickWhenColumn } from './schema.ts';
+import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE, pickWhenColumn, DERIVED_MONEY, DERIVED_DURATION, DERIVED_COL } from './schema.ts';
 import { localRowImage } from './rowmedia.ts';
 
 // FS0 — who is reading? 'public' = the produced site's anonymous data API (private visitor-record
@@ -525,6 +525,41 @@ export async function readRow(pool: pg.Pool, projectId: string, table: string, i
 // (a public booking form must not offer "Status", and a crafted POST must not set it either).
 const SYSTEM_COLS = /^(status|state|approved|confirmed|verified)$/i;
 
+// Derive an action row's money/duration/total from the catalog row(s) it references (a booking's price
+// is the SERVICE's price). Returns the columns to FORCE onto the insert — client values for these are
+// ignored (anti-tamper). No priced ref → empty (a donations table where the donor DOES enter the amount
+// is untouched, because no referenced table carries a price column).
+async function deriveActionFields(pool: pg.Pool, schema: string, table: string, data: Record<string, any>, cols: { name: string; type: string }[]): Promise<Record<string, any>> {
+  const moneyCols = cols.filter(c => DERIVED_MONEY.test(c.name) && !/^total$/i.test(c.name));
+  const durCols = cols.filter(c => DERIVED_DURATION.test(c.name));
+  const totalCol = cols.find(c => /^total$/i.test(c.name));
+  if (!moneyCols.length && !durCols.length && !totalCol) return {};
+  const fkRows = (await pool.query(
+    `select kcu.column_name as col, ccu.table_name as ref
+     from information_schema.table_constraints tc
+     join information_schema.key_column_usage kcu on kcu.constraint_name=tc.constraint_name and kcu.table_schema=tc.table_schema
+     join information_schema.constraint_column_usage ccu on ccu.constraint_name=tc.constraint_name and ccu.table_schema=tc.table_schema
+     where tc.constraint_type='FOREIGN KEY' and tc.table_schema=$1 and tc.table_name=$2`, [schema, table]).catch(() => ({ rows: [] as any[] }))).rows;
+  let unitPrice: number | null = null, unitDur: number | null = null;
+  for (const fk of fkRows) {
+    const v = (data || {})[fk.col];
+    if (v == null || v === '' || !IDENT.test(String(fk.ref))) continue;
+    const rc = (await typedColumns(pool, schema, fk.ref).catch(() => [])).map(c => c.name);
+    const pc = rc.find(n => DERIVED_MONEY.test(n) && !/^total$/i.test(n));
+    const dc = rc.find(n => DERIVED_DURATION.test(n));
+    if (!pc && !dc) continue;
+    const row = (await pool.query(`select * from "${schema}"."${fk.ref}" where id=$1`, [coerce(v, 'integer')]).catch(() => ({ rows: [] as any[] }))).rows[0];
+    if (!row) continue;
+    if (pc && unitPrice == null && Number.isFinite(Number(row[pc]))) unitPrice = Number(row[pc]);
+    if (dc && unitDur == null && Number.isFinite(Number(row[dc]))) unitDur = Number(row[dc]);
+  }
+  const out: Record<string, any> = {};
+  if (unitPrice != null) for (const c of moneyCols) out[c.name] = unitPrice;
+  if (unitDur != null) for (const c of durCols) out[c.name] = unitDur;
+  if (totalCol && unitPrice != null) out[totalCol.name] = unitPrice;   // single-service booking: total = price
+  return out;
+}
+
 // Insert one row into a REAL project table — only existing columns, type-coerced, fully parameterized.
 // FS1: on a private (visitor-record) table with a ref_token column, a 128-bit receipt token is
 // generated HERE (never client-supplied — SENSITIVE already blocks it from `data`) and returned so
@@ -534,6 +569,13 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
   if (!IDENT.test(table)) return { ok: false };
   if (!(await listTables(pool, projectId)).includes(table)) return { ok: false };
   const cols = await typedColumns(pool, schema, table);
+  // SERVER-DERIVED action fields: a booking's price/duration/total come from the chosen SERVICE, never
+  // the client (the public form omits them; a crafted POST that sets price=1 is OVERRIDDEN here — the
+  // same anti-tamper rule the store checkout uses). (live-caught on the barbershop flight, 2026-07-05)
+  if (audience !== 'owner' && LIFECYCLE_TABLE.test(table)) {
+    const derived = await deriveActionFields(pool, schema, table, data, cols);
+    if (Object.keys(derived).length) data = { ...(data || {}), ...derived };
+  }
   const use = cols.filter(c => IDENT.test(c.name) && c.name in (data || {}) && !['id', 'created_at'].includes(c.name) && !SENSITIVE.test(c.name) && (audience === 'owner' || !SYSTEM_COLS.test(c.name)));
   if (!use.length) return { ok: false };
   // FS3 — booking semantics validated SERVER-side, with errors a visitor can act on (never a silent
@@ -853,10 +895,21 @@ export async function formColumns(pool: pg.Pool, projectId: string, table: strin
        where tc.constraint_type='FOREIGN KEY' and tc.table_schema=$1 and tc.table_name=$2`, [schema, table])).rows;
     for (const fk of fks) if (IDENT.test(fk.col) && IDENT.test(fk.ref) && fk.ref !== table) fkMap.set(fk.col, fk.ref);
   } catch {}
+  // SERVER-DERIVED money/duration: a booking form must NOT ask the visitor to type the price/duration —
+  // those come from the chosen service. Excluded from the PUBLIC form when this lifecycle table refs a
+  // priced catalog (a table with a price/duration column). (live-caught, 2026-07-05)
+  let pricedRef = false;
+  if (audience !== 'owner' && LIFECYCLE_TABLE.test(table)) {
+    for (const refTbl of new Set(fkMap.values())) {
+      const rc = (await typedColumns(pool, schema, refTbl).catch(() => [])).map(c => c.name);
+      if (rc.some(n => DERIVED_MONEY.test(n) || DERIVED_DURATION.test(n))) { pricedRef = true; break; }
+    }
+  }
   const out: { name: string; type: string; nullable: boolean; ref?: string; display?: string }[] = [];
   for (const c of await typedColumns(pool, schema, table)) {
     if (['id', 'created_at'].includes(c.name) || SENSITIVE.test(c.name)) continue;
     if (audience !== 'owner' && SYSTEM_COLS.test(c.name)) continue;   // FS0: a visitor never fills "Status"
+    if (pricedRef && !fkMap.has(c.name) && DERIVED_COL.test(c.name)) continue;   // server-derived, off the form
     const ref = fkMap.get(c.name);
     // a PUBLIC form never shows a dropdown into a private table — its read is sealed, so the options
     // would always be empty (compile makes these nullable, so omitting the field keeps inserts valid)
