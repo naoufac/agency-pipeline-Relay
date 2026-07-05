@@ -1129,3 +1129,15 @@ Adversarial audit of the visitor self-cancel shipped earlier today. 7 confirmed,
   still cancelled it. The endpoint now mirrors the button (time-less rows not self-cancellable).
 lifecycle:check 43→48; full check green. Shipped feb7133. LIVE: continuum book → owner-confirm
 (act) → visitor-cancel → confirmed→cancelled atomically, final status cancelled.
+
+## 2026-07-05 — Owner status changes unified with the canonical lifecycle transition
+
+Found drift: the board Content tab had a SECOND implementation of a lifecycle status change — a blind
+UPDATE + hardcoded ENGLISH email on a typo-prone free-text field, ignoring the site locale, racing the
+email-link actions (no CAS), no legal-transition guard. Two implementations of one operation.
+Unified onto ONE ownerSetStatus(): legal transitions only (terminal stays terminal), compare-and-swap
+on the validated status, LOCALIZED visitor notification (mail_status_*, site locale) + logged event.
+Status now renders as a closed dropdown in the edit form (no typo → no garbage status/email).
+New mail_status_cancelled_* ×5. lifecycle:check 48→56; full check green. Shipped 8a37779.
+LIVE PROOF (prod DB): invalid status refused (bad_status); pending→confirmed lands; terminal cancelled
+✗→confirmed refused (illegal), final status cancelled.
