@@ -936,3 +936,19 @@ but caught a pre-existing compose class live on hearth: the M2 form-guarantee on
 recognized type==='form', so stores with a working cart+checkout still got a raw Orders
 form injected on the homepage (a second, uglier way to buy). checkoutCovers fixes it at
 the compose floor; booking apps keep the guarantee. spec 156, 18 suites green.
+
+## 2026-07-05 — THE SHOP WINDOW: Relay built its own site, through its own pipeline
+
+The agency had no public face. Now: relay-site.naples.agency — brief in, site out, review
+passed, Android app served, its own how-it-was-built page: the pipeline demonstrating
+itself. Dogfooding immediately caught a REAL class: the first build shipped branded
+"Passa" although the brief opened "Relay — an autonomous web agency…". THE CLIENT NAMES
+THE BUSINESS: briefStatedName() locks the leading Name-—-description pattern (valid only
+when every word is capitalized — "A barbershop booking app — …" stays a sentence);
+resolveBrand puts the stated name above the model's invention. 6 gates (spec 162). Rebuilt:
+brand Relay, slug relay-site (reserved-slug suffix by design), lead form wired to
+notifyLead. The APEX is prepared but INERT: naples.agency currently serves an existing
+landing page ("where brands go live") which code never stomps — env-gated routing
+(RELAY_HOME_SLUG) is deployed and gated; flipping the apex = set env + route DNS + ingress,
+strictly the owner's call. Known wart on the demo: the model invented production metrics
+(€1,200) — owner-editable via the Content tab before any flip.
