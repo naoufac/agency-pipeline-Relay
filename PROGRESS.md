@@ -1159,3 +1159,15 @@ NOTED (not fixed): some LLM booking schemas draw start_time+end_time as two cust
 customer shouldn't pick the end time (= start + duration). Bookings still work; refine next turn.
 PROCESS: a `pgrep -f canary.ts` cleanup self-matched my own shell and killed it (exit 144) — the code
 was already shipped, only this log + the report were lost. Use `ps -eo pid,cmd | grep '[c]anary'`.
+
+## 2026-07-05 — Derived booking end-time (the deferred follow-up), + compiler re-certified
+
+Picked up the follow-up I deferred last turn: some LLM booking schemas draw start_time + end_time as
+two required timestamps — the customer must never pick the END of their own appointment (it's start +
+the chosen service's duration). Extended the derive machinery: on a lifecycle table with a start event
+column AND an end column, the end column is made nullable (compiler), kept off the public form
+(formColumns), excluded from the event pick so min-notice/reminders/ICS/cancel still key on the START
+(WHEN_EXCLUDE += end/finish), and DERIVED at insert (end = start + service duration). app:check 202→205.
+Shipped 2ad8f21; full check (20 suites) green. Compiler change re-certified by a fresh barbershop flight
+(15/15, review passed, iteration 10→15 survived, chopslot.naples.agency) — it drew appointment_at so the
+end-time path is proven by the gate (real prod DB), not this build.
