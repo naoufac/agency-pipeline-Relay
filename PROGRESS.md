@@ -1081,3 +1081,21 @@ booking); 18 pre-existing test rows grandfathered so no stale reminders fired.
 Ops lesson (memory updated): dev .env shares the PROD DB — sweep-style gates must scope to their
 scratch project; injectable senders are mandatory for anything that mails.
 lifecycle:check = suite 20 (24 gates). Full check green. Shipped 0f7c379.
+
+## 2026-07-05 — Adversarial audit of the lifecycle surface: 7 findings closed + gated
+
+5-lens find→verify workflow over this morning's lifecycle code. 8 confirmed (7 distinct), fixed:
+· CRITICAL XSS: /act page interpolated visitor customer_name into HTML unescaped (owner opens it
+  on the board origin → visitor→owner stored XSS). Now esc()'d; generalized to show any *name*
+  column (patient_name/guest_name) so the owner sees the person, not "#42". LIVE-PROVEN: a
+  <script> payload rendered as inert &lt;script&gt;, name still shown, zero raw tags.
+· CRITICAL wrong event-column: reminder sweep + ICS feed picked "first date column" → on a table
+  with date_of_birth they keyed on the birth date. New shared pickWhenColumn() excludes personal/
+  bookkeeping dates, prefers the appointment column. SIBLING bug the gate caught: insertRow's
+  past-date guard (and slotGuard min-notice) rejected a booking because an unrelated date_of_birth
+  was in the past — now only the event column is past-checked.
+· HIGH: corrupt locale threw in Intl and killed the whole sweep → locale clamped + per-project
+  try/catch. reminder_log pruned (60-day TTL). 30-min scheduler given an in-flight latch.
+lifecycle:check 24→32; full check (20 suites) green. Shipped 60c5add.
+Process note: I briefly committed through a stale source-pin (functional fix was fine); caught it,
+fixed the pin, re-ran full check green, redeployed. Never leave a red gate shipped.
