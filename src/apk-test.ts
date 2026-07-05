@@ -122,6 +122,11 @@ const server = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
 ok('server: .apk has the android MIME type', server.includes("apk: 'application/vnd.android.package-archive'"));
 ok('server: subdomain Host-routing exists (the APK origin resolves)', server.includes('.naples.agency') && server.includes("path = '/sites/'"));
 {
+  const i2 = server.indexOf('RELAY_HOME_SLUG');
+  const apex = i2 >= 0 ? server.slice(Math.max(0, i2 - 400), i2 + 600) : '';
+  ok('server: apex shop-window routing exists, env-gated + api/sites excluded (inert until flipped)', i2 >= 0 && apex.includes("reqHost === 'naples.agency'") && apex.includes('www.naples.agency') && apex.includes("!path.startsWith('/api/')"));
+}
+{
   const i = server.indexOf("path === '/api/apk'");
   const route = i >= 0 ? server.slice(i, i + 1200) : '';
   ok('server: /api/apk exists and is ownership-gated (404, never leaked)', i >= 0 && route.includes('canSee') && route.includes('ownerOf'));

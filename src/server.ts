@@ -110,6 +110,13 @@ const server = http.createServer(async (req, res) => {
     // tunnel ingress lands here; explicit hosts like board/api keep their own ingress rules).
     // /api/* stays untouched on every host — produced pages call it with absolute paths.
     const reqHost = String(req.headers.host || '').toLowerCase().split(':')[0];
+    // THE SHOP WINDOW: when RELAY_HOME_SLUG is set AND the apex DNS points here, naples.agency
+    // (+ www) serves the agency's own pipeline-built site — the dogfood demo. Inert until the
+    // owner flips the env + DNS; the existing apex page is never stomped from code.
+    if ((reqHost === 'naples.agency' || reqHost === 'www.naples.agency') && process.env.RELAY_HOME_SLUG && !path.startsWith('/api/') && !path.startsWith('/sites/')) {
+      const hp = (await pool.query("select id from projects where params->>'slug' = $1 limit 1", [process.env.RELAY_HOME_SLUG])).rows[0];
+      if (hp) path = '/sites/' + hp.id + (path === '/' ? '/' : path);
+    }
     const sub = reqHost.match(/^([a-z0-9][a-z0-9-]{0,62})\.naples\.agency$/)?.[1];
     if (sub && !/^(board|api|email|cms|sites|www|mail|admin|status|relay)$/.test(sub) && !path.startsWith('/api/') && !path.startsWith('/sites/')) {
       const pr = (await pool.query("select id from projects where params->>'slug' = $1 limit 1", [sub])).rows[0];
