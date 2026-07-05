@@ -13,7 +13,10 @@
 
 const OR_KEY = process.env.OPENROUTER_API_KEY;
 const OR_BASE = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-const OR_MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m2.7'; // MiniMax-only, has reasoning
+const OR_MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m2.7'; // used for WEB-grounded calls (Exa plugin is OR-only)
+// the FALLBACK when MiniMax-direct is quota-dead: a FREE/cheap OpenRouter model — the owner's
+// call ('as fallback use free models / really cheap one'); override via env.
+const OR_FALLBACK_MODEL = process.env.OPENROUTER_FALLBACK_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
 const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
@@ -182,63 +185,66 @@ async function callMiniMaxDirect(messages: any[], maxTokens: number, timeoutMs: 
   return { text, meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: true } };
 }
 
-// one 8-token ping of the FALLBACK provider (MiniMax-direct) — used by the daily digest so a
-// stale second key surfaces before the day the primary lapses. null = no fallback configured.
+// one small ping of the FALLBACK (the OpenRouter free model) — used by the daily digest so a
+// dead fallback surfaces before the day the primary lapses. null = no fallback configured.
 export async function pingFallback(): Promise<boolean | null> {
   if (!OR_KEY || !KEY) return null;   // fallback only exists when BOTH are configured
-  // 400 tokens, not 8 — a REASONING model spends its budget in <think> first; a tiny cap starves
-  // the answer and false-flags a healthy provider as dead
-  try { const r = await callMiniMaxDirect([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], 400, 30000, false, Date.now()); return !!r.meta.ok; }
+  // 400 tokens — enough even for a reasoning model to close its think block
+  try { const r = await callOpenRouter([{ role: 'system', content: 'Answer with the single word: ok' }, { role: 'user', content: 'ping' }], OR_FALLBACK_MODEL, 400, 30000, false, Date.now()); return !!r.meta.ok; }
   catch { return false; }
 }
 
+async function callOpenRouter(messages: any[], model: string, maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {
+  const body: any = { model, messages, temperature: 0.7, max_tokens: maxTokens };
+  // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
+  if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
+  // reasoning effort only for models that HAVE reasoning — a free non-reasoning model may reject it
+  if (/minimax|deepseek-r1|o[13]-|thinking/i.test(model)) body.reasoning = { effort: 'minimal' };
+  const res = await fetch(`${OR_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OR_KEY}`, 'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data: any = await res.json();
+  const text = String(data?.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  if (!text) {
+    const fin = data?.choices?.[0]?.finish_reason;
+    throw new Error(fin === 'length'
+      ? 'OpenRouter: truncated before content — raise max_tokens (reasoning ate the budget)'
+      : 'OpenRouter: empty response ' + JSON.stringify(data).slice(0, 200));
+  }
+  return { text, meta: { provider: 'openrouter', model, latencyMs: Date.now() - t0, web, ok: true } };
+}
+
+// PROVIDER ORDER (owner's directive 2026-07-05): MiniMax-direct is the PRIMARY — the coding
+// plan carries ~12.5B tokens/month of M3. OpenRouter is the FALLBACK on a FREE/cheap model.
+// Exception: web-grounded calls (research/strategy) go OR-first — the Exa plugin is OR-only —
+// and fall back to MiniMax UNgrounded rather than fail. Transient errors never fail over.
 export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;
   const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : LLM_TIMEOUT_MS;  // compose (whole site) needs more
-  // provider/model are FIXED by the SAME openrouter-first logic as before — instrumentation only observes it.
-  const provider: 'openrouter' | 'minimax-direct' = OR_KEY ? 'openrouter' : 'minimax-direct';
-  const model = OR_KEY ? OR_MODEL : MODEL;
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
+  const primary: 'openrouter' | 'minimax-direct' = (web && OR_KEY) ? 'openrouter' : (KEY ? 'minimax-direct' : 'openrouter');
   try {
-    if (OR_KEY) {
-      const body: any = { model: OR_MODEL, messages, temperature: 0.7, max_tokens: maxTokens };
-      // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
-      if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
-      // Fastest reasoning the proxy/model allows (m2.7 requires reasoning; 'minimal' = least thinking,
-      // least latency). The model only WRITES copy — it NEVER decides the stack (CMS choice is forced
-      // deterministically in code, never by the model).
-      body.reasoning = { effort: 'minimal' };
-      const res = await fetch(`${OR_BASE}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${OR_KEY}`, 'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://board.naples.agency', 'X-Title': 'Relay',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      const data: any = await res.json();
-      const text = data?.choices?.[0]?.message?.content;  // reasoning lands in a separate field; content is clean
-      if (!text || !String(text).trim()) {
-        const fin = data?.choices?.[0]?.finish_reason;
-        throw new Error(fin === 'length'
-          ? 'OpenRouter: truncated before content — raise max_tokens (reasoning ate the budget)'
-          : 'OpenRouter: empty response ' + JSON.stringify(data).slice(0, 200));
-      }
-      return { text: String(text), meta: { provider: 'openrouter', model: OR_MODEL, latencyMs: Date.now() - t0, web, ok: true } };
-    }
-    // no OpenRouter key → MiniMax-direct is the primary
+    if (primary === 'openrouter') return await callOpenRouter(messages, web ? OR_MODEL : OR_FALLBACK_MODEL, maxTokens, timeoutMs, web, t0);
     return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0);
   } catch (e: any) {
-    // FAILOVER: OpenRouter account unusable (quota/credits/key) + a direct key configured →
-    // the same request rides the second provider. Transient errors do NOT fail over (they retry).
-    if (OR_KEY && KEY && isQuotaExhausted(e?.message)) {
-      try { return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0); }
-      catch (e2: any) { return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `failover after [${String(e?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } }; }
+    if (isQuotaExhausted(e?.message) && OR_KEY && KEY) {
+      try {
+        return primary === 'minimax-direct'
+          ? await callOpenRouter(messages, OR_FALLBACK_MODEL, maxTokens, timeoutMs, false, t0)
+          : await callMiniMaxDirect(messages, maxTokens, timeoutMs, false, t0);
+      } catch (e2: any) {
+        return { text: '', meta: { provider: primary === 'minimax-direct' ? 'openrouter' : 'minimax-direct', model: primary === 'minimax-direct' ? OR_FALLBACK_MODEL : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `failover after [${String(e?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
+      }
     }
-    return { text: '', meta: { provider, model, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
+    return { text: '', meta: { provider: primary, model: primary === 'openrouter' ? (web ? OR_MODEL : OR_FALLBACK_MODEL) : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
   }
 }
 
