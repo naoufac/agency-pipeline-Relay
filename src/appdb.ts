@@ -6,7 +6,7 @@ import { L, columnLabel } from './i18n.ts';
 // the only schema we ever create/drop/write is `app_<32hex>` derived from the project UUID.
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
-import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE } from './schema.ts';
+import { parseModel, compile, lit, PRIVATE_READ, LIFECYCLE_TABLE, STATUS_SET, SLOT_TABLE, pickWhenColumn } from './schema.ts';
 import { localRowImage } from './rowmedia.ts';
 
 // FS0 — who is reading? 'public' = the produced site's anonymous data API (private visitor-record
@@ -540,8 +540,11 @@ export async function insertRow(pool: pg.Pool, projectId: string, table: string,
   // lie in the copy): a date in the past is refused; a full slot is refused (capacity-aware).
   if (audience !== 'owner' && PRIVATE_READ.test(table)) {
     const today = new Date().toISOString().slice(0, 10);
+    // only the EVENT column may not be in the past — a personal date the visitor also submits
+    // (date_of_birth) is legitimately in the past and must NOT block the booking. (audit 2026-07-05)
+    const eventCol = pickWhenColumn(use);
     for (const c of use) {
-      if (!/^(date|timestamp)/.test(c.type)) continue;
+      if (c.name !== eventCol || !/^(date|timestamp)/.test(c.type)) continue;
       const m = String(data[c.name] ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
       if (m && m[1] < today) { const l2 = await localeOf(pool, projectId); return { ok: false, error: L(l2, 'err_past_date', { f: columnLabel(l2, c.name, c.name.replace(/_/g, ' ')).toLowerCase() }) }; }
     }
@@ -602,7 +605,8 @@ async function slotGuard(pool: pg.Pool, projectId: string, schema: string, table
   const pol = (await pool.query("select params->'policies' as p from projects where id=$1", [projectId])).rows[0]?.p || {};
   const notice = Number(pol.min_notice_hours) || 0;
   if (notice > 0) {
-    const whenCol = used.find(c => /^(date|timestamp)/.test(c.type));
+    const whenName = pickWhenColumn(used);   // the EVENT column, not a birth date the visitor also gave
+    const whenCol = whenName ? used.find(c => c.name === whenName) : undefined;
     const when = whenCol ? new Date(coerce(data[whenCol.name], whenCol.type)) : null;
     if (when && !isNaN(+when) && +when < Date.now() + notice * 3_600_000) {
       return L(await localeOf(pool, projectId), 'err_too_soon', { n: notice });

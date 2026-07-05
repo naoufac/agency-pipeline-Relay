@@ -20,6 +20,7 @@ import { apkStatus, packageProjectAsync } from './apk.ts';
 import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
 import { startTgDoor } from './tg-door.ts';
 import { L } from './i18n.ts';
+import { esc } from './components.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -335,9 +336,13 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const thing = hit.table.replace(/s$/, '').replace(/_/g, ' ');
       const label = aQ === 'confirm' ? L(loc, 'act_confirm_btn', { x: thing }) : L(loc, 'act_decline_btn');
       const tone = aQ === 'confirm' ? '#16a34a' : '#dc2626';
+      // esc() the visitor-controlled name — the owner opens this page from their email on the board
+      // origin, so an unescaped name would be a visitor→owner stored XSS. (audit 2026-07-05)
+      const who = esc(String(hit.row.customer_name || hit.row.name || '#' + hit.row.id));
+      const statusNote = esc(L(loc, 'act_already', { s: String(hit.row.status || 'pending') }).replace(/^[^—–:]*[—–:]\s*/, ''));
       return send(res, 200, 'text/html; charset=utf-8', page(
-        `<p style="color:#666">${String(hit.row.customer_name || hit.row.name || '#' + hit.row.id)} · ${L(loc, 'act_already', { s: String(hit.row.status || 'pending') }).replace(/^[^—–:]*[—–:]\s*/, '')}</p>
-         <form method="post"><button style="font-size:17px;padding:12px 28px;border:0;border-radius:10px;background:${tone};color:#fff;cursor:pointer">${label}</button></form>`));
+        `<p style="color:#666">${who} · ${statusNote}</p>
+         <form method="post"><button style="font-size:17px;padding:12px 28px;border:0;border-radius:10px;background:${tone};color:#fff;cursor:pointer">${esc(label)}</button></form>`));
     }
     // OWNER CALENDAR FEED: bookings as iCalendar — paste once into Google/Apple Calendar.
     // The key is the auth (calendar apps cannot sign in), minted by the integrations step.
@@ -778,7 +783,15 @@ import('./chat.ts').then((m) => m.ensureChatTables(pool)).catch((e) => console.e
 import('./lifecycle.ts').then((m) => {
   m.ensureLifecycleTables(pool).catch((e) => console.error('lifecycle tables', e?.message));
   if (mailReady()) {
-    const run = () => m.sweepReminders(pool).then((n) => { if (n) console.log(`reminders: ${n} sent`); }).catch((e) => console.error('reminders', e?.message));
+    // in-flight guard: a slow sweep (many projects) must never overlap the next tick and double-work
+    let sweeping = false;
+    const run = async () => {
+      if (sweeping) return;
+      sweeping = true;
+      try { const n = await m.sweepReminders(pool); if (n) console.log(`reminders: ${n} sent`); }
+      catch (e: any) { console.error('reminders', e?.message); }
+      finally { sweeping = false; }
+    };
     setTimeout(run, 3 * 60_000).unref?.();
     setInterval(run, 30 * 60_000).unref?.();
   }

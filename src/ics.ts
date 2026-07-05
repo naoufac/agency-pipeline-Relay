@@ -5,7 +5,7 @@
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
 import * as appdb from './appdb.ts';
-import { PRIVATE_READ } from './schema.ts';
+import { PRIVATE_READ, pickWhenColumn } from './schema.ts';
 
 export async function calKeyFor(pool: pg.Pool, projectId: string): Promise<string> {
   const cur = (await pool.query("select params->>'cal_key' as k from projects where id=$1", [projectId])).rows[0]?.k;
@@ -47,7 +47,8 @@ export async function buildIcs(pool: pg.Pool, projectId: string): Promise<string
   for (const t of [...new Set(candidates)]) {
     if (!tables.includes(t)) continue;
     const cols = await appdb.formColumns(pool, projectId, t, 'owner').catch(() => []);
-    const when = cols.find((c: any) => /timestamp|date/.test(String(c.type)) && !/created_at/.test(c.name));
+    const whenName = pickWhenColumn(cols as any);   // the EVENT column, never date_of_birth / created_at
+    const when = whenName ? (cols as any[]).find((c: any) => c.name === whenName) : null;
     if (!when) continue;
     const dateOnly = String(when.type) === 'date';   // a date column is an ALL-DAY event, not 00:00Z
     const nameCol = cols.find((c: any) => /(^|_)name$/.test(c.name))?.name;

@@ -100,9 +100,67 @@ try {
   ok('server: the act route exists and rides the read rate-cap', /\/act\$\/\)/.test(serverSrc) && /actM[\s\S]{0,200}readLimited/.test(serverSrc));
   ok('server: only POST calls applyAction (GET is prefetch-safe)', (serverSrc.match(/applyAction\(/g) || []).length === 1 && /req\.method === 'POST'[\s\S]{0,200}applyAction\(/.test(serverSrc));
   ok('server: lifecycle inserts mint signed confirm+decline links into the lead mail', serverSrc.includes("actToken(dataM[1], r.ref, 'confirm')") && serverSrc.includes('a=decline&t='));
-  ok('server: the reminder sweep is scheduled (30 min, mailReady-gated)', serverSrc.includes('sweepReminders(pool)') && /mailReady\(\)[\s\S]{0,400}setInterval\(run, 30 \* 60_000\)/.test(serverSrc));
+  ok('server: the reminder sweep is scheduled (30 min, mailReady-gated)', serverSrc.includes('sweepReminders(pool)') && serverSrc.includes('setInterval(run, 30 * 60_000)') && /if \(mailReady\(\)\)/.test(serverSrc));
   const mailSrc = (await import('node:fs')).readFileSync(new URL('./mail.ts', import.meta.url), 'utf8');
   ok('mail: notifyLead carries the one-tap links when given', /actions \? [\s\S]{0,80}Confirm: \$\{actions\.confirm\}/.test(mailSrc));
+
+  // ---- ADVERSARIAL AUDIT 2026-07-05 on the lifecycle surface: 7 findings closed ----
+  // XSS: the act page escapes visitor-controlled name (owner opens it on the board origin)
+  ok('server: the act page escapes the visitor name (no visitor→owner XSS)', /const who = esc\(String\(hit\.row\.customer_name/.test(serverSrc) && serverSrc.includes("import { esc } from './components.ts'"));
+
+  // WRONG WHEN-COLUMN: a booking table that ALSO has date_of_birth must remind on the appointment,
+  // never the birth date — pickWhenColumn is the shared, correct picker.
+  const { pickWhenColumn } = await import('./schema.ts');
+  ok('schema: pickWhenColumn skips date_of_birth, prefers the appointment column',
+    pickWhenColumn([{ name: 'date_of_birth', type: 'date' }, { name: 'appointment_at', type: 'timestamptz' }]) === 'appointment_at'
+    && pickWhenColumn([{ name: 'created_at', type: 'timestamptz' }, { name: 'starts_at', type: 'timestamptz' }]) === 'starts_at'
+    && pickWhenColumn([{ name: 'date_of_birth', type: 'date' }]) === null);
+  // functional: a booking table carrying date_of_birth reminds on the real event, and never on the DOB
+  {
+    const bid = randomUUID(); const bsch = appdb.schemaName(bid);
+    try {
+      await pool.query(`insert into projects(id, brief, status, params) values ($1,'dob scratch','done',$2)`,
+        [bid, JSON.stringify({ slug: 'dob-scratch-x', locale: 'en', schema_forms: { actionTable: 'appointments' } })]);
+      await appdb.provision(pool, bid, JSON.stringify({ entities: [
+        { name: 'appointments', public: false, fields: [
+          { name: 'customer_name', type: 'text', required: true },
+          { name: 'date_of_birth', type: 'date' },
+          { name: 'appointment_at', type: 'datetime', required: true }] },
+      ] }));
+      const soon = new Date(Date.now() + 6 * 3_600_000).toISOString();
+      await appdb.insertRow(pool, bid, 'appointments', { customer_name: 'Dora', email: 'dora@example.com', date_of_birth: '1990-01-15', appointment_at: soon });
+      const outb: string[] = [];
+      const n = await sweepReminders(pool, { hours: 24, projectIds: [bid], send: async (_p: any, _i: any, to: string) => { outb.push(to); return { ok: true }; } });
+      ok('reminder keyed on the EVENT column even when a birth date exists', n === 1 && outb[0] === 'dora@example.com', JSON.stringify({ n, outb }));
+    } finally {
+      await pool.query(`drop schema if exists "${bsch}" cascade`).catch(() => {});
+      await pool.query('delete from reminder_log where project_id=$1', [bid]).catch(() => {});
+      await pool.query('delete from projects where id=$1', [bid]).catch(() => {});
+    }
+  }
+  // LOCALE CRASH ISOLATION: a corrupt locale must not throw and kill the sweep
+  {
+    const lid = randomUUID(); const lsch = appdb.schemaName(lid);
+    try {
+      await pool.query(`insert into projects(id, brief, status, params) values ($1,'bad locale','done',$2)`,
+        [lid, JSON.stringify({ slug: 'badloc-x', locale: 'not-a-locale', schema_forms: { actionTable: 'bookings' } })]);
+      await appdb.provision(pool, lid, JSON.stringify({ entities: [
+        { name: 'bookings', public: false, fields: [{ name: 'customer_name', type: 'text', required: true }, { name: 'starts_at', type: 'datetime', required: true }] },
+      ] }));
+      await appdb.insertRow(pool, lid, 'bookings', { customer_name: 'Zed', email: 'zed@example.com', starts_at: new Date(Date.now() + 5 * 3_600_000).toISOString() });
+      const outb: string[] = [];
+      const n = await sweepReminders(pool, { hours: 24, projectIds: [lid], send: async (_p: any, _i: any, to: string) => { outb.push(to); return { ok: true }; } });
+      ok('a corrupt project locale does not crash the sweep (falls back to en)', n === 1 && outb[0] === 'zed@example.com', JSON.stringify({ n, outb }));
+    } finally {
+      await pool.query(`drop schema if exists "${lsch}" cascade`).catch(() => {});
+      await pool.query('delete from reminder_log where project_id=$1', [lid]).catch(() => {});
+      await pool.query('delete from projects where id=$1', [lid]).catch(() => {});
+    }
+  }
+  ok('lifecycle: reminder_log is pruned (bounded growth)', (await import('node:fs')).readFileSync(new URL('./lifecycle.ts', import.meta.url), 'utf8').includes("delete from reminder_log where sent_at < now() - interval '60 days'"));
+  ok('lifecycle: one project error is isolated, never aborts the whole sweep', (await import('node:fs')).readFileSync(new URL('./lifecycle.ts', import.meta.url), 'utf8').includes('project skipped after error'));
+  ok('server: the reminder scheduler has an in-flight guard (no overlapping sweeps)', /let sweeping = false[\s\S]{0,200}if \(sweeping\) return/.test(serverSrc));
+  ok('ics: the calendar feed uses the same event-column picker', (await import('node:fs')).readFileSync(new URL('./ics.ts', import.meta.url), 'utf8').includes('pickWhenColumn(cols'));
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.stack || e?.message || e);
 } finally {

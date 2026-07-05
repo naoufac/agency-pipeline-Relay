@@ -25,6 +25,17 @@ export const PRIVATE_READ = /^(_relay_\w+|orders?|order_items|bookings?|appointm
 // hidden from public forms (SYSTEM_COLS), flipped only by the owner through the closed set.
 export const LIFECYCLE_TABLE = /^(bookings?|appointments?|reservations?|reservation_requests?|orders?|rsvps?|requests?|applications?|registrations?|preorders?|pre_orders?|deliveries|enquir(?:y|ies)|inquir(?:y|ies))$/i;
 export const STATUS_SET = ['pending', 'confirmed', 'declined', 'cancelled', 'new', 'completed'];
+
+// THE EVENT-TIME COLUMN of a lifecycle row (the calendar feed and reminders both need it). Picking
+// "the first date/timestamp column" is WRONG — a booking table may also carry date_of_birth, and a
+// reminder keyed on that never fires (audit 2026-07-05). Exclude personal/bookkeeping dates, then
+// prefer an obvious appointment column, else fall back to the first remaining dated column.
+const WHEN_EXCLUDE = /(^|_)(birth|dob|created|updated|modified|expire[sd]?|deleted|joined|hired|since|anniversar)/i;
+const WHEN_PREFER = /(scheduled|starts?_|start_at|appointment|booking|reserv|slot|due|when|_at$|_date$|_time$|^date$|^time$)/i;
+export function pickWhenColumn(cols: { name: string; type: string }[]): string | null {
+  const dated = cols.filter((c) => /timestamp|date|time/.test(String(c.type)) && !WHEN_EXCLUDE.test(c.name));
+  return dated.find((c) => WHEN_PREFER.test(c.name))?.name ?? dated[0]?.name ?? null;
+}
 // slot-shaped tables where double-booking semantics apply (strict set — never forced onto tables
 // that legitimately allow duplicates, like orders)
 export const SLOT_TABLE = /^(bookings?|appointments?|reservations?)$/i;

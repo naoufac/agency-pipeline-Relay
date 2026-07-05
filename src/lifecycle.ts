@@ -12,9 +12,9 @@
 import pg from 'pg';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import * as appdb from './appdb.ts';
-import { LIFECYCLE_TABLE, PRIVATE_READ } from './schema.ts';
+import { LIFECYCLE_TABLE, PRIVATE_READ, pickWhenColumn } from './schema.ts';
 import { sendMail, isQaProbe } from './mail.ts';
-import { L } from './i18n.ts';
+import { L, isLocale } from './i18n.ts';
 import { ev } from './db.ts';
 
 export type Action = 'confirm' | 'decline';
@@ -92,43 +92,52 @@ export async function sweepReminders(pool: pg.Pool, opts: { hours?: number; cap?
   const hours = Math.min(168, Math.max(1, Number(process.env.REMINDER_HOURS || opts.hours || 24)));
   const cap = opts.cap ?? 100;
   const send = opts.send || sendMail;
+  // the log is append-only per booking; a booking 60+ days past will never be swept again, so its
+  // claim can go — keeps reminder_log from growing without bound. (audit 2026-07-05)
+  await pool.query("delete from reminder_log where sent_at < now() - interval '60 days'").catch(() => {});
   const projects = (await pool.query(
     `select id, params->>'slug' as slug, params->>'locale' as loc, params->'schema_forms'->>'actionTable' as act from projects where status='done'${opts.projectIds ? ' and id = any($1)' : ''}`,
     opts.projectIds ? [opts.projectIds] : [])).rows;
   let sent = 0;
   for (const p of projects) {
     if (sent >= cap) { console.log(`reminders: cap ${cap} reached — remaining projects wait for the next sweep`); break; }
-    const schema = appdb.schemaName(p.id);
-    const tables = await appdb.listTables(pool, p.id).catch(() => [] as string[]);
-    for (const t of [...new Set([String(p.act || ''), ...tables.filter((x) => LIFECYCLE_TABLE.test(x))])].filter(Boolean)) {
-      if (!tables.includes(t) || !IDENT.test(t)) continue;
-      const cols = (await pool.query('select column_name, data_type from information_schema.columns where table_schema=$1 and table_name=$2', [schema, t])).rows;
-      const names = cols.map((c: any) => c.column_name);
-      const when = cols.find((c: any) => /timestamp|date/.test(String(c.data_type)) && c.column_name !== 'created_at')?.column_name;
-      const mailCol = names.includes('email') ? 'email' : (names.includes('customer_email') ? 'customer_email' : null);
-      if (!when || !mailCol) continue;
-      const rows = (await pool.query(
-        `select r.* from "${schema}"."${t}" r
-         where r."${when}" > now() and r."${when}" <= now() + ($1 || ' hours')::interval
-           and coalesce(r."${mailCol}",'') <> ''
-           ${names.includes('status') ? "and coalesce(r.\"status\",'pending') not in ('declined','cancelled')" : ''}
-           and not exists (select 1 from public.reminder_log l where l.project_id=$2 and l.tbl=$3 and l.row_id=r.id)
-         order by r."${when}" limit 50`, [String(hours), p.id, t])).rows;
-      for (const r of rows) {
-        if (sent >= cap) break;
-        if (isQaProbe(r)) continue;
-        const claimed = await pool.query('insert into reminder_log(project_id, tbl, row_id) values ($1,$2,$3) on conflict do nothing returning 1', [p.id, t, r.id]);
-        if (!claimed.rows.length) continue;   // another sweep owns it
-        const base = p.slug ? `https://${p.slug}.naples.agency` : `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/sites/${p.id}`;
-        const thing = t.replace(/s$/, '').replace(/_/g, ' ');
-        const whenTxt = new Intl.DateTimeFormat(p.loc || 'en', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(r[when]));
-        const link = r.ref_token ? `\n\n${base}/receipt-${t}-${r.ref_token}.html` : `\n\n${base}`;
-        const res = await send(pool, p.id, String(r[mailCol]).trim(),
-          L(p.loc, 'mail_reminder_subject', { x: thing }),
-          L(p.loc, 'mail_reminder_body', { x: thing, when: whenTxt }) + link).catch(() => ({ ok: false }));
-        if (res.ok) { sent++; await ev(pool, p.id, null, 'reminder_sent', `${t} #${r.id} · ${whenTxt}`).catch(() => {}); }
-        else await pool.query('delete from reminder_log where project_id=$1 and tbl=$2 and row_id=$3', [p.id, t, r.id]).catch(() => {});
+    // ONE project's bad schema/locale must never abort the sweep for everyone else. (audit 2026-07-05)
+    try {
+      const loc = isLocale(p.loc) ? p.loc : 'en';   // a corrupt locale would throw in Intl and kill the run
+      const schema = appdb.schemaName(p.id);
+      const tables = await appdb.listTables(pool, p.id).catch(() => [] as string[]);
+      for (const t of [...new Set([String(p.act || ''), ...tables.filter((x) => LIFECYCLE_TABLE.test(x))])].filter(Boolean)) {
+        if (!tables.includes(t) || !IDENT.test(t)) continue;
+        const cols = (await pool.query('select column_name as name, data_type as type from information_schema.columns where table_schema=$1 and table_name=$2', [schema, t])).rows;
+        const names = cols.map((c: any) => c.name);
+        const when = pickWhenColumn(cols);   // the EVENT column, never date_of_birth / created_at
+        const mailCol = names.includes('email') ? 'email' : (names.includes('customer_email') ? 'customer_email' : null);
+        if (!when || !mailCol) continue;
+        const rows = (await pool.query(
+          `select r.* from "${schema}"."${t}" r
+           where r."${when}" > now() and r."${when}" <= now() + ($1 || ' hours')::interval
+             and coalesce(r."${mailCol}",'') <> ''
+             ${names.includes('status') ? "and coalesce(r.\"status\",'pending') not in ('declined','cancelled')" : ''}
+             and not exists (select 1 from public.reminder_log l where l.project_id=$2 and l.tbl=$3 and l.row_id=r.id)
+           order by r."${when}" limit 50`, [String(hours), p.id, t])).rows;
+        for (const r of rows) {
+          if (sent >= cap) break;
+          if (isQaProbe(r)) continue;
+          const claimed = await pool.query('insert into reminder_log(project_id, tbl, row_id) values ($1,$2,$3) on conflict do nothing returning 1', [p.id, t, r.id]);
+          if (!claimed.rows.length) continue;   // another sweep owns it
+          const base = p.slug ? `https://${p.slug}.naples.agency` : `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/sites/${p.id}`;
+          const thing = t.replace(/s$/, '').replace(/_/g, ' ');
+          const whenTxt = new Intl.DateTimeFormat(loc, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(r[when]));
+          const link = r.ref_token ? `\n\n${base}/receipt-${t}-${r.ref_token}.html` : `\n\n${base}`;
+          const res = await send(pool, p.id, String(r[mailCol]).trim(),
+            L(loc, 'mail_reminder_subject', { x: thing }),
+            L(loc, 'mail_reminder_body', { x: thing, when: whenTxt }) + link).catch(() => ({ ok: false }));
+          if (res.ok) { sent++; await ev(pool, p.id, null, 'reminder_sent', `${t} #${r.id} · ${whenTxt}`).catch(() => {}); }
+          else await pool.query('delete from reminder_log where project_id=$1 and tbl=$2 and row_id=$3', [p.id, t, r.id]).catch(() => {});
+        }
       }
+    } catch (e: any) {
+      console.error('reminders: project skipped after error', p.id, e?.message ?? e);
     }
   }
   return sent;
