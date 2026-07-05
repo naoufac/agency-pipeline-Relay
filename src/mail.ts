@@ -39,11 +39,15 @@ export async function sendMail(pool: pg.Pool | null, projectId: string | null, t
 // not when they next open a dashboard. Fire-and-forget from the submission handlers.
 // Returns whether a mail was queued (false for QA probes) so the gate can assert the guard.
 const QA_MARKER = /Automated QA check — please ignore|^QA Test \d/;
+// the interaction reviewer's test submissions must never generate REAL email — not leads,
+// not visitor confirmations (they'd spam qa@example.com on every single build)
+export const isQaProbe = (data: Record<string, any>): boolean =>
+  Object.values(data || {}).some((v) => QA_MARKER.test(String(v)));
 export function notifyLead(pool: pg.Pool, projectId: string, brief: string, form: string, data: Record<string, any>): boolean {
   const to = process.env.OPERATOR_EMAIL;
   if (!to || !mailReady()) return false;
   // the interaction reviewer submits test rows on every build — those are probes, not leads
-  if (Object.values(data || {}).some((v) => QA_MARKER.test(String(v)))) return false;
+  if (isQaProbe(data)) return false;
   const lines = Object.entries(data || {}).slice(0, 12).map(([k, v]) => `${k}: ${String(v).slice(0, 200)}`).join('\n');
   const site = String(brief || '').slice(0, 80);
   sendMail(pool, projectId, to, `New lead — ${site}`,

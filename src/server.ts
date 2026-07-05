@@ -14,7 +14,7 @@ import { renderLiveFromCms, renderLivePdp, renderLiveReceipt, renderLiveFind, re
 import { requestVisitorMagic, verifyVisitorMagic, visitorFromCookie, visitorCookie, clearVisitorCookie, logoutVisitor } from './visitors.ts';
 import { reviewSite, qaRunning } from './qa.ts';
 import * as appdb from './appdb.ts';
-import { mailReady, notifyLead, sendMail } from './mail.ts';
+import { mailReady, notifyLead, sendMail, isQaProbe } from './mail.ts';
 import { apkStatus, packageProjectAsync } from './apk.ts';
 import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
 import { startTgDoor } from './tg-door.ts';
@@ -416,7 +416,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           // VISITOR CONFIRMATION (the notifications leg): a booking with an email gets its receipt
           // link by mail, in the site's language — fire-and-forget, mailReady-guarded inside sendMail
           const vmail = String(data.email || data.customer_email || '').trim();
-          if (r.ref && proj && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(vmail)) {
+          if (r.ref && proj && !isQaProbe(data) && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(vmail)) {
             const { L } = await import('./i18n.ts');
             const base = proj.slug ? `https://${proj.slug}.naples.agency` : `${process.env.PUBLIC_URL || 'https://board.naples.agency'}/sites/${dataM[1]}`;
             const thing = dataM[2].replace(/s$/, '').replace(/_/g, ' ');

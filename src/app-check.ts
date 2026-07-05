@@ -442,6 +442,9 @@ try {
   const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
   ok('server: calendar.ics route is key-auth\'d + rate-capped', serverSrc.includes('calendar\\.ics') && /wantKey !== haveKey/.test(serverSrc) && /icsM && req\.method === 'GET'[\s\S]{0,200}readLimited/.test(serverSrc));
   ok('server: visitor confirmation mail rides the insert (localized, receipt link)', serverSrc.includes('mail_confirm_subject') && serverSrc.includes("receipt-${dataM[2]}-${r.ref}"));
+  ok('server: QA probes never receive real email (caught live: qa@example.com got a confirmation)', serverSrc.includes('!isQaProbe(data)'));
+  const mailSrc = (await import('node:fs')).readFileSync(new URL('./mail.ts', import.meta.url), 'utf8').toString();
+  ok('mail: ONE probe detector shared by leads and confirmations', mailSrc.includes('export const isQaProbe'));
 }
 
 console.log(`\napp:check — ${pass} passed, ${fail} failed`);
