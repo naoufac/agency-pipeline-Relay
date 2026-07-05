@@ -1193,3 +1193,19 @@ so they win the cascade. Canary reverted after.
 OPEN FORK (owner's call): (a) design IDENTITY from a source = shipped; (b) full 1:1 pixel-faithful
 LAYOUT import = a different rendering paradigm (big). And to run the adapter on REAL data, need a Figma
 file/URL or a connected Figma account. Asked the owner.
+
+## 2026-07-05 — Design-ingestion audit: legibility guarantee survives design overrides
+
+Adversarial audit (4 lenses) of the figma-to-reality seam. 5 confirmed, two roots fixed:
+· LEGIBILITY (critical ×3, one cause): the renderer derived text/on-primary/muted/line with WCAG
+  contrast from the THEME bg+primary, then blindly appended the design's bg/primary AFTER — so a
+  Figma design with a dark bg (no text colour) left the theme's dark text on it = unreadable body
+  copy site-wide, and a new primary left button labels (on-primary) stale. Fixed: the design palette
+  now feeds the SAME contrast-guaranteed derivation (design bg/primary are the inputs; everything
+  re-derived against them). A design colour that FAILS contrast is dropped for the safe value —
+  closes the 'external token file with an illegible palette' gap too. Retired designVars (blind
+  palette append) for designTypeVars (fonts+radius only).
+· PRIVACY (medium): the Google-Fonts <link> now carries referrerpolicy=no-referrer.
+design:check 21→26 (real contrast-ratio assertions on the rendered vars). Full check (21 suites)
+green. Shipped 93fc2ea. LIVE PROOF: a dark-bg Figma design with no text colour → served page
+re-derived --text:#fff at 18.9:1 on the dark bg (legible), where pre-fix it would have been unreadable.
