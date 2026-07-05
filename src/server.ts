@@ -338,7 +338,10 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const tone = aQ === 'confirm' ? '#16a34a' : '#dc2626';
       // esc() the visitor-controlled name — the owner opens this page from their email on the board
       // origin, so an unescaped name would be a visitor→owner stored XSS. (audit 2026-07-05)
-      const who = esc(String(hit.row.customer_name || hit.row.name || '#' + hit.row.id));
+      // pick any *name* column (patient_name, guest_name, …), not just customer_name — else the owner
+      // sees a bare "#42" on tables that name the person differently.
+      const nameKey = Object.keys(hit.row).find((k) => /(^|_)name$/.test(k) && !/file|table|display/.test(k) && hit.row[k]);
+      const who = esc(String((nameKey && hit.row[nameKey]) || hit.row.name || hit.row.customer_name || '#' + hit.row.id));
       const statusNote = esc(L(loc, 'act_already', { s: String(hit.row.status || 'pending') }).replace(/^[^—–:]*[—–:]\s*/, ''));
       return send(res, 200, 'text/html; charset=utf-8', page(
         `<p style="color:#666">${who} · ${statusNote}</p>
