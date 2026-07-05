@@ -1141,3 +1141,21 @@ Status now renders as a closed dropdown in the edit form (no typo → no garbage
 New mail_status_cancelled_* ×5. lifecycle:check 48→56; full check green. Shipped 8a37779.
 LIVE PROOF (prod DB): invalid status refused (bad_status); pending→confirmed lands; terminal cancelled
 ✗→confirmed refused (illegal), final status cancelled.
+
+## 2026-07-05 — Certification flight caught a real booking bug (server-derived prices)
+
+Flew a fresh barbershop build to prove the accumulated lifecycle depth composes end-to-end. It did
+(16/16, review passed, iteration survived) — but exercising the produced site LIVE exposed what gates
+missed: the booking form asked the CUSTOMER to type in price / duration / total (a price-tamper vector
+and nonsense UX). Fixed the class:
+· schema compiler: a lifecycle table that refs a PRICED catalog gets its money/duration/total made
+  nullable (so the form can omit them).
+· formColumns: those columns excluded from the PUBLIC form (customer picks a service, never types a price).
+· insertRow: derived server-side from the chosen catalog row; a client-supplied price is OVERRIDDEN
+  (same anti-tamper rule as checkout). A lifecycle table with NO priced ref (donations) is untouched.
+Re-flew → the re-build showed 'total_price' still slipped through (fully-anchored regex). Widened
+DERIVED_* to word-boundary matching. Gates: app 195→202. Shipped 2cd20c9 + d5c4556; full check green.
+NOTED (not fixed): some LLM booking schemas draw start_time+end_time as two customer inputs; the
+customer shouldn't pick the end time (= start + duration). Bookings still work; refine next turn.
+PROCESS: a `pgrep -f canary.ts` cleanup self-matched my own shell and killed it (exit 144) — the code
+was already shipped, only this log + the report were lost. Use `ps -eo pid,cmd | grep '[c]anary'`.
