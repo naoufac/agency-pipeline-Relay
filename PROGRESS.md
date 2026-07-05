@@ -1171,3 +1171,25 @@ column AND an end column, the end column is made nullable (compiler), kept off t
 Shipped 2ad8f21; full check (20 suites) green. Compiler change re-certified by a fresh barbershop flight
 (15/15, review passed, iteration 10→15 survived, chopslot.naples.agency) — it drew appointment_at so the
 end-time path is proven by the gate (real prod DB), not this build.
+
+## 2026-07-05 — Figma → reality v1 (design-source ingestion) + the CMS decision
+
+Directive (garbled, strategic): "introduce [Canva] to full CMS (wp or others, decide) / maybe our
+system / Important: figma to reality." Grounded the decision in the real state:
+· CMS: produced sites ALREADY serve from our own renderer (Directus/WP are dormant plumbing) and the
+  whole verified pipeline depends on it → OUR SYSTEM stays the CMS. No WordPress (it would abandon the
+  gated pipeline for zero fidelity gain + re-open the "CMS over-claimed" wound). Directus remains an
+  optional external-admin backend that already exists if a client ever needs it.
+· The real "figma to reality" gap was IDENTITY: system fonts locked to 5 themes, no external-design
+  ingestion. Built src/design.ts: designFromTokens() maps an exported-tokens object (Figma variables /
+  Tokens Studio / Canva brand kit — same shape) → a Design {palette,fonts,radius}; the renderer honors
+  it OVER the theme and LOADS the web fonts (Google Fonts link); font names sanitized; ABSENT design →
+  byte-identical (zero regression). Rides on the canonical brand → identical per page. Deliberately NOT
+  a pixel-layout importer — Relay still composes verified sections (accessible, responsive, DB-wired).
+design:check (21 gates) = suite 21; full check green. Shipped f6902c3.
+LIVE PROOF: a realistic Figma token export → adapter → the live chopslot page rendered with the Figma
+palette (#f59e0b), fonts (Playfair Display + Inter loaded), radius (16px) — design vars appended last
+so they win the cascade. Canary reverted after.
+OPEN FORK (owner's call): (a) design IDENTITY from a source = shipped; (b) full 1:1 pixel-faithful
+LAYOUT import = a different rendering paradigm (big). And to run the adapter on REAL data, need a Figma
+file/URL or a connected Figma account. Asked the owner.
