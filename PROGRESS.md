@@ -1055,3 +1055,13 @@ findings, all fixed as CLASSES with deterministic gates. Highlights:
 
 Proof: full check (19 suites) green; app 195 / migrate 21 / chat 24; live continuum ICS feed
 validates (200, valid VCALENDAR, 0 lines >75 octets). Shipped b805057, deployed + restarted.
+
+## 2026-07-05 — Re-certification flight on the hardened build (b805057): GREEN, zero-touch
+
+Last night's 03:38 canary had legitimately SKIPPED (old exhausted key still deployed at that
+hour). Re-flown manually at 20:34 on the new provider chain + today's 15 audit fixes:
+· Italian trattoria brief → 17/17 tasks, independent review PASSED in 9 min.
+· Iteration leg exercised the NEW startRebuild() path end-to-end: rebuild started, data
+  survived (5→23 rows), identity kept, review re-passed — plan-before-sweep + twin mapping
+  proven on a real live rebuild, not just gates.
+· casa-mirella.naples.agency routed; 1 old canary swept. Nightly timer next fires 03:38.
