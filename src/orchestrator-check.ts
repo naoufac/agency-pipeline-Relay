@@ -252,6 +252,42 @@ for (const [brief, delivId] of [
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// 10. MULTILINGUAL classification (FR/IT — the real client base, not English demos)
+// ────────────────────────────────────────────────────────────────────────────
+{
+  ok('FR ecom: "boutique en ligne … vendre … panier … paiement" -> wp_woocommerce',
+    detectDeliverable('Une boutique en ligne de lingerie — vendre des produits, panier, paiement') === 'wp_woocommerce');
+  ok('IT ecom: "negozio online … vendere … carrello" -> wp_woocommerce',
+    detectDeliverable('Un negozio online per vendere prodotti, carrello e pagamento') === 'wp_woocommerce');
+  ok('FR app: "plateforme de réservation … tableau de bord" -> fullstack_app',
+    detectDeliverable('Une plateforme de réservation avec tableau de bord') === 'fullstack_app');
+  ok('IT magazine: "rivista … redazione … articoli" -> wp_site',
+    detectDeliverable('Una rivista di cucina con articoli e una redazione multi-autore') === 'wp_site');
+  ok('IT restaurant "prenotazioni" -> booking branch (database+integrations) on a site',
+    (() => { const n = detectNeeds('Una trattoria a Napoli con prenotazioni per il weekend', 'app', 'directus_site');
+             return n.includes('database') && n.includes('integrations'); })());
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 11. THE PROJECT DICTATES ITS STEPS — no nonsense branches on the wrong deliverable
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const campaign = detectNeeds('an email launch campaign, newsletter blast, no website', 'site', 'campaign');
+  ok('campaign has NO database step', !campaign.includes('database'), campaign.join(','));
+  ok('campaign has NO policies step', !campaign.includes('policies'), campaign.join(','));
+  ok('campaign has NO integrations step', !campaign.includes('integrations'), campaign.join(','));
+  ok('campaign has ONLY campaign_assets', campaign.length === 1 && campaign[0] === 'campaign_assets', campaign.join(','));
+
+  const blog = detectNeeds('a multi-author food magazine with articles and a newsroom', 'app', 'wp_site');
+  ok('blog/wp_site has NO policies step (a blog is not a booking system)', !blog.includes('policies'), blog.join(','));
+  ok('blog/wp_site has NO integrations/calendar step', !blog.includes('integrations'), blog.join(','));
+  ok('blog/wp_site has wp_provision', blog.includes('wp_provision'), blog.join(','));
+
+  const bakery = detectNeeds('a simple bakery website: home, menu, about, contact', 'site', 'directus_site');
+  ok('plain site has NO data steps (just content)', !bakery.includes('database') && !bakery.includes('policies'), bakery.join(','));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // RESULT
 // ────────────────────────────────────────────────────────────────────────────
 console.log(`\norchestrator:check — ${pass} passed, ${fail} failed`);

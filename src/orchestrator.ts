@@ -197,7 +197,8 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      const matches = (b.match(/\b(blog|news|magazine|editorial|content site|publish|articles?|cms|wordpress|multi-author|newsroom|press)\b/g) || []).length;
+      // EN + FR + IT content-site signals (Naples/French clients are the real base, not English demos)
+      const matches = (b.match(/\b(blog|news|magazine|editorial|content site|publish|articles?|cms|wordpress|multi-author|newsroom|press|actualit[ée]s?|revue|journal|r[ée]daction|rivista|notizie|editoriale|articoli?|pubblicazione)\b/g) || []).length;
       // cap at 4 so a single signal doesn't blow past woocommerce
       score += Math.min(4, matches * 2);
       return score;
@@ -216,7 +217,9 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      const matches = (b.match(/\b(shop|store|e-?commerce|e-?shop|woo(commerce)?|online store|sell (online|products?)|checkout|\bcart\b|catalog(ue)?|boutique selling|webshop|merch)\b/g) || []).length;
+      // EN + FR + IT ecom signals. FR: boutique en ligne, vendre, panier, paiement, achat, prestashop.
+      // IT: negozio, vendere, carrello, pagamento. Plain "boutique"/"negozio" + a sell/cart/pay word = ecom.
+      const matches = (b.match(/\b(shop|store|e-?commerce|e-?shop|woo(commerce)?|online store|sell (online|products?)|checkout|\bcart\b|catalog(ue)?|webshop|merch|boutique en ligne|vendre|vente|panier|paiement|achat|prestashop|magasin|negozio|vendere|vendita|carrello|pagamento|acquist\w*)\b/g) || []).length;
       score += Math.min(6, matches * 3);
       return score;
     },
@@ -234,7 +237,9 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      const matches = (b.match(/\b(app|application|platform|saas|dashboard|booking|reservation|settlement|tracker|tracking|portal|marketplace|directory|crm|erp|scheduling|on[- ]?demand|fleet|api|backend|full[- ]?stack)\b/g) || []).length;
+      // EN + FR + IT app signals. FR: appli, plateforme, tableau de bord, réservation, suivi.
+      // IT: applicazione, piattaforma, cruscotto, prenotazione, tracciamento.
+      const matches = (b.match(/\b(app|appli|application|platform|plateforme|piattaforma|saas|dashboard|tableau de bord|cruscotto|booking|reservation|r[ée]servation|prenotazione|settlement|tracker|tracking|suivi|tracciamento|portal|portail|marketplace|directory|annuaire|crm|erp|scheduling|planning|on[- ]?demand|fleet|flotte|api|backend|full[- ]?stack)\b/g) || []).length;
       score += Math.min(6, matches * 3);
       return score;
     },
@@ -298,8 +303,18 @@ export function detectNeeds(brief: string, archetype: Archetype, deliverable: De
   const del = DELIVERABLES[deliverable];
   if (del.branchCaps.includes('content_copy')) needs.add('content_copy');
 
-  // data-backed archetypes (app/store) always need database + policies + integrations
-  if (needsData(archetype)) {
+  // THE PROJECT DICTATES ITS STEPS. The data branch (database + policies + integrations) is NOT
+  // pulled in by the archetype floor alone (that dragged policies/calendar onto a blog and even an
+  // email campaign — nonsense steps the owner rightly rejected). It fires only when EITHER:
+  //   (a) the brief explicitly signals bookings/reservations/scheduling (a real dynamic branch), OR
+  //   (b) the DELIVERABLE genuinely runs on data (its branchCaps declare 'database').
+  // And NEVER for a campaign (no site, no schema).
+  const wantsBooking = /\b(book(ing)?s?|reservations?|appointments?|scheduling|calendar|slots?|availability|table|r[ée]servations?|rendez[- ]?vous|prenotazion\w*|prenota\w*|agenda)\b/.test(b);
+  const deliverableUsesData = del.branchCaps.includes('database') || deliverable === 'fullstack_app' || deliverable === 'wp_woocommerce';
+  // directus_site can carry a booking branch on demand (e.g. a restaurant); a wp_site/blog does not,
+  // unless the brief itself asks for bookings.
+  const dataCapable = deliverableUsesData || deliverable === 'directus_site';
+  if (deliverable !== 'campaign' && (deliverableUsesData || (wantsBooking && dataCapable))) {
     needs.add('database');
     needs.add('policies');
     needs.add('integrations');
@@ -312,26 +327,13 @@ export function detectNeeds(brief: string, archetype: Archetype, deliverable: De
   }
 
   // app_api branch (feature-flagged at runtime; present in chain when deliverable is fullstack_app)
-  if (deliverable === 'fullstack_app') {
-    needs.add('app_api');
-  }
+  if (deliverable === 'fullstack_app') needs.add('app_api');
 
   // wp_provision for WordPress-based deliverables
-  if (deliverable === 'wp_site' || deliverable === 'wp_woocommerce') {
-    needs.add('wp_provision');
-  }
+  if (deliverable === 'wp_site' || deliverable === 'wp_woocommerce') needs.add('wp_provision');
 
-  // campaign_assets for campaign deliverable
-  if (deliverable === 'campaign') {
-    needs.add('campaign_assets');
-  }
-
-  // booking/calendar regex → keep integrations even on non-data archetypes
-  // (this matches validate()'s inject logic)
-  if (/\b(book(ing)?s?|reservations?|appointments?|scheduling|calendar|slots?|availability)\b/.test(b)) {
-    if (!needs.has('database')) needs.add('database');
-    needs.add('integrations');
-  }
+  // campaign gets ONLY its own asset branch — no site/data steps
+  if (deliverable === 'campaign') needs.add('campaign_assets');
 
   return [...needs];
 }
