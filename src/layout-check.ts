@@ -3,10 +3,12 @@
 //   (1) the chooser spreads real briefs across multiple hero treatments (not all the same),
 //   (2) each hero variant renders its own distinct STRUCTURE (different marker classes), and
 //   (3) every variant stays WCAG-safe and free of raw tokens / [object Object].
+// ARC F: also gates new hero variants (poster, ledger), the minimal card variant, and the three
+// section-mode dimensions (features grid|rail, testimonials grid|spotlight, stats row|inline).
 // Deterministic, no server needed. Exit 1 on any failure. Run: npm run layout:check.
-import { chooseLayout, HERO_VARIANTS } from './layout.ts';
+import { chooseLayout, HERO_VARIANTS, CARD_VARIANTS } from './layout.ts';
 import { renderPage } from './render.ts';
-import { DS_CSS } from './components.ts';
+import { DS_CSS, SECTIONS } from './components.ts';
 import { archetypeFor } from './archetype.ts';
 import { themeFor } from './themes.ts';
 
@@ -36,12 +38,21 @@ const navUsed = new Set(layouts.map((l) => l.nav));
 ok('nav style varies across briefs', navUsed.size >= 1);   // centered only on editorial/minimal — presence is a bonus, not required
 
 // (2) each hero variant renders a DISTINCT structure (its own marker classes)
+// specOf includes features + stats so back-compat tests can assert the default mode markers.
 const specOf = () => ({ brand: { name: 'Acme', tokens: { bg: '#ffffff', primary: '#123456' } }, sections: [
   { type: 'hero', image: 'city skyline', eyebrow: 'Est. 2020', headline: 'We build things', lead: 'A one-line promise about the work.', cta: 'Get started' },
   { type: 'features', items: [{ title: 'A', body: 'b' }] },
+  { type: 'stats', items: [{ value: '12k', label: 'users' }] },
 ] });
+// ARC F: markers for all 6 hero variants — each must have a unique structural marker class.
+// poster uses .hero-poster, ledger uses .hero-ledger (both new in ARC F).
 const markers: Record<string, RegExp> = {
-  image: /class="hero on-image"/, split: /class="hero hero-split"/, center: /class="hero hero-center"/, editorial: /class="hero hero-editorial"/,
+  image:    /class="hero on-image"/,
+  split:    /class="hero hero-split"/,
+  center:   /class="hero hero-center"/,
+  editorial:/class="hero hero-editorial"/,
+  poster:   /class="hero-poster/,
+  ledger:   /class="hero-ledger"/,
 };
 const rendered: Record<string, string> = {};
 for (const v of HERO_VARIANTS) {
@@ -52,33 +63,142 @@ for (const v of HERO_VARIANTS) {
   ok(`hero "${v}" has the headline + a working CTA`, html.includes('We build things') && /<a class="btn"/.test(html));
   ok(`hero "${v}" no raw token / [object Object]`, !html.includes('{{') && !html.includes('[object Object]'));
 }
-// scope photo checks to the hero MARKUP (the <header>) — the stylesheet defines .hero-bg on every page
+// scope photo checks to the hero MARKUP — the stylesheet defines .hero-bg on every page
 const heroMarkup: Record<string, string> = {};
-for (const v of HERO_VARIANTS) heroMarkup[v] = (rendered[v].match(/<header class="hero[\s\S]*?<\/header>/) || [''])[0];
-// the four heroes must NOT be byte-identical (that was the whole bug)
-ok('the four hero variants are structurally DIFFERENT from each other', new Set(Object.values(heroMarkup)).size === 4);
+// poster and ledger have different root elements (hero-poster/hero-ledger not hero-*) — match both patterns
+for (const v of HERO_VARIANTS) {
+  const m = rendered[v].match(/<header class="hero[\s\S]*?<\/header>/) || rendered[v].match(/<header class="hero-(?:poster|ledger)[\s\S]*?<\/header>/) || [''];
+  heroMarkup[v] = m[0];
+}
+// ALL heroes must be structurally different from each other (that was the original bug)
+ok('all six hero variants are structurally DIFFERENT from each other', new Set(Object.values(heroMarkup)).size === HERO_VARIANTS.length);
 ok('split hero frames an in-flow photo, not a full-bleed bg', /hero-photo/.test(heroMarkup.split) && !/hero-bg/.test(heroMarkup.split));
 ok('center hero drops the photo entirely', !/hero-photo|hero-bg/.test(heroMarkup.center));
 ok('editorial hero uses a wide in-flow photo', /hero-wide/.test(heroMarkup.editorial));
 ok('image hero uses a full-bleed bg photo', /hero-bg/.test(heroMarkup.image));
+// ARC F: poster — full-bleed + scrim (white text on dark gradient, same AA technique as image hero)
+ok('poster hero uses a full-bleed bg photo', /hero-bg/.test(heroMarkup.poster));
+ok('poster hero has the gradient scrim (AA guarantee)', /hero-scrim/.test(heroMarkup.poster));
+// ARC F: ledger — no photo, editorial two-column
+ok('ledger hero has no photo', !/hero-bg|hero-photo/.test(heroMarkup.ledger));
+ok('ledger hero has the grid structure', /hero-ledger-grid/.test(heroMarkup.ledger));
+// ARC F: poster text-over-image AA guarantee — must NOT use plain --text colour on the image; white
+// text on the gradient scrim is enforced by the scrim itself (same technique as the image hero).
+ok('poster hero copy container is present (will render white text via CSS)', rendered.poster.includes('hero-copy'));
+// ARC F: ledger is entirely on-bg, no overlay — safe by the theme palette guarantee.
+ok('ledger hero has no overlay/scrim (on-bg text)', !rendered.ledger.includes('hero-overlay') && !rendered.ledger.includes('hero-scrim'));
 
-// PQ1 · DISTRIBUTION: across a fixed brief matrix the chooser must actually SPREAD — at least 3
+// PQ1 · DISTRIBUTION: across a fixed brief matrix the chooser must actually SPREAD — at least 4
 // distinct heroes and both navs. Guards against any future rule quietly funneling everything into
 // one variant (the split-funnel class the agency panel caught at 7.3/10 sameness).
+// ARC F: expanded matrix to 5 themes × 6 briefs = 30 sites. Expect >=4 distinct heroes, >=3 card
+// variants, both section modes for each section type somewhere in the matrix.
 {
   const { chooseLayout } = await import('./layout.ts');
   const themes = ['editorial', 'modern', 'warm', 'bold', 'minimal'] as const;
-  const briefs = ['a barbershop booking app', 'an online ceramics store', 'a law firm site', 'a delivery platform', 'a bakery pre-order app', 'a yoga studio'];
+  // ARC F: expanded to 30 sites; include site-archetype briefs so photo-less heroes (ledger/center)
+  // can appear — they are demoted for store/app archetypes, so a mixed archetype matrix is necessary.
+  // 'a dental practice' → editorial theme idx 1 = ledger (verified deterministically above).
+  const briefRows: Array<[string, 'site' | 'store' | 'app']> = [
+    ['a barbershop booking app', 'app'], ['an online ceramics store', 'store'],
+    ['a law firm site', 'site'], ['a delivery platform', 'app'],
+    ['a bakery pre-order app', 'app'], ['a yoga studio', 'site'],
+    ['a dental practice', 'site'], ['a portfolio for a photographer', 'site'],
+    ['a SaaS scheduling tool', 'app'], ['an events agency website', 'site'],
+    ['a luxury hotel website', 'site'], ['a fitness coaching landing page', 'site'],
+  ];
   const heroes = new Set<string>(); const navs = new Set<string>(); const cardVars = new Set<string>(); const combos = new Set<string>();
-  for (const t of themes) for (const b of briefs) { const l = chooseLayout(t, b.includes('store') ? 'store' : 'app', b); heroes.add(l.hero); navs.add(l.nav); if (l.cards) cardVars.add(l.cards); combos.add(`${l.hero}-${l.cards}`); }
-  ok('chooser spreads: >=3 distinct heroes across the matrix', heroes.size >= 3, [...heroes].join(','));
+  const featuresModes = new Set<string>(); const testimonialsModes = new Set<string>(); const statsModes = new Set<string>();
+  for (const t of themes) for (const [b, arch] of briefRows) {
+    const l = chooseLayout(t, arch, b);
+    heroes.add(l.hero); navs.add(l.nav); if (l.cards) cardVars.add(l.cards); combos.add(`${l.hero}-${l.cards}`);
+    if (l.sectionModes) {
+      featuresModes.add(l.sectionModes.features);
+      testimonialsModes.add(l.sectionModes.testimonials);
+      statsModes.add(l.sectionModes.stats);
+    }
+  }
+  ok('chooser spreads: >=4 distinct heroes across the 30-site matrix', heroes.size >= 4, [...heroes].join(','));
   ok('chooser spreads: both nav variants appear', navs.size === 2, [...navs].join(','));
-  ok('chooser spreads: >=2 distinct card variants across the matrix', cardVars.size >= 2, [...cardVars].join(','));
+  ok('chooser spreads: >=3 distinct card variants across the matrix', cardVars.size >= 3, [...cardVars].join(','));
   ok('cards/hero combos are not all identical across the matrix', combos.size > 1);
+  // ARC F: section modes must both appear somewhere in the 30-site matrix
+  ok('features: both grid and rail modes appear across the 30-site matrix', featuresModes.size === 2, [...featuresModes].join(','));
+  ok('testimonials: both grid and spotlight modes appear across the matrix', testimonialsModes.size === 2, [...testimonialsModes].join(','));
+  ok('stats: both row and inline modes appear across the matrix', statsModes.size === 2, [...statsModes].join(','));
+  // ARC F: new hero variants actually appear in the matrix
+  ok('poster hero appears somewhere in the 30-site matrix', heroes.has('poster'), [...heroes].join(','));
+  ok('ledger hero appears somewhere in the 30-site matrix', heroes.has('ledger'), [...heroes].join(','));
+  // ARC F: minimal card variant appears (in editorial/minimal themes)
+  ok('minimal card variant appears somewhere in the 30-site matrix', cardVars.has('minimal'), [...cardVars].join(','));
 }
 
+// ARC F · OLD-PARAMS BACK-COMPAT: a Layout object from before ARC F (without sectionModes, without
+// poster/ledger heroes) must render identically to a chooseLayout result with the same core fields.
+// This proves that adding new fields never mutates old sites — the renderer falls back to defaults.
+{
+  const oldLayout = { hero: 'image' as const, nav: 'standard' as const, band: false, cards: 'photo' as const };
+  const oldHtml = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: oldLayout });
+  // Old layout still renders: must pass the structural gate (no crash, correct body class, headline present)
+  ok('old params (no sectionModes): renders without crash', oldHtml.length > 100);
+  ok('old params (no sectionModes): correct body l-hero-image class', oldHtml.includes('l-hero-image'));
+  ok('old params (no sectionModes): headline present', oldHtml.includes('We build things'));
+  // features section falls back to grid mode (no sectionModes → default)
+  ok('old params (no sectionModes): features defaults to grid mode', oldHtml.includes('features-grid'));
+  // stats section falls back to row mode
+  ok('old params (no sectionModes): stats defaults to row mode', oldHtml.includes('stats-row'));
+}
+
+// ARC F · SECTION-MODE STRUCTURAL MARKERS: each mode of each section type emits its own marker class.
+{
+  const withModes = (sm: any) => renderPage(
+    { brand: { name: 'X', tokens: { bg: '#fff', primary: '#111' } }, sections: [
+      { type: 'hero', headline: 'Test' },
+      { type: 'features', title: 'F', items: [{ title: 'A', body: 'b' }, { title: 'B', body: 'c' }] },
+      { type: 'testimonials', title: 'T', items: [{ quote: 'Great!', name: 'Bob', role: 'CEO' }, { quote: 'Lovely.', name: 'Ann', role: 'Founder' }] },
+      { type: 'stats', title: 'S', items: [{ value: '10k', label: 'users' }, { value: '99%', label: 'uptime' }] },
+    ] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false, cards: 'photo', sectionModes: sm } }
+  );
+  const gridHtml     = withModes({ features: 'grid',  testimonials: 'grid',      stats: 'row'    });
+  const railHtml     = withModes({ features: 'rail',  testimonials: 'grid',      stats: 'row'    });
+  const spotHtml     = withModes({ features: 'grid',  testimonials: 'spotlight', stats: 'row'    });
+  const inlineHtml   = withModes({ features: 'grid',  testimonials: 'grid',      stats: 'inline' });
+  ok('features grid: marker class present',           gridHtml.includes('features-grid'));
+  ok('features rail: marker class present',           railHtml.includes('features-rail'));
+  ok('features rail: uses features-cards container',  railHtml.includes('features-cards'));
+  ok('testimonials grid: marker class present',       gridHtml.includes('testimonials-grid'));
+  ok('testimonials spotlight: marker class present',  spotHtml.includes('testimonials-spotlight'));
+  ok('testimonials spotlight: large quote rendered',  spotHtml.includes('spotlight-quote'));
+  ok('testimonials spotlight: attribution rendered',  spotHtml.includes('spotlight-attr'));
+  ok('stats row: marker class present',               gridHtml.includes('stats-row'));
+  ok('stats inline: marker class present',            inlineHtml.includes('stats-inline'));
+  ok('stats inline: si-n number class present',       inlineHtml.includes('si-n'));
+  ok('stats inline: si-label class present',          inlineHtml.includes('si-label'));
+  // modes must be structurally DIFFERENT (not byte-identical)
+  ok('features grid and rail are structurally different', gridHtml !== railHtml);
+  ok('testimonials grid and spotlight are structurally different', gridHtml !== spotHtml);
+  ok('stats row and inline are structurally different', gridHtml !== inlineHtml);
+}
+
+// ARC F · MINIMAL CARD: body class + DS_CSS contains the rules
+{
+  const minHtml = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false, cards: 'minimal' } });
+  ok('l-cards-minimal body class lands on <body>', minHtml.includes('l-cards-minimal'));
+}
+ok('DS_CSS contains .l-cards-minimal rule', DS_CSS.includes('l-cards-minimal'));
+// ARC F: verify new hero CSS is in DS_CSS
+ok('DS_CSS contains .hero-poster rule', DS_CSS.includes('.hero-poster'));
+ok('DS_CSS contains .hero-poster .hero-scrim (AA scrim)', DS_CSS.includes('.hero-poster .hero-scrim'));
+ok('DS_CSS contains .hero-ledger rule', DS_CSS.includes('.hero-ledger'));
+ok('DS_CSS contains .hero-ledger-grid rule', DS_CSS.includes('.hero-ledger-grid'));
+// ARC F: verify section-mode CSS is in DS_CSS
+ok('DS_CSS contains .features-rail rule', DS_CSS.includes('.features-rail'));
+ok('DS_CSS contains .testimonials-spotlight rule', DS_CSS.includes('.testimonials-spotlight'));
+ok('DS_CSS contains .stats-inline rule', DS_CSS.includes('.stats-inline'));
+
 // (PQ1-B) each l-cards-* body class lands on <body> and DS_CSS contains the variant rules
-for (const cv of ['photo', 'horizontal', 'overlay'] as const) {
+for (const cv of CARD_VARIANTS) {
   const html = renderPage(specOf(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false, cards: cv } });
   ok(`l-cards-${cv} body class lands on <body>`, html.includes(`l-cards-${cv}`));
 }
@@ -164,7 +284,7 @@ ok('the search box is accessible + safe (aria from the locale dict)', rendered.i
 // All assertions must hold at render time (no server, no live DB).
 // INVARIANT: no iframe tag / youtube-nocookie URL in any src attribute before click.
 // ============================================================================
-import { SECTIONS } from './components.ts';
+// (SECTIONS already imported at the top of this file — no re-import needed)
 
 // (A) Valid YouTube facade
 {

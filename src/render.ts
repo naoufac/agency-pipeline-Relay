@@ -109,7 +109,11 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   const onPageAnchor = secTypes.has('form') ? '#contact-form' : secTypes.has('offer') ? '#offer' : secTypes.has('cta') ? '#get-started' : '#';
   const link = (raw: any, text: any) => resolveCta(raw, text);
   const loc = isLocale(ctx.locale) ? ctx.locale : 'en';
-  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable, hero: lay.hero, locale: loc })).join('\n');
+  // ARC F: pass sectionModes from the chosen Layout to section renderers so features/testimonials/stats
+  // can each vary their structure independently of the hero (different hash seed per section type).
+  // Old Layout objects that lack sectionModes will have undefined here → renderers fall back to the
+  // classic default mode (grid / grid / row), so no produced site ever breaks on a schema addition.
+  const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable, hero: lay.hero, locale: loc, sectionModes: lay.sectionModes })).join('\n');
   const desc = metaDescription(spec);
   // STRUCTURED DATA (schema.org): the home page carries Organization/LocalBusiness + WebSite; a product
   // page carries Product (name/price/availability); inner pages carry a breadcrumb. Deterministic.

@@ -172,6 +172,34 @@ p{margin:0 0 1rem}
 .hero-editorial .hero-wide::after{content:'';position:absolute;inset:0;background:var(--primary);opacity:var(--photo-tint,0);mix-blend-mode:var(--photo-tint-blend,multiply);border-radius:var(--photo-radius,var(--radius));pointer-events:none}
 .hero-editorial .hero-foot{max-width:620px}
 .hero-editorial .hero-foot .lead{margin:0 0 1.6rem}
+/* HERO · poster — full-bleed image, headline pinned bottom-left on a gradient scrim, oversized display type.
+   Like the 'image' hero but the copy anchors BOTTOM-LEFT (not centered) for a cinematic poster read.
+   The scrim guarantees AA: the FIXED dark gradient floor (same technique as .hero-overlay) means white
+   headline text can never lose contrast — the brand tint is added ABOVE the black floor, not replacing it. */
+.hero-poster{position:relative;overflow:hidden;min-height:clamp(420px,65vw,720px);display:flex;align-items:flex-end}
+.hero-poster .hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;filter:var(--photo-filter,none)}
+/* scrim: identical construction to .hero-overlay (dark floor + brand tint layer) — AA by construction */
+.hero-poster .hero-scrim{position:absolute;inset:0;background:linear-gradient(10deg,rgba(0,0,0,.72) 0%,rgba(0,0,0,.38) 55%,rgba(0,0,0,.08) 100%),color-mix(in srgb,var(--primary) var(--hero-tint-mix,0%),transparent);z-index:1}
+.hero-poster .hero-copy{position:relative;z-index:2;color:#fff;width:100%;padding:clamp(40px,6vw,80px) 0}
+.hero-poster .hero-copy h1{font-size:clamp(3rem,9.5vw,7rem);line-height:.96;letter-spacing:var(--display-tracking,-.035em);font-weight:var(--display-weight,700);max-width:14ch;color:#fff;margin:0 0 .5em}
+.hero-poster .hero-copy .eyebrow{color:#fff;opacity:.85}
+.hero-poster .hero-copy .lead{color:rgba(255,255,255,.92);max-width:42ch;margin:0 0 2rem}
+/* no-photo fallback: intentional dark branded panel — white text stays legible */
+.hero-poster.no-photo{background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 70%,#0b1220),#0b1220);min-height:clamp(360px,50vw,580px)}
+/* HERO · ledger — no photo: thin top rule, eyebrow, massive left-aligned headline, lead in a narrow right
+   column. An editorial/legal look — two-column asymmetry at desktop, stacked at mobile.
+   Entirely on-bg (no image, no overlay), so contrast is the same guarantee as the center/split variants. */
+.hero-ledger{border-top:2px solid var(--text);padding:clamp(40px,6vw,80px) 0 clamp(48px,7vw,96px)}
+.hero-ledger .hero-ledger-grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,4vw,56px);align-items:start}
+.hero-ledger .hero-head-col{grid-column:1/3}
+.hero-ledger h1{font-size:clamp(3rem,10vw,7.5rem);line-height:.92;letter-spacing:var(--display-tracking,-.04em);font-weight:var(--display-weight,700);margin:0 0 .15em;max-width:12ch}
+.hero-ledger .hero-ledger-sub{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(20px,4vw,56px);align-items:start;padding-top:clamp(20px,3vw,40px);border-top:1px solid var(--line)}
+.hero-ledger .hero-lead-col .lead{margin:0 0 1.6rem}
+.hero-ledger .hero-rule-col .eyebrow{display:block;margin-bottom:.8rem}
+@media(max-width:760px){
+  .hero-ledger .hero-ledger-grid{grid-template-columns:1fr}.hero-ledger .hero-head-col{grid-column:1}
+  .hero-ledger .hero-ledger-sub{grid-template-columns:1fr}.hero-ledger h1{font-size:clamp(2.6rem,10vw,5rem)}
+}
 /* NAV · centered — brand stacked above centered links */
 @media(min-width:761px){
   .nav-centered .nav-inner{flex-direction:column;gap:12px;padding-top:20px;padding-bottom:16px}
@@ -253,6 +281,42 @@ body.l-cards-overlay .collection .card.has-img>:not(img):not(a.p-imglink):last-c
 body.l-cards-overlay .collection .card.has-img .muted,body.l-cards-overlay .products .card.has-img .muted,body.l-cards-overlay .feed .card.has-img .muted{color:rgba(255,255,255,.85)}
 body.l-cards-overlay .collection .card.has-img .btn,body.l-cards-overlay .products .card.has-img .btn,body.l-cards-overlay .feed .card.has-img .btn{position:relative;z-index:3}
 body.l-cards-overlay .collection .card.has-img p,body.l-cards-overlay .products .card.has-img p,body.l-cards-overlay .feed .card.has-img p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* minimal — borderless, no photo, generous whitespace, numbered 01/02/03 eyebrows, hairline dividers.
+   For editorial/minimal themes where restraint IS the design. No border, no radius, just the type and rule.
+   Because there is no image, the card is entirely on --bg with --text — AA guaranteed by construction. */
+body.l-cards-minimal .collection .card,body.l-cards-minimal .feed .card,body.l-cards-minimal .collection .card.has-img,body.l-cards-minimal .feed .card.has-img{background:transparent;border:none;border-top:1px solid var(--line);border-radius:0;padding:clamp(20px,3vw,32px) 0}
+body.l-cards-minimal .collection .card>img,body.l-cards-minimal .feed .card>img{display:none!important}
+body.l-cards-minimal .collection,body.l-cards-minimal .feed{grid-template-columns:1fr;gap:0}
+body.l-cards-minimal .collection .card h3,body.l-cards-minimal .feed .card h3{margin-top:.2em}
+body.l-cards-minimal .collection .card p,body.l-cards-minimal .feed .card p{color:var(--muted);margin:0}
+/* ============================================================================
+   SECTION-MODE VARIANTS (ARC F) — features, testimonials, stats each have two render modes,
+   chosen deterministically by a second FNV seed on brief + section type (see layout.ts hashSection).
+   Marker classes: .features-rail / .features-grid, .testimonials-spotlight / .testimonials-grid,
+   .stats-inline / .stats-row. Missing class = default mode (grid / grid / row).
+   ============================================================================ */
+/* features · rail — horizontal scroll-snap on mobile; 3-across at desktop.
+   The snap container at mobile shows a peek of the next card so the scrollable affordance is obvious. */
+.features-rail .features-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+@media(max-width:880px){
+  .features-rail .features-cards{display:flex;flex-direction:row;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding-bottom:8px}
+  .features-rail .features-cards>.card{flex:0 0 80%;scroll-snap-align:start}
+}
+@media(max-width:560px){.features-rail .features-cards>.card{flex:0 0 88%}}
+/* testimonials · spotlight — one large, centred quote that commands the space, with smaller attributions
+   below in a flex row. The contrast guarantee is the same: text on --bg, scaled-up but still --text. */
+.testimonials-spotlight .spotlight-quote{font-family:var(--font-display);font-size:clamp(1.5rem,4vw,2.6rem);font-weight:var(--display-weight,700);line-height:1.2;text-align:center;max-width:28ch;margin:0 auto 2rem;color:var(--text)}
+.testimonials-spotlight .spotlight-attr{display:flex;flex-wrap:wrap;justify-content:center;gap:1rem 2.6rem}
+.testimonials-spotlight .spotlight-by{text-align:center}
+.testimonials-spotlight .spotlight-by b{display:block}
+.testimonials-spotlight .spotlight-by span{font-size:.88rem;color:var(--muted)}
+/* stats · inline — stats woven into a sentence band: numbers inline in prose, separated by dividers.
+   Reads as one coherent sentence of proof rather than a grid of stats — suits editorial/minimal. */
+.stats-inline .stats-band{display:flex;flex-wrap:wrap;align-items:baseline;gap:.6rem 0;font-family:var(--font-display);font-size:1.08rem;color:var(--muted);justify-content:center;text-align:center}
+.stats-inline .stats-band .si-stat{display:inline-flex;flex-direction:column;align-items:center;padding:0 clamp(16px,3vw,40px)}
+.stats-inline .stats-band .si-stat+.si-stat{border-left:1px solid var(--line)}
+.stats-inline .stats-band .si-n{font-size:clamp(1.8rem,4vw,2.4rem);font-weight:700;color:var(--primary);line-height:1;display:block}
+.stats-inline .stats-band .si-label{font-size:.88rem;margin-top:.2rem}
 /* ARC D · VIDEO SECTION — privacy-safe, mobile-first, 16:9 aspect-ratio */
 /* .video-facade: the click-to-load poster for YouTube. NO iframe pre-click — zero third-party requests
    until the visitor taps play. The youtube-nocookie URL lives ONLY in data-src (read on click). */
@@ -294,7 +358,9 @@ export function footer(brand: string, pages: any[], accountLinks = false, locale
 }
 
 // section components — each takes a content object, returns perfect HTML
-type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string; hero?: string; locale?: string };
+// sectionModes: the Layout's section-mode map (features/testimonials/stats each have two render modes
+// chosen deterministically per brief). Missing = default (grid / grid / row) for back-compat.
+type SecOpts = { link?: (raw: any, text: any) => string; forms?: Record<string, any[]>; primaryTable?: string; hero?: string; locale?: string; sectionModes?: { features?: string; testimonials?: string; stats?: string } };
 const href = (o: SecOpts | undefined, raw: any, text: any) => esc(o?.link ? o.link(raw, text) : '#');
 // A CTA value may be a STRING or an OBJECT ({text/label, link/href}). Normalize to {text, link} or null
 // so a button is NEVER `esc(object)` ("[object Object]") and never renders with an empty label.
@@ -327,6 +393,25 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <div class="hero-head">${eyebrow}<h1>${esc(s.headline)}</h1></div>
       ${s.image ? `<div class="hero-wide">${q(s.image, 'hero-photo', true)}</div>` : ''}
       <div class="hero-foot">${lead}${cta}</div>
+    </div></header>`;
+    // poster: full-bleed image, headline pinned bottom-left, oversized display type on a gradient scrim.
+    // The scrim (identical construction to the 'image' hero overlay) guarantees AA: fixed dark gradient
+    // floor + brand tint — white text on dark gradient is always ≥ 4.5:1. No photo = dark branded panel.
+    if (v === 'poster') return `<header class="hero-poster${s.image ? '' : ' no-photo'}">
+      ${s.image ? `${q(s.image, 'hero-bg', true)}<div class="hero-scrim"></div>` : ''}
+      <div class="container"><div class="hero-copy">
+        ${eyebrow}<h1>${esc(s.headline)}</h1>${lead}${cta}
+      </div></div></header>`;
+    // ledger: no photo, editorial/legal. Two-column: massive left headline + narrow right lead column.
+    // Entirely on-bg typography — contrast guaranteed by the theme palette, same as center/split.
+    if (v === 'ledger') return `<header class="hero-ledger"><div class="container">
+      <div class="hero-ledger-grid">
+        <div class="hero-head-col">${eyebrow}<h1>${esc(s.headline)}</h1></div>
+      </div>
+      <div class="hero-ledger-sub">
+        <div class="hero-lead-col">${lead}${cta}</div>
+        <div class="hero-rule-col"></div>
+      </div>
     </div></header>`;
     // image (default): full-bleed photo + overlay. The `on-image` (white text) treatment is applied
     // ONLY when a photo is actually present — otherwise the hero is a clean, legible typographic hero
@@ -595,10 +680,23 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     <p style="margin-top:2rem"><button type="button" class="btn" onclick="relayVisitorLogout()" style="background:var(--surface);color:var(--text);border:1px solid var(--line)">${esc(L(o?.locale, 'sign_out'))}</button></p>
   </div></section>`;
   },
-  features: (s) => `<section class="section"><div class="container">
+  // features — two render modes chosen by the section-hash in layout.ts:
+  //   grid (default): the classic 3-col card grid.
+  //   rail: horizontal scroll-snap on mobile, 3-across at desktop (marker class: features-rail).
+  // The mode is passed via o.sectionModes.features; absent = grid for back-compat with old layouts.
+  features: (s, o) => {
+    const mode = o?.sectionModes?.features || 'grid';
+    const cards = (s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('');
+    if (mode === 'rail') return `<section class="section features-rail"><div class="container">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
-    <div class="grid grid-3" style="margin-top:2.6rem">${(s.items || []).map((it: any) => `<div class="card"><h3>${esc(it.title)}</h3><p>${esc(it.body)}</p></div>`).join('')}</div>
-  </div></section>`,
+    <div class="features-cards" style="margin-top:2.6rem">${cards}</div>
+  </div></section>`;
+    // grid (default)
+    return `<section class="section features-grid"><div class="container">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="grid grid-3" style="margin-top:2.6rem">${cards}</div>
+  </div></section>`;
+  },
   split: (s, o) => `<section class="section"><div class="container"><div class="split ${s.reverse ? 'rev' : ''}">
     <div class="split-media">${q(s.image || 'abstract brand texture')}</div>
     <div>${s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : ''}<h2>${esc(s.title)}</h2><p class="muted">${esc(s.body)}</p>${btn(o, s.cta, s.link)}</div>
@@ -618,22 +716,51 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       <ul class="price-feats">${(p.features || []).slice(0, 8).map((f: string) => `<li>${esc(f)}</li>`).join('')}</ul>
       ${p.cta ? `<a class="btn" href="${href(o, p.link, p.cta)}">${esc(p.cta)}</a>` : ''}
     </div>`).join('')}</div></div></section>`,
-  // testimonials — quote cards
-  testimonials: (s) => `<section class="section"><div class="container">
-    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
-    <div class="grid grid-3" style="margin-top:2.4rem">${(s.items || []).slice(0, 6).map((t: any) => `<div class="card quote">
-      <p class="qtext">“${esc(t.quote)}”</p><div class="qby"><b>${esc(t.name)}</b>${t.role ? `<span class="muted">${esc(t.role)}</span>` : ''}</div>
-    </div>`).join('')}</div></div></section>`,
+  // testimonials — two render modes chosen by the section-hash in layout.ts:
+  //   grid (default): 3-col card grid (the existing design).
+  //   spotlight: the first quote is featured large + centred; remaining items are small attributions below.
+  // The spotlight mode suits sites with a powerful single endorsement — editorial/minimal/warm contexts.
+  testimonials: (s, o) => {
+    const mode = o?.sectionModes?.testimonials || 'grid';
+    const items: any[] = (s.items || []).slice(0, 6);
+    if (mode === 'spotlight' && items.length > 0) {
+      const [first, ...rest] = items;
+      const restAttrs = rest.map((t: any) => `<div class=”spotlight-by”><b>${esc(t.name)}</b>${t.role ? `<span class=”muted”>${esc(t.role)}</span>` : ''}</div>`).join('');
+      return `<section class=”section testimonials-spotlight”><div class=”container”>
+    ${s.title ? `<h2 style=”text-align:center;margin-bottom:2rem”>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class=”lead muted” style=”text-align:center”>${esc(s.intro)}</p>` : ''}
+    <p class=”spotlight-quote” style=”margin-top:2.4rem”>”${esc(first.quote)}”</p>
+    <div class=”spotlight-attr”><div class=”spotlight-by”><b>${esc(first.name)}</b>${first.role ? `<span class=”muted”>${esc(first.role)}</span>` : ''}</div>${restAttrs}</div>
+  </div></section>`;
+    }
+    // grid (default)
+    return `<section class=”section testimonials-grid”><div class=”container”>
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class=”lead muted”>${esc(s.intro)}</p>` : ''}
+    <div class=”grid grid-3” style=”margin-top:2.4rem”>${items.map((t: any) => `<div class=”card quote”>
+      <p class=”qtext”>”${esc(t.quote)}”</p><div class=”qby”><b>${esc(t.name)}</b>${t.role ? `<span class=”muted”>${esc(t.role)}</span>` : ''}</div>
+    </div>`).join('')}</div></div></section>`;
+  },
   // faq — CSS-only accordion (native <details>)
   faq: (s) => `<section class="section"><div class="container" style="max-width:820px">
     ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}
     <div class="faq" style="margin-top:1.8rem">${(s.items || []).slice(0, 10).map((f: any) => `<details class="faq-item"><summary>${esc(f.q)}</summary><p class="muted">${esc(f.a)}</p></details>`).join('')}</div>
   </div></section>`,
-  // stats — big-number band
-  stats: (s) => `<section class="section"><div class="container">
+  // stats — two render modes chosen by the section-hash in layout.ts:
+  //   row (default): the existing big-number grid band.
+  //   inline: stats woven into a centred sentence band — numbers inline with hairline dividers.
+  // The inline mode reads as editorial proof-copy rather than a grid of numbers; suits editorial/minimal.
+  stats: (s, o) => {
+    const mode = o?.sectionModes?.stats || 'row';
+    const items: any[] = (s.items || []).slice(0, 4);
+    if (mode === 'inline') return `<section class="section stats-inline"><div class="container">
     ${s.title ? `<h2 style="text-align:center;margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
-    <div class="grid grid-3 stats">${(s.items || []).slice(0, 4).map((x: any) => `<div class="stat"><div class="stat-n">${esc(x.value)}</div><div class="muted">${esc(x.label)}</div></div>`).join('')}</div>
-  </div></section>`,
+    <div class="stats-band">${items.map((x: any) => `<div class="si-stat"><span class="si-n">${esc(x.value)}</span><span class="si-label">${esc(x.label)}</span></div>`).join('')}</div>
+  </div></section>`;
+    // row (default)
+    return `<section class="section stats-row"><div class="container">
+    ${s.title ? `<h2 style="text-align:center;margin-bottom:2rem">${esc(s.title)}</h2>` : ''}
+    <div class="grid grid-3 stats">${items.map((x: any) => `<div class="stat"><div class="stat-n">${esc(x.value)}</div><div class="muted">${esc(x.label)}</div></div>`).join('')}</div>
+  </div></section>`;
+  },
   // logos — "trusted by" social-proof band: plain text marks (no external images → gate-safe)
   logos: (s) => `<section class="section" style="padding-block:2.6rem"><div class="container">
     ${s.title ? `<p class="muted" style="text-align:center;letter-spacing:.08em;text-transform:uppercase;font-size:.8rem;margin-bottom:1.4rem">${esc(s.title)}</p>` : ''}
