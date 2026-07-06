@@ -1255,3 +1255,15 @@ recursion-crash worry was correctly REFUTED (the endpoint try/catch contains a R
 · MED: first-wins colour ignored per-instance overrides. Now the MODE colour across all binding nodes.
 · LOW: 'Text/Background' misclassified as text. Now classified on the leaf segment → background.
 figma:check 13→18 (realistic file fixtures). Full check (22 suites) green. Shipped 3b6ff27.
+
+## 2026-07-06 — Design presets: one-click looks for everyone (the Figma path was owner-blocked)
+
+The Figma MCP is auth-only (no file-read tool, interactive OAuth I can't complete headless) — the live
+Figma connector genuinely needs the owner's FIGMA_TOKEN + a URL. Rather than keep hammering it, closed
+the design arc for REAL users: 6 curated presets (Midnight, Editorial, Clean SaaS, Bold Studio, Calm
+Wellness, Mono Minimal) — each a complete Design {palette + Google-Font pairing + radius} applied in one
+click via the SAME validated, contrast-guaranteed path. design:check 32→61: every preset asserted
+LEGIBLE through the real renderer (body >=4.5:1 on its bg, button labels >=4.5:1 on its primary) + fonts
+load. Endpoint: GET returns the preset list, POST {preset} applies; Design tab shows swatch chips.
+Full check (22 suites) green. Shipped de98edc. LIVE: Midnight preset on chopslot → bg #0e1117, text
+#eef1f6 at 16.7:1, Space Grotesk loaded. Reverted.
