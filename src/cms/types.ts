@@ -89,3 +89,21 @@ export interface CmsTarget {
   // purge=false leaves data for audit. Confined to this project's namespace, like appdb teardown.
   teardown(inst: CmsInstance, opts?: { purge?: boolean }): Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// BUILDER REGISTRY — substrate-level delivery (orthogonal to the CMS registry)
+// params.cms STAYS 'directus' forever; params.builder selects the delivery substrate.
+// The CMS registry (REGISTRY/CMS_NAMES/CMS_ORDER) is untouched; cms:check still passes.
+// ---------------------------------------------------------------------------
+
+// The one method every builder must implement: given a fully composed project, deliver it
+// through the appropriate substrate and return a proof record. On any failure the static
+// files stand (runner.ts wraps in try/catch). Idempotent — re-running upserts, never duplicates.
+export interface Builder {
+  readonly id: string;  // 'directus' | 'wordpress' | 'app' | 'campaign'
+  finalize(pool: any, projectId: string, ctx: BuildCtx): Promise<{ ok: boolean; log: string }>;
+}
+
+// Known builder IDs — additive, never replaces CmsName.
+export type BuilderId = 'directus' | 'wordpress' | 'app' | 'campaign';
+export const BUILDER_IDS: BuilderId[] = ['directus', 'wordpress', 'app', 'campaign'];
