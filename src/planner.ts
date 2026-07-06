@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { detectLocale } from './i18n.ts';
+import { isLocalBusiness } from './jsonld.ts';
 import { llm } from './agents.ts';
 import { themeFor, type ThemeName } from './themes.ts';
 import { archetypeFor, needsData, FACADE_PAGE, type Archetype } from './archetype.ts';
@@ -193,7 +194,7 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   const cms = 'directus';
   const layout = chooseLayout(theme, archetype, brief);   // STRUCTURE, brief-rooted, once per project
   const scope = evaluateScope(brief, archetype);
-  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief) };
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief) };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
@@ -218,7 +219,7 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
     theme: prev.theme || theme, brand: prev.brand,           // identity continuity across rebuilds
     slug: prev.slug,                                         // the SUBDOMAIN is identity too — a rebuild may never move the site
     layout: prev.layout || chooseLayout(prev.theme || theme, archetype, brief),  // keep the site's structure across rebuilds
-    rebuilds: Number(prev.rebuilds || 0) + 1, scope, locale: detectLocale(brief),
+    rebuilds: Number(prev.rebuilds || 0) + 1, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief),
   };
   await pool.query('delete from tasks where project_id=$1', [projectId]);
   await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);

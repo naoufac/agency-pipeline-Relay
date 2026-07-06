@@ -7,6 +7,7 @@ import { DEFAULT_LAYOUT, isHeroVariant, isCardVariant, type Layout } from './lay
 import { PRIVATE_READ } from './schema.ts';
 import { metaDescription } from './seo.ts';
 import { designTypeVars, fontLink, hasDesign } from './design.ts';
+import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd } from './jsonld.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -26,7 +27,7 @@ export const formPageSlug = (site: any): string | undefined =>
 export const receiptsEnabled = (site: any): boolean =>
   ((site && site.pages) || []).some((p: any) => (p.sections || []).some((s: any) => s && s.type === 'form' && typeof s.table === 'string' && PRIVATE_READ.test(s.table)));
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string; accountLinks?: boolean; locale?: string }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string; accountLinks?: boolean; locale?: string; siteBase?: string; localBusiness?: boolean }): string {
   // LAYOUT (structure) is chosen once per project (params.layout) and passed here; a stray value falls
   // back to the safe default. Independent of THEME (tokens) — together they make sites distinct.
   const lay: Layout = (ctx.layout && isHeroVariant(ctx.layout.hero)) ? ctx.layout : DEFAULT_LAYOUT;
@@ -108,6 +109,21 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
   const loc = isLocale(ctx.locale) ? ctx.locale : 'en';
   const sections = ((spec && spec.sections) || []).map((s: any) => (SECTIONS[s.type] || (() => ''))(s, { link, forms: ctx.forms, primaryTable: (ctx as any).primaryTable, hero: lay.hero, locale: loc })).join('\n');
   const desc = metaDescription(spec);
+  // STRUCTURED DATA (schema.org): the home page carries Organization/LocalBusiness + WebSite; a product
+  // page carries Product (name/price/availability); inner pages carry a breadcrumb. Deterministic.
+  const isHome = /^index$/i.test(ctx.slug) || (ctx.pages && ctx.pages[0] && ctx.slug === ctx.pages[0].slug);
+  const ld: any[] = [];
+  if (isHome) { ld.push(organizationLd({ name: brand, base: ctx.siteBase, logo: 'icon-512.png', localBusiness: !!ctx.localBusiness })); ld.push(websiteLd({ name: brand, base: ctx.siteBase })); }
+  const prodSec = ((spec && spec.sections) || []).find((s: any) => s && s.type === 'product' && s.row && typeof s.row === 'object');
+  if (prodSec) {
+    const r = prodSec.row;
+    const img = Object.keys(r).find((k) => /image|photo|picture|cover|thumb/i.test(k) && typeof r[k] === 'string' && (/^https?:/.test(r[k]) || String(r[k]).startsWith('/')));
+    const pk = Object.keys(r).find((k) => /^(price|amount|cost)$/i.test(k));
+    ld.push(productLd({ name: String(r.title || r.name || ctx.title), description: r.description || r.body, image: img ? r[img] : undefined, price: pk ? r[pk] : undefined, currency: (loc && loc !== 'en') ? 'EUR' : 'USD', inStock: typeof r.stock === 'number' ? r.stock > 0 : undefined, base: ctx.siteBase, brandName: brand }));
+  }
+  const bc = breadcrumbLd({ pages: ctx.pages || [], slug: ctx.slug, title: ctx.title, base: ctx.siteBase });
+  if (bc && !isHome) ld.push(bc);
+  const ldBlock = ldScript(ld);
   const html = `<!doctype html><html lang="${loc}"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
@@ -117,7 +133,7 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
 ${desc ? `\n<meta name="description" content="${esc(desc)}">` : ''}
 <meta property="og:title" content="${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}">
 ${desc ? `<meta property="og:description" content="${esc(desc)}">` : ''}
-<meta property="og:image" content="icon-512.png">
+<meta property="og:image" content="icon-512.png">${ldBlock ? '\n' + ldBlock : ''}
 <style>${vars}
 ${DS_CSS}</style></head>
 <body class="t-${theme} l-hero-${lay.hero} l-cards-${isCardVariant(lay.cards) ? lay.cards : 'photo'}${lay.band ? ' l-band' : ''}">
