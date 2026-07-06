@@ -8,6 +8,9 @@
 #         backup.sh dry    — full run incl. verification, no ship (the gate suite)
 # Failure in push mode rings the owner's phone (Telegram) via the ERR trap.
 set -euo pipefail
+# Under systemd HOME is unset, so git never finds ~/.gitconfig (credential.helper=store) and the
+# push dies with "could not read Username". Pin it — this script always runs as root.
+export HOME=/root
 MODE="${1:-push}"
 KEY=/root/.backup-key
 VAULT_DIR=/root/relay-vault

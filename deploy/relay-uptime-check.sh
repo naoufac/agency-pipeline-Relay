@@ -13,7 +13,7 @@ api="https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
 CHECKS="
 board|https://board.naples.agency/healthz|200
 sites|https://nenna.naples.agency/|200
-cms|https://cms.naples.agency/server/health|up
+cms|https://cms.naples.agency/server/ping|up
 "
 
 alert() { curl -s -F chat_id="${TG_CHAT_ID}" -F text="$1" "$api" >/dev/null; }
