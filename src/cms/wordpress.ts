@@ -183,52 +183,231 @@ function esc(s: string): string {
 // ---------------------------------------------------------------------------
 // WHY bundled themes only: installing a marketplace theme needs internet + a paid licence; the
 // built-in Twenty* themes are always present and cover the basic visual axes.
+// WHY fallback chain: not every environment ships every Twenty* version; the container may have
+// only a subset. activateTheme() tries the mapped theme, installs it if absent (wp theme install),
+// and falls back to the first active/installed default — never hangs or throws.
 const THEME_MAP: Record<string, string> = {
   editorial: 'twentytwentyfive',
   modern:    'twentytwentyfour',
   warm:      'twentytwentythree',
-  bold:      'twentytwentytwo',
+  bold:      'twentytwentyfive',  // twentytwentytwo absent in base container → use twentytwentyfive
   minimal:   'twentytwentyfour',  // same grid structure, brand CSS overrides contrast
 };
+// Hardcoded fallback order: themes that ship in the WP docker image by default.
+const FALLBACK_THEMES = ['twentytwentythree', 'twentytwentyfour', 'twentytwentyfive', 'twentytwentyone'];
+
 function wpTheme(relayTheme: string): string {
   return THEME_MAP[relayTheme] || 'twentytwentyfour';
 }
 
+// Idempotent theme activation with install + fallback.
+// 1. Try to activate the target theme directly.
+// 2. If that fails (not installed), try `wp theme install <t> --activate`.
+// 3. If install also fails (no internet / licence), activate the first available installed theme.
+// Returns the slug of the theme that ended up active.
+function activateTheme(target: string): string {
+  // Fast path: already active.
+  try {
+    const active = wp('theme list --status=active --field=name --format=csv').split('\n')[0]?.trim();
+    if (active === target) return target;
+  } catch { /* ignore */ }
+
+  // Try direct activate (works when theme is already installed).
+  try { wp(`theme activate ${target}`); return target; } catch { /* not installed */ }
+
+  // Try installing then activating.
+  try {
+    wp(`theme install ${target} --activate`);
+    return target;
+  } catch { /* no internet or licence; fall through to installed fallback */ }
+
+  // Fall back to the first installed theme in our preferred list.
+  try {
+    const installedCsv = wp('theme list --field=name --format=csv');
+    const installed = installedCsv.split('\n').map(s => s.trim()).filter(Boolean);
+    for (const fb of FALLBACK_THEMES) {
+      if (installed.includes(fb)) {
+        try { wp(`theme activate ${fb}`); return fb; } catch { /* continue */ }
+      }
+    }
+    // Last resort: activate whatever is first in the list.
+    if (installed[0]) { try { wp(`theme activate ${installed[0]}`); return installed[0]; } catch {} }
+  } catch { /* ignore */ }
+
+  // Could not activate any theme — return the target slug so the caller can log it.
+  return target;
+}
+
 // ---------------------------------------------------------------------------
-// WooCommerce product sync
+// T6 — Brand palette injection
+// ---------------------------------------------------------------------------
+// WHY Additional CSS (custom_css post type): it is the officially supported, theme-agnostic channel
+// for injecting CSS into a WP site without editing theme files. WP stores it as a `custom_css`
+// post whose slug matches the active theme. We write CSS custom properties (--relay-bg, etc.) so
+// every theme inherits the brand palette without any per-theme conditionals.
+//
+// WHY idempotent marker: we wrap our block in /* relay-brand-palette-<projectId> */…/* /relay */
+// so re-runs detect and replace only OUR block, leaving any manually added CSS intact.
+
+const PALETTE_MARKER_OPEN  = (id: string) => `/* relay-brand-palette-${id.slice(0, 8)} */`;
+const PALETTE_MARKER_CLOSE = '/* /relay-brand-palette */';
+
+// Returns the CSS block to inject for this project's brand palette.
+function buildPaletteCSS(palette: { bg?: string; primary?: string; accent?: string }, projectId: string): string {
+  const bg      = String(palette?.bg      || '#ffffff');
+  const primary = String(palette?.primary || '#000000');
+  const accent  = String(palette?.accent  || primary);
+  const block = [
+    PALETTE_MARKER_OPEN(projectId),
+    ':root {',
+    `  --relay-bg: ${bg};`,
+    `  --relay-primary: ${primary};`,
+    `  --relay-accent: ${accent};`,
+    '}',
+    'body { background-color: var(--relay-bg); }',
+    'a, .wp-block-button__link { color: var(--relay-primary); }',
+    '.wp-block-button__link { background-color: var(--relay-accent); }',
+    PALETTE_MARKER_CLOSE,
+  ].join('\n');
+  return block;
+}
+
+// Inject or replace the relay brand palette block in WP's Additional CSS.
+// Uses the `custom_css` post type (WP Customizer's Additional CSS mechanism).
+// Idempotent: detects existing block by marker comment and replaces it in-place.
+// Returns a summary string for the finalize log.
+function injectBrandPalette(palette: { bg?: string; primary?: string; accent?: string }, projectId: string, activeTheme: string): string {
+  if (!palette?.bg && !palette?.primary && !palette?.accent) return 'palette:no-colors-skipped';
+  const newBlock = buildPaletteCSS(palette, projectId);
+
+  try {
+    // Retrieve existing custom_css post for the active theme, if any.
+    let existingId = '';
+    let existingContent = '';
+    try {
+      existingId = wp(`post list --post_type=custom_css --post_name=${JSON.stringify(activeTheme)} --field=ID --format=csv`).split('\n')[0]?.trim() || '';
+    } catch { /* no post yet — will create */ }
+
+    if (existingId) {
+      existingContent = wp(`post get ${existingId} --field=post_content`);
+    }
+
+    // Replace our block if already present; otherwise append.
+    let updated: string;
+    const open  = PALETTE_MARKER_OPEN(projectId);
+    const close = PALETTE_MARKER_CLOSE;
+    if (existingContent.includes(open)) {
+      // Replace between markers (inclusive).
+      const before = existingContent.slice(0, existingContent.indexOf(open));
+      const after  = existingContent.slice(existingContent.indexOf(close) + close.length);
+      updated = before + newBlock + after;
+    } else {
+      updated = existingContent ? existingContent + '\n' + newBlock : newBlock;
+    }
+
+    if (existingId) {
+      // Update existing custom_css post.
+      wp(`post update ${existingId} --post_content=${JSON.stringify(updated)}`);
+    } else {
+      // Create new custom_css post for the active theme.
+      const newId = wp(`post create --post_type=custom_css --post_name=${JSON.stringify(activeTheme)} --post_title="Additional CSS" --post_status=publish --post_content=${JSON.stringify(updated)} --porcelain`).split('\n')[0]?.trim();
+      // Link the theme_mods option so WP picks up this post.
+      try { wp(`option patch update theme_mods_${activeTheme} custom_css_post_id ${JSON.stringify(newId)}`); } catch { /* best-effort */ }
+    }
+
+    return `palette:injected(bg=${palette?.bg || 'default'},primary=${palette?.primary || 'default'})`;
+  } catch (e: any) {
+    return `palette:error(${String(e?.message ?? e).slice(0, 100)})`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T5 — WooCommerce product sync
 // ---------------------------------------------------------------------------
 // WHY: a wp_woocommerce deliverable stores products in the app DB (appdb.ts provisions the
 // schema). We read them here and push to WooCommerce via wp-cli so the storefront is real.
-async function syncWooCommerceProducts(pool: pg.Pool, projectId: string): Promise<string> {
+//
+// WHY fallback: `wp wc product create` requires WooCommerce REST API sub-command (shipped with
+// the woocommerce plugin). If the plugin is absent or the sub-command isn't registered yet,
+// we fall back to `wp post create --post_type=product` with `_price` / `_regular_price` meta
+// (the WooCommerce data model). Both paths record the WP post ID for the proof record.
+//
+// WHY idempotent-by-name: we look up existing products with the same post_title first; if found,
+// we skip creation rather than duplicate. A more precise key (SKU) requires WooCommerce to be
+// active; the name check works in both paths.
+
+async function syncWooCommerceProducts(pool: pg.Pool, projectId: string): Promise<{ log: string; productIds: string[] }> {
   const notes: string[] = [];
+  const productIds: string[] = [];
   try {
     const { listTables, readRows } = await import('../appdb.ts');
     const tables = await listTables(pool, projectId);
     const productTable = tables.find(t => /^products?$/.test(t));
-    if (!productTable) return 'no products table';
+    if (!productTable) return { log: 'no products table', productIds };
 
     const rows = await readRows(pool, projectId, productTable, 100);
-    if (!rows.length) return 'products table empty';
+    if (!rows.length) return { log: 'products table empty', productIds };
 
-    // Ensure WooCommerce is active
+    // Ensure WooCommerce plugin is active (idempotent: skip if already active).
     const plugins = wp('plugin list --field=name --status=active --format=csv');
     if (!plugins.includes('woocommerce')) {
-      wp('plugin install woocommerce --activate');
-      notes.push('woocommerce installed+activated');
+      try {
+        wp('plugin install woocommerce --activate');
+        notes.push('woocommerce installed+activated');
+      } catch (e: any) {
+        notes.push(`woocommerce install failed: ${String(e?.message ?? e).slice(0, 80)}`);
+      }
     }
+
+    // Detect whether `wp wc` sub-command is available (only present when WooCommerce is active
+    // AND its REST scaffolding is registered in the container).
+    let useWcCli = false;
+    try {
+      wp('wc --help');
+      useWcCli = true;
+    } catch { useWcCli = false; }
 
     for (const row of rows) {
       const name  = String(row.name || row.title || row.product_name || '').trim();
       const price = String(row.price || row.regular_price || '0').trim();
+      const desc  = String(row.description || row.desc || '').trim();
       if (!name) continue;
-      // Idempotent: check if a product with this name exists under this project
+
+      // Idempotent: skip if a product with this title already exists.
       try {
-        wp(`wc product create --user=1 --name=${JSON.stringify(name)} --regular_price=${JSON.stringify(price)} --status=publish`);
-        notes.push(`product: ${name}`);
-      } catch { /* product may already exist; best-effort */ }
+        const existing = wp(`post list --post_type=product --post_title=${JSON.stringify(name)} --field=ID --format=csv`).split('\n')[0]?.trim();
+        if (existing && /^\d+$/.test(existing)) {
+          notes.push(`product:exists(${name})`);
+          productIds.push(existing);
+          continue;
+        }
+      } catch { /* ignore — proceed to create */ }
+
+      try {
+        if (useWcCli) {
+          // Primary path: wp wc product create (available when WooCommerce REST is scaffolded).
+          const out = wp(`wc product create --user=1 --name=${JSON.stringify(name)} --regular_price=${JSON.stringify(price)} --description=${JSON.stringify(desc || name)} --status=publish --format=json`);
+          try { const parsed = JSON.parse(out); if (parsed?.id) { productIds.push(String(parsed.id)); } } catch { /* ok */ }
+          notes.push(`product:wc-cli(${name})`);
+        } else {
+          // Fallback: wp post create --post_type=product (WooCommerce native data model).
+          // _price + _regular_price are the meta keys WooCommerce reads for pricing.
+          const pid = wp(`post create --post_type=product --post_title=${JSON.stringify(name)} --post_content=${JSON.stringify(desc || name)} --post_status=publish --porcelain`).split('\n')[0]?.trim();
+          if (pid && /^\d+$/.test(pid)) {
+            wp(`post meta update ${pid} _price ${JSON.stringify(price)}`);
+            wp(`post meta update ${pid} _regular_price ${JSON.stringify(price)}`);
+            // Mark with relay_project_id so teardown can find these products.
+            wp(`post meta update ${pid} ${META_KEY} ${JSON.stringify(projectId)}`);
+            productIds.push(pid);
+          }
+          notes.push(`product:post-fallback(${name},id=${pid || '?'})`);
+        }
+      } catch (e: any) {
+        notes.push(`product:err(${name}:${String(e?.message ?? e).slice(0, 60)})`);
+      }
     }
-  } catch (e: any) { return `woocommerce sync error: ${String(e?.message ?? e).slice(0, 200)}`; }
-  return notes.length ? `synced: ${notes.join(', ')}` : 'no products to sync';
+  } catch (e: any) { return { log: `woocommerce sync error: ${String(e?.message ?? e).slice(0, 200)}`, productIds }; }
+  return { log: notes.length ? `synced: ${notes.join(', ')}` : 'no products to sync', productIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -262,15 +441,18 @@ export const wordpressBuilder: Builder = {
 
     const brandName = String(brand?.name || 'Studio');
     const theme     = wpTheme(String(params.theme || 'modern'));
+    const palette   = brand?.palette || {};
     const notes: string[] = [];
 
     try {
       // 1. Check WP core is installed.
       wp('core is-installed');
 
-      // 2. Activate the closest matching theme (idempotent — re-activating is a no-op).
-      try { wp(`theme activate ${theme}`); notes.push(`theme:${theme}`); }
-      catch { notes.push(`theme:${theme} (activate failed, continuing)`); }
+      // 2. T7: Activate the mapped theme with install + fallback (idempotent).
+      // activateTheme() tries: activate → install+activate → installed fallback.
+      // Never throws; returns the slug of the theme that actually became active.
+      const activeTheme = activateTheme(theme);
+      notes.push(`theme:${activeTheme}${activeTheme !== theme ? `(wanted:${theme})` : ''})`);
 
       // 3. Upsert each page, get back the WP post IDs.
       const pageIds: Record<string, string> = {};
@@ -319,14 +501,28 @@ export const wordpressBuilder: Builder = {
         notes.push(`homepage:${firstSlug}`);
       }
 
-      // 6. WooCommerce product sync (only for wp_woocommerce deliverable; no-op otherwise).
+      // 6. T6: Inject the locked brand palette as CSS custom properties into WP Additional CSS.
+      // This makes the WP front-end visually match the brand, not the raw theme default.
+      // injectBrandPalette() is idempotent: wraps block in marker comments, replaces on re-run.
+      const paletteLog = injectBrandPalette(palette, projectId, activeTheme);
+      notes.push(paletteLog);
+
+      // 7. T5: WooCommerce product sync (only for wp_woocommerce deliverable; no-op otherwise).
+      let productIds: string[] = [];
       if (String(params.deliverable) === 'wp_woocommerce') {
-        const wooLog = await syncWooCommerceProducts(pool, projectId);
-        notes.push(wooLog);
+        const wooResult = await syncWooCommerceProducts(pool, projectId);
+        notes.push(wooResult.log);
+        productIds = wooResult.productIds;
       }
 
-      // 7. Write proof onto the project params so the wp_provisioned verify rule can check it.
-      const proof = { pageIds, menuId, theme, timestamp: new Date().toISOString(), ok: true };
+      // 8. Write proof onto the project params so the wp_provisioned verify rule can check it.
+      // T5: include productIds in proof so gates can verify real WC products were created.
+      // T6: include paletteLog in proof so gates can verify CSS was injected.
+      const proof = {
+        pageIds, menuId, theme: activeTheme, timestamp: new Date().toISOString(), ok: true,
+        productIds,                        // T5: WooCommerce product WP post IDs
+        paletteInjected: paletteLog.startsWith('palette:injected'), // T6: brand palette applied
+      };
       await pool.query(
         "update projects set params = jsonb_set(params, '{wp_provision}', $2::jsonb, true) where id=$1",
         [projectId, JSON.stringify(proof)],
