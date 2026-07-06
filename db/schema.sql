@@ -171,3 +171,23 @@ create table if not exists spec_findings (
   created_at timestamptz not null default now()
 );
 create index if not exists spec_findings_project_idx on spec_findings(project_id, created_at desc);
+
+-- ===== ARC A: billing ledger (prepaid credits / quota) =====
+-- APPEND-ONLY: no UPDATE or DELETE may ever run on this table (source-pinned in billing:check).
+-- Sign invariant enforced by CHECK: debits negative, grants/adjusts non-negative.
+create table if not exists billing_ledger (
+  id           uuid        primary key default gen_random_uuid(),
+  user_id      uuid        not null references users(id) on delete cascade,
+  kind         text        not null check (kind in ('grant','debit','adjust')),
+  amount_cents int         not null
+                           check ((kind = 'debit'  and amount_cents <  0)
+                               or (kind <> 'debit' and amount_cents >= 0)),
+  reason       text        not null,
+  project_id   uuid,
+  created_at   timestamptz not null default now()
+);
+-- ONE grant per user enforced at the index layer.
+create unique index if not exists billing_one_grant
+  on billing_ledger(user_id) where kind = 'grant';
+-- Fast balance queries and per-user history.
+create index if not exists billing_ledger_user_idx on billing_ledger(user_id, created_at desc);

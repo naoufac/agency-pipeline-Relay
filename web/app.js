@@ -8,13 +8,30 @@ navLinks?.addEventListener('click', e => { if (e.target.closest('a')) navLinks.c
 let poll = null;
 const j = (u, o) => fetch(u, o).then(r => r.json());
 /* ---- M4 · auth: magic-link sign-in; the nav shows who you are ---- */
-let me = null;
-async function loadMe(){ try { me = (await j('/api/me')).email; } catch { me = null; } renderAuthNav(); }
+/* ---- ARC A: balance chip next to the sign-out link (phone-first: compact, no jargon) ---- */
+let me = null, meBalance = null;
+async function loadMe(){
+  try { const r = await j('/api/me'); me = r.email; meBalance = r.balance_cents; } catch { me = null; meBalance = null; }
+  renderAuthNav();
+}
 function renderAuthNav(){
   let a = document.getElementById('authlink');
   if (!a && navLinks){ a = document.createElement('a'); a.id = 'authlink'; a.href = '#/signin'; navLinks.insertBefore(a, navLinks.querySelector('.btn')); }
   if (!a) return;
-  if (me){ a.textContent = 'Sign out (' + me.split('@')[0] + ')'; a.onclick = async e => { e.preventDefault(); await fetch('/api/auth/logout', { method:'POST' }); me = null; renderAuthNav(); location.hash = '#/'; location.reload(); }; }
+  if (me){
+    // balance chip: "$XX.XX credit" in a small inline badge (phone-first: fits in one line).
+    // Build with DOM nodes so no HTML injection is possible from the email string.
+    const label = document.createTextNode('Sign out (' + me.split('@')[0] + ')');
+    a.innerHTML = '';
+    a.appendChild(label);
+    if (typeof meBalance === 'number') {
+      const chip = document.createElement('span');
+      chip.style.cssText = 'font-size:11px;background:#1a2a1a;color:#36B37E;border-radius:20px;padding:2px 8px;font-weight:600;vertical-align:middle;margin-left:6px';
+      chip.textContent = '$' + (meBalance / 100).toFixed(2);
+      a.appendChild(chip);
+    }
+    a.onclick = async e => { e.preventDefault(); await fetch('/api/auth/logout', { method:'POST' }); me = null; meBalance = null; renderAuthNav(); location.hash = '#/'; location.reload(); };
+  }
   else { a.textContent = 'Sign in'; a.onclick = null; }
 }
 function signin(){

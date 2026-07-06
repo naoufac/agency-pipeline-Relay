@@ -184,15 +184,20 @@ export async function buildPlan(brief: string): Promise<{ plan: Plan; usedLLM: b
   return { plan: llmResult || validate({ tasks: FB_THINKING, pages: FB_PAGES }, brief)!, usedLLM: !!llmResult };
 }
 
-export async function plan(pool: pg.Pool, brief: string): Promise<string> {
-  // Both paths flow through validate(), so the fallback gets the same archetype/database/verify wiring.
-  const { plan: result, usedLLM } = await buildPlan(brief);
+// persistPlan: write a pre-built plan to the DB and return the new project ID.
+// Separated from buildPlan so the server can: (1) build the plan, (2) quote the cost,
+// (3) debit the user, and THEN (4) persist — without calling the LLM twice.
+// Returns the project ID and the final task count (used to cross-check billing).
+export async function persistPlan(
+  pool: pg.Pool,
+  brief: string,
+  built: { plan: Plan; usedLLM: boolean },
+): Promise<{ projectId: string; taskCount: number }> {
+  const { plan: result, usedLLM } = built;
   const { tasks, pages, theme, archetype, shape } = result;
-  // ONE CMS, forced in code — never selected, never rotated, never named by an LLM. Every site is
-  // built on Directus (the proven adapter: real e2e proof + servedFromCms gate). The old per-brief
-  // 5-CMS selector is deleted; `npm run cms:check` asserts this invariant holds.
+  // ONE CMS, forced in code — never selected, never rotated, never named by an LLM.
   const cms = 'directus';
-  const layout = chooseLayout(theme, archetype, brief);   // STRUCTURE, brief-rooted, once per project
+  const layout = chooseLayout(theme, archetype, brief);
   const scope = evaluateScope(brief, archetype);
   const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief) };
 
@@ -202,6 +207,13 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'scoped',$2)", [projectId, `D${scope.difficulty} · includes: ${scope.includes.map(i => i.name).join(', ')} · not included: ${scope.excludes.map(e => e.ask).join(', ')}`.slice(0, 400)]);
   for (const n of (result.notes || [])) await pool.query("insert into run_events(project_id, type, detail) values ($1,'plan_repair',$2)", [projectId, n]).catch(() => {});
+  return { projectId, taskCount: tasks.length };
+}
+
+export async function plan(pool: pg.Pool, brief: string): Promise<string> {
+  // Thin wrapper kept for backwards compatibility (eval harness, tests that call plan() directly).
+  const built = await buildPlan(brief);
+  const { projectId } = await persistPlan(pool, brief, built);
   return projectId;
 }
 

@@ -4,7 +4,8 @@ import http from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
-import { plan } from './planner.ts';
+import { plan, buildPlan, persistPlan } from './planner.ts';
+import { ensureBillingTables, balanceCents, spentTodayCents, debitCents, quoteCents, isOperator, billingEnabled, formatInsufficientFunds } from './billing.ts';
 import { runLoop } from './runner.ts';
 import { startRebuild } from './rebuild.ts';
 import { computeKpi } from './kpi.ts';
@@ -41,10 +42,15 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   arr.push(now); map.set(ip, arr); return false;
 }
 const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>(), AUTH_HITS = new Map<string, number[]>();
+// ARC A: anonymous build cap — 2 per IP per 24h sliding window (the lead-gen shop window stays
+// open but can't be used as a free LLM proxy; the nightly localhost canary fits under 2/day).
+// Separate from RUN_HITS (15-min window) — this is a 24-hour window.
+const ANON_RUN_HITS = new Map<string, number[]>();
+const ANON_WINDOW_MS = 24 * 60 * 60 * 1000, ANON_MAX_PER_IP = 2;
 // the hit maps prune stale TIMESTAMPS on access but never drop the IP KEYS themselves — over months a
 // long-lived process accumulates a key per unique visitor IP (unbounded memory). Sweep empty/all-expired
 // entries every window so the maps track only recently-active IPs. (adversarial audit 2026-07-05)
-const RATE_MAPS = [RUN_HITS, PUB_HITS, APK_HITS, CHAT_HITS, QA_HITS, FORM_HITS, READ_HITS, AUTH_HITS];
+const RATE_MAPS = [RUN_HITS, PUB_HITS, APK_HITS, CHAT_HITS, QA_HITS, FORM_HITS, READ_HITS, AUTH_HITS, ANON_RUN_HITS];
 function purgeRateMaps(): void {
   const now = Date.now();
   for (const m of RATE_MAPS) for (const [ip, arr] of m) {
@@ -53,6 +59,14 @@ function purgeRateMaps(): void {
 }
 setInterval(purgeRateMaps, RATE_WINDOW_MS).unref?.();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
+// anonBuildLimited: returns true when an anonymous IP has exhausted the 24-h free build cap.
+// Called ONLY for unauthenticated requests (signed-in users are covered by credit debit instead).
+function anonBuildLimited(ip: string): boolean {
+  const now = Date.now();
+  const arr = (ANON_RUN_HITS.get(ip) || []).filter((t) => now - t < ANON_WINDOW_MS);
+  if (arr.length >= ANON_MAX_PER_IP) { ANON_RUN_HITS.set(ip, arr); return true; }
+  arr.push(now); ANON_RUN_HITS.set(ip, arr); return false;
+}
 const qaLimited = (ip: string) => limited(QA_HITS, 20, ip);                   // /api/qa/run: vision calls + chromium, own budget
 const formLimited = (ip: string) => limited(FORM_HITS, 30, ip);               // produced-site form submissions, anti-spam
 const readLimited = (ip: string) => limited(READ_HITS, Number(process.env.READ_MAX || 240), ip); // public content reads (feed/collection) — generous; just caps bulk harvesting
@@ -174,7 +188,12 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'set-cookie': clearCookie(), 'content-type': 'application/json' });
       res.end('{"ok":true}'); return;
     }
-    if (path === '/api/me') return send(res, 200, 'application/json', JSON.stringify(user ? { email: user.email } : { email: null }));
+    if (path === '/api/me') {
+      if (!user) return send(res, 200, 'application/json', JSON.stringify({ email: null, balance_cents: null, spent_today_cents: null }));
+      // Lazily grant signup credit (idempotent) and return the live balance alongside the identity.
+      const [bal, spent] = await Promise.all([balanceCents(pool, user.id), spentTodayCents(pool, user.id)]);
+      return send(res, 200, 'application/json', JSON.stringify({ email: user.email, balance_cents: bal, spent_today_cents: spent }));
+    }
 
     // mail.naples.agency / email.naples.agency — the PUBLISHED status of Relay's email layer:
     // what it does (lead alerts on every produced-site submission; account email lands in M4),
@@ -299,6 +318,16 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           rebuild: async (projectId, changeText) => {
             const pr = (await pool.query('select brief from projects where id=$1', [projectId])).rows[0];
             if (!pr) return { started: false, reason: 'project not found' };
+            // ARC A: check rebuild credit before starting. For chat, we return a declined rebuild
+            // so the chat module can post the polite out-of-credit reply as the assistant message.
+            if (!isOperator(user) && billingEnabled()) {
+              const cost = quoteCents('rebuild');
+              const dr = await debitCents(pool, user.id, cost, `chat-rebuild: ${projectId}`, projectId);
+              if (!dr.ok) {
+                const bal = await balanceCents(pool, user.id);
+                return { started: false, reason: formatInsufficientFunds(bal, cost) };
+              }
+            }
             const amended = `${pr.brief} · UPDATE: ${changeText.slice(0, 500)}`;
             const r = await startRebuild(pool, projectId, amended);   // ONE safe path: plan → sweep → run, per-project lock
             if (r.started) chat.announceWhenDone(pool, sidQ, projectId).catch(() => {});   // the session hears the outcome
@@ -659,6 +688,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         design = designFromTokens(tokenInput, source);
       }
       if (!hasDesign(design)) return send(res, 400, 'application/json', '{"ok":false,"error":"no usable design tokens found — name your Figma colour styles (Background/Primary/Text) or paste a token export"}');
+      // ARC A: debit design cost before the write. operator skip; anon is already blocked above (owner check).
+      if (!isOperator(user) && billingEnabled()) {
+        const dcost = quoteCents('design');
+        const dr = await debitCents(pool, user.id, dcost, `design: ${did}`, did);
+        if (!dr.ok) {
+          const bal = await balanceCents(pool, user.id);
+          return send(res, 402, 'application/json', JSON.stringify({ ok: false, error: formatInsufficientFunds(bal, dcost) }));
+        }
+      }
       brand.design = design;
       await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1", [did, JSON.stringify(brand)]);
       await pool.query("insert into run_events(project_id, type, detail) values ($1,'design_applied',$2)", [did, `palette:${Object.keys(design.palette || {}).length} fonts:${design.fonts ? 1 : 0} source:${design.source}`]).catch(() => {});
@@ -773,12 +811,31 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     if (path === '/api/run' && req.method === 'POST') {
       const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
       if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many briefs — max 5 per 15 min. Try again shortly.' }));
+      // ARC A: anonymous builds are the lead-gen shop window but are capped at 2/IP/day.
+      // Signed-in users (even out-of-credit ones) skip this gate — they get a 402 instead.
+      if (!user && anonBuildLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Anonymous build limit reached — sign in for unlimited access (you get $30 free credit).' }));
       const active = (await pool.query("select count(distinct project_id)::int n from tasks where status in ('ready','running','verifying')")).rows[0].n;
       if (active >= MAX_ACTIVE_PROJECTS) return send(res, 429, 'application/json', JSON.stringify({ error: 'Relay is at capacity right now — a few sites are still building. Try again in a moment.' }));
       let raw = ''; for await (const c of req) raw += c;
       let brief = ''; try { brief = (JSON.parse(raw || '{}').brief || '').trim(); } catch {}
       if (!brief) return send(res, 400, 'application/json', JSON.stringify({ error: 'brief required' }));
-      const id = await plan(pool, brief);
+
+      // ARC A: build the plan first (LLM call) so we know the task count before charging.
+      // persistPlan writes to the DB; we only call it after confirming the user can afford it.
+      const built = await buildPlan(brief);
+      const cost = quoteCents('build', built.plan.tasks.length);
+
+      // ARC A: debit signed-in non-operator users. Operator + anonymous bypass billing.
+      if (user && !isOperator(user) && billingEnabled()) {
+        const dr = await debitCents(pool, user.id, cost, `build: ${brief.slice(0, 80)}`, null);
+        if (!dr.ok) {
+          // Don't persist the plan — user can't afford it. Return a phone-readable 402.
+          const bal = await balanceCents(pool, user.id);
+          return send(res, 402, 'application/json', JSON.stringify({ error: formatInsufficientFunds(bal, cost) }));
+        }
+      }
+
+      const { projectId: id } = await persistPlan(pool, brief, built);
       if (user) await pool.query('update projects set owner_id=$2 where id=$1', [id, user.id]);   // your brief = your site
       // build in-process by default; with RELAY_BUILD=0 the web server only PLANS and a worker builds it
       if (process.env.RELAY_BUILD !== '0') runLoop(pool, id, { cap: 4, review: true }).catch((e) => console.error('run', id, e?.message));
@@ -795,6 +852,17 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!/^[0-9a-f-]{36}$/i.test(id)) return send(res, 400, 'application/json', '{"error":"id required"}');
       const pr = (await pool.query('select brief, status, owner_id from projects where id=$1', [id])).rows[0];
       if (!pr || !canSee(user, pr.owner_id)) return send(res, 404, 'application/json', '{"error":"project not found"}');
+
+      // ARC A: owner signed-in non-operator → debit rebuild cost before starting.
+      if (user && !isOperator(user) && billingEnabled()) {
+        const cost = quoteCents('rebuild');
+        const dr = await debitCents(pool, user.id, cost, `rebuild: ${id}`, id);
+        if (!dr.ok) {
+          const bal = await balanceCents(pool, user.id);
+          return send(res, 402, 'application/json', JSON.stringify({ error: formatInsufficientFunds(bal, cost) }));
+        }
+      }
+
       // ONE safe path: plans first, sweeps the previous generation's pages ONLY after the plan
       // succeeds (stale slugs would mix two navigations and fail site_consistent), never sweeps when
       // builds are paused, and a per-project lock serializes concurrent triggers.
@@ -851,6 +919,7 @@ server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PO
 // no lease). Release it so the page stays editable. Runs on boot + every 2 min.
 // ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
 ensureAuthTables(pool).catch((e) => console.error('auth tables', e?.message));
+ensureBillingTables(pool).catch((e) => console.error('billing tables', e?.message));
 import('./chat.ts').then((m) => m.ensureChatTables(pool)).catch((e) => console.error('chat tables', e?.message));
 // BOOKING REMINDERS: sweep every 30 min (idempotent via reminder_log — a restart never double-sends).
 // First run 3 min after boot so a crash-loop can't hammer the mailer.
