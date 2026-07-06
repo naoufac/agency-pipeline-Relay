@@ -1291,3 +1291,17 @@ DESIGN-ON-REAL-STORE PROOF: applied the Editorial preset to the finished store �
 bg #faf6ef / text #2a2420 at 14.2:1 (legible) / primary #a2432a, Fraunces loaded — AND the product grid
 + checkout page stayed intact (checkout 200). The design→reality path composes end-to-end on a store,
 not just a barbershop or a hand-edited canary. Reverted after. No code change — a certification pass.
+
+## 2026-07-06 — SEO: JSON-LD structured data on every produced page (new arc)
+
+Real gap: produced sites had sitemap/robots/OG but ZERO schema.org — no rich Google results. Built it
+deterministically from data Relay already holds (src/jsonld.ts):
+· Organization / LocalBusiness + WebSite on the home page (LocalBusiness vs Organization = a build
+  property, isLocalBusiness(brief), computed once in the planner).
+· Product (name + Offer price/currency/availability + brand) on every product page, live from the row.
+· BreadcrumbList on inner pages.
+Injected as <script type=application/ld+json>, values escaped (no </script>/& breakout; theme-check
+skips attributed scripts so no eval). Threaded through BOTH the build render (static files) and the
+live-served pages (what Google crawls). jsonld:check (19) = suite 23; full check green. Shipped 3cd7b78.
+LIVE PROOF on hearthline: home = Organization + WebSite (correct URL, Organization not LocalBusiness for
+an online store); product-1 = Product "Hearth" · Offer 24.00 USD · InStock + BreadcrumbList. All valid JSON.
