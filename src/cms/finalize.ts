@@ -10,7 +10,7 @@ import { servedFromCms } from './gate.ts';
 import { isCmsName, type SiteModel, type BuildCtx, type CmsName } from './types.ts';
 import { SITES } from '../verify.ts';
 import { ev } from '../db.ts';
-import { extractBusinessFacts } from '../jsonld.ts';
+import { extractBusinessFacts, bizTypeFor } from '../jsonld.ts';
 
 export interface FinalizeResult { ok: boolean; cms: string; builtOn?: string; fellBackFrom?: string | null; log: string; }
 
@@ -28,7 +28,9 @@ export async function cmsFinalize(pool: pg.Pool, projectId: string, sitesDirOver
   const ctx: BuildCtx = { projectId, brief: r.brief, archetype: params.archetype || 'site', theme: params.theme || 'modern', sitesDir, schemaForms: params.schema_forms, layout: params.layout, locale: params.locale,
     // SEO identity must survive the CMS re-serve (the final writer of every page)
     siteBase: params.slug ? `https://${params.slug}.naples.agency` : undefined,
-    localBusiness: !!params.localBusiness, bizType: params.bizType,
+    // legacy projects predate params.bizType (minted at branding) — derive from the brief so a
+    // re-serve upgrades their JSON-LD instead of falling back to generic LocalBusiness
+    localBusiness: !!params.localBusiness, bizType: params.bizType || bizTypeFor(r.brief),
     bizFacts: extractBusinessFacts({ pages: site.pages, brand: params.brand || site.brand }) };
   const model: SiteModel = { pages: site.pages, brand: params.brand || site.brand, data: site.data };
   const tag = fellBackFrom ? `assigned ${fellBackFrom} (not operational yet) → built on ${builtOn}` : `built on ${builtOn}`;
