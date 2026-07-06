@@ -115,7 +115,8 @@ for (const [pid, d] of Object.entries(DESIGN_PRESETS)) {
   ok(`preset "${pid}": button labels legible on its primary (>=4.5:1)`, !!pPrim && !!pOn && ratio(pOn!, pPrim!) >= 4.5, `on-primary ${pOn} on ${pPrim}`);
   ok(`preset "${pid}": its display font loads (Google Fonts link)`, page.includes('fonts.googleapis.com/css2') && page.includes(encodeURIComponent(d.fonts!.display!).replace(/%20/g, '+')));
 }
-ok('presets: summaries carry id + label + swatches + font (for the picker)', presetSummaries().every((s) => s.id && s.label && s.swatches.length >= 2 && typeof s.font === 'string'));
+ok('presets: summaries carry id + label + swatches + font + the full Design (for the in-app preview)', presetSummaries().every((s) => s.id && s.label && s.swatches.length >= 2 && typeof s.font === 'string' && !!(s as any).design?.palette?.primary && !!(s as any).design?.fonts?.display));
+ok('board: the Design tab renders a live in-app preview (styled with the design, no cross-origin iframe)', appjs.includes('id="dpreview"') && appjs.includes('const previewOf') && appjs.includes('showPreview(') && appjs.includes('loadFonts'));
 ok('server: the /design endpoint applies a curated preset (validated Design)', serverSrc.includes("typeof b.preset === 'string'") && serverSrc.includes('DESIGN_PRESETS[b.preset]') && serverSrc.includes('presetSummaries()'));
 ok('board: the Design tab renders one-click preset chips', appjs.includes('dpreset') && appjs.includes('preset:p'));
 

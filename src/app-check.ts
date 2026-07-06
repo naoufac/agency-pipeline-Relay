@@ -482,6 +482,34 @@ try {
   ok('appdb: a new column only twins an existing one the model is DROPPING (not one it keeps)', appdbSrc.includes('!wanted.has(hn)'));
   const icsSrc = (await import('node:fs')).readFileSync(new URL('./ics.ts', import.meta.url), 'utf8');
   ok('ics: date-only columns emit VALUE=DATE all-day events', icsSrc.includes('VALUE=DATE') && icsSrc.includes('foldLine'));
+
+  // ---- DESIGN SURVIVES A REBUILD (the gap the owner flagged, 2026-07-06). An applied design lives on
+  // params.brand.design; a rebuild must carry it AND re-project it onto the regenerated static HTML. ----
+  {
+    const { randomUUID } = await import('node:crypto');
+    const { replan } = await import('./planner.ts');
+    const { brandIdentity, applyBrand } = await import('./spec.ts');
+    const { renderPage } = await import('./render.ts');
+    const rid = randomUUID();
+    try {
+      // a finished project with an APPLIED design on the canonical brand
+      const design = { source: 'preset', palette: { bg: '#0e1117', primary: '#79a8ff', text: '#eef1f6' }, fonts: { display: 'Space Grotesk', body: 'Inter' }, radius: '10px' };
+      await pool.query(`insert into projects(id, brief, status, params) values ($1,'a barbershop booking app','done',$2)`,
+        [rid, JSON.stringify({ theme: 'modern', slug: 'brand-survive-x', layout: {}, brand: { name: 'Fade', cta: null, tokens: { bg: '#fff', primary: '#4f46e5' }, design } })]);
+      await replan(pool, rid, 'a barbershop booking app · UPDATE: add a gallery page');   // fallback plan (no LLM)
+      const after = (await pool.query('select params from projects where id=$1', [rid])).rows[0].params;
+      ok('rebuild: an applied design SURVIVES replan (carried on params.brand)', !!after?.brand?.design && after.brand.design.palette?.primary === '#79a8ff' && after.brand.design.fonts?.display === 'Space Grotesk', JSON.stringify(after?.brand?.design));
+      // and the render projection FORCES that surviving design onto a regenerated page (static HTML too)
+      const canon = brandIdentity({ brand: after.brand });
+      const spec: any = { brand: {}, sections: [{ type: 'hero', headline: 'Hi' }] };
+      applyBrand(spec, canon);
+      const html = renderPage(spec, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', theme: 'modern' });
+      ok('rebuild: the regenerated page carries the design (palette + font + Google Fonts link)',
+        html.includes('--primary:#79a8ff') && /--font-display:'Space Grotesk'/.test(html) && html.includes('fonts.googleapis.com/css2'), 'design not projected onto rebuilt HTML');
+    } finally {
+      await pool.query('delete from projects where id=$1', [rid]).catch(() => {});
+    }
+  }
 }
 {
   // SERVER-DERIVED BOOKING FIELDS (live-caught on the lather barbershop flight 2026-07-05): a booking's

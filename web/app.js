@@ -314,40 +314,52 @@ function project(id, tab, seq){
     const presets = (cur&&cur.presets)||[];
     const chips = presets.map(p=>`<button class="btn btn-sm btn-ghost dpreset" data-preset="${esc(p.id)}" style="padding:6px 10px" title="${esc(p.font)}">${(p.swatches||[]).slice(0,4).map(c=>`<span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${esc(c)};vertical-align:middle;margin-right:1px"></span>`).join('')} ${esc(p.label)}</button>`).join(' ');
     body.innerHTML = `<h2 class="rv-h" style="margin-top:0">Design <span class="muted" style="font-size:13px;font-weight:400">— bring a Figma / Canva design to your live site</span></h2>
-      <div id="dcur" style="margin-bottom:16px">${summary(cur&&cur.design)}</div>
+      <div id="dcur" style="margin-bottom:14px">${summary(cur&&cur.design)}</div>
+      <div id="dpreview" style="margin-bottom:16px"></div>
       ${presets.length?`<div style="margin-bottom:18px"><div class="muted" style="font-size:13px;margin-bottom:8px">One-click looks (no Figma needed):</div><div class="row" style="gap:8px;flex-wrap:wrap">${chips}</div></div>`:''}
-      <p class="muted" style="max-width:640px">Paste a <b>Figma file link</b> (name your colour styles Background / Primary / Text) — or export your <b>Figma Variables</b> / a Tokens Studio / Canva brand-kit JSON below. Relay reads the colours, fonts and corner radius and applies them to your live site — instantly, keeping every page accessible (text stays legible even on a dark palette).</p>
+      <p class="muted" style="max-width:640px">Paste a <b>Figma file link</b> (name your colour styles Background / Primary / Text) — or paste any <b>colours + fonts JSON</b> below (a Figma Variables export, a Tokens Studio file, or your own <code>{colors, typography, radius}</code>). Relay reads the colours, fonts and corner radius and applies them to your live site — instantly, keeping every page accessible (text stays legible even on a dark palette).</p>
       <div class="row" style="gap:8px;margin-bottom:12px"><input id="dfurl" type="url" placeholder="https://www.figma.com/design/…" style="flex:1"><button class="btn btn-ghost" id="dfetch">Import from Figma</button></div>
       <textarea id="dtok" rows="10" placeholder='{ "colors": { "background": "#0f1115", "primary": "#e8b04b", "text": "#f4f4f5" }, "typography": { "heading": { "fontFamily": "Playfair Display" }, "body": { "fontFamily": "Inter" } }, "radius": "14px" }' style="width:100%;font-family:ui-monospace,monospace;font-size:12.5px"></textarea>
       <div class="row" style="gap:8px;margin-top:10px"><button class="btn" id="dapply">Apply to my site</button><button class="btn btn-ghost" id="dclear">Remove design</button><span class="rform-msg" id="dmsg" hidden></span></div>`;
     const msg=(t,good)=>{ const m=document.getElementById('dmsg'); m.hidden=false; m.textContent=t; m.style.color=good?'var(--accent)':'#dc2626'; };
+    // IN-APP PREVIEW: a live mock styled with the design's own colours + fonts (no cross-origin iframe).
+    const onP=(hex)=>{ try{ const h=hex.replace('#',''); const n=h.length===3?h.split('').map(c=>c+c).join(''):h; const [r,g,b]=[0,2,4].map(i=>parseInt(n.slice(i,i+2),16)); return (0.2126*r+0.7152*g+0.0722*b)>140?'#111':'#fff'; }catch(e){ return '#fff'; } };
+    const loadFonts=(d)=>{ const fams=[...new Set([d&&d.fonts&&d.fonts.display,d&&d.fonts&&d.fonts.body].filter(Boolean))]; if(!fams.length)return; const q=fams.map(f=>'family='+encodeURIComponent(f).replace(/%20/g,'+')+':wght@400;600;700').join('&'); let l=document.getElementById('dpvfont'); if(!l){l=document.createElement('link');l.id='dpvfont';l.rel='stylesheet';document.head.appendChild(l);} l.href='https://fonts.googleapis.com/css2?'+q+'&display=swap'; };
+    const previewOf=(d)=>{ if(!d||!d.palette)return '<div class="muted" style="font-size:13px">No design applied — your site uses its built-in theme.</div>'; const p=d.palette,bg=p.bg||'#fff',tx=p.text||'#111',pr=p.primary||'#4f46e5',su=p.surface||bg,rad=d.radius||'8px',disp=(d.fonts&&d.fonts.display)||'inherit',bo=(d.fonts&&d.fonts.body)||'inherit'; return `<div style="background:${bg};color:${tx};border:1px solid var(--line);border-radius:12px;padding:22px;font-family:'${bo}',system-ui"><div style="font-family:'${disp}',Georgia,serif;font-size:26px;font-weight:700;line-height:1.15">The quick brown fox</div><p style="opacity:.85;margin:.5rem 0 1rem">Body copy in your chosen typeface — this is how a paragraph reads on your live site.</p><span style="display:inline-block;background:${pr};color:${onP(pr)};padding:9px 16px;border-radius:${rad};font-weight:600">Primary button</span><span style="display:inline-block;margin-left:8px;background:${su};color:${tx};padding:9px 16px;border-radius:${rad};border:1px solid rgba(128,128,128,.2)">Surface</span></div>`; };
+    const showPreview=(d)=>{ loadFonts(d); const el=document.getElementById('dpreview'); if(el)el.innerHTML=previewOf(d); };
+    let liveDesign = cur&&cur.design; showPreview(liveDesign);
     document.getElementById('dapply').onclick = async ()=>{
       let tokens; try { tokens = JSON.parse(document.getElementById('dtok').value||'{}'); } catch { return msg('That is not valid JSON — paste the exported token file.',false); }
       const btn=document.getElementById('dapply'); btn.disabled=true;
       const r = await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tokens})}).then(r=>r.json()).catch(()=>({}));
       btn.disabled=false;
-      if (r.ok){ document.getElementById('dcur').innerHTML=summary(r.design); msg('Applied — reload your live site to see it.',true); }
+      if (r.ok){ liveDesign=r.design; document.getElementById('dcur').innerHTML=summary(r.design); showPreview(r.design); msg('Applied — reload your live site to see it.',true); }
       else msg(r.error||'Could not apply — check the tokens and try again.',false);
     };
-    body.querySelectorAll('.dpreset').forEach(bt=>bt.onclick=async ()=>{
-      const p=bt.getAttribute('data-preset'); bt.disabled=true;
-      const r=await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({preset:p})}).then(r=>r.json()).catch(()=>({}));
-      bt.disabled=false;
-      if(r.ok){ document.getElementById('dcur').innerHTML=summary(r.design); msg('Applied "'+p+'" — reload your live site to see it.',true); }
-      else msg(r.error||'Could not apply that look.',false);
+    body.querySelectorAll('.dpreset').forEach(bt=>{
+      const p=bt.getAttribute('data-preset'); const ps=presets.find(x=>x.id===p);
+      bt.onmouseenter=()=>{ if(ps&&ps.design) showPreview(ps.design); };   // hover to preview a look
+      bt.onmouseleave=()=>showPreview(liveDesign);
+      bt.onclick=async ()=>{
+        bt.disabled=true;
+        const r=await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({preset:p})}).then(r=>r.json()).catch(()=>({}));
+        bt.disabled=false;
+        if(r.ok){ liveDesign=r.design; document.getElementById('dcur').innerHTML=summary(r.design); showPreview(r.design); msg('Applied "'+p+'" — reload your live site to see it.',true); }
+        else msg(r.error||'Could not apply that look.',false);
+      };
     });
     document.getElementById('dfetch').onclick = async ()=>{
       const u=(document.getElementById('dfurl').value||'').trim(); if(!u) return msg('Paste your Figma file link first.',false);
       const btn=document.getElementById('dfetch'); btn.disabled=true; msg('Reading your Figma file…',true);
       const r = await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({figmaUrl:u})}).then(r=>r.json()).catch(()=>({}));
       btn.disabled=false;
-      if (r.ok){ document.getElementById('dcur').innerHTML=summary(r.design); msg('Imported from Figma — reload your live site to see it.',true); }
+      if (r.ok){ liveDesign=r.design; document.getElementById('dcur').innerHTML=summary(r.design); showPreview(r.design); msg('Imported from Figma — reload your live site to see it.',true); }
       else msg(r.error||'Could not import from Figma.',false);
     };
     document.getElementById('dclear').onclick = async ()=>{
       if(!confirm('Remove the design and go back to the built-in theme?'))return;
       const r = await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clear:true})}).then(r=>r.json()).catch(()=>({}));
-      if (r.ok){ document.getElementById('dcur').innerHTML=summary(null); document.getElementById('dtok').value=''; msg('Removed — back to the built-in theme.',true); }
+      if (r.ok){ liveDesign=null; document.getElementById('dcur').innerHTML=summary(null); showPreview(null); document.getElementById('dtok').value=''; msg('Removed — back to the built-in theme.',true); }
     };
   }
 

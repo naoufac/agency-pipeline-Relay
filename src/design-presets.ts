@@ -40,11 +40,15 @@ export const DESIGN_PRESETS: Record<string, Design & { label: string }> = {
 
 export const isPreset = (id: any): id is keyof typeof DESIGN_PRESETS => typeof id === 'string' && Object.prototype.hasOwnProperty.call(DESIGN_PRESETS, id);
 
-// compact list for the Design tab (id, label, a few swatch colours, the display font)
-export function presetSummaries(): Array<{ id: string; label: string; swatches: string[]; font: string }> {
-  return Object.entries(DESIGN_PRESETS).map(([id, d]) => ({
-    id, label: d.label,
-    swatches: [d.palette?.bg, d.palette?.primary, d.palette?.accent, d.palette?.text].filter(Boolean) as string[],
-    font: d.fonts?.display || '',
-  }));
+// compact list for the Design tab: id/label/swatches/font for the chip, plus the full Design so the
+// dashboard can render a true in-app preview (no cross-origin iframe to the live site).
+export function presetSummaries(): Array<{ id: string; label: string; swatches: string[]; font: string; design: Design }> {
+  return Object.entries(DESIGN_PRESETS).map(([id, d]) => {
+    const { label: _l, ...design } = d;
+    return {
+      id, label: d.label,
+      swatches: [d.palette?.bg, d.palette?.primary, d.palette?.accent, d.palette?.text].filter(Boolean) as string[],
+      font: d.fonts?.display || '', design,
+    };
+  });
 }
