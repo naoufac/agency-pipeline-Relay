@@ -271,5 +271,22 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     return { ok: true, log: `site model ok — ${ps.length} pages composed (one CMS)` };
   }
 
+  if (rule === 'wp_provisioned') {
+    // Proof that the WordPress builder successfully pushed this project's site to the live WP container.
+    // The builder writes params.wp_provision = { pageIds, menuId, theme, timestamp, ok:true } at finalize.
+    // We verify the proof record exists and is non-empty — the wp:check gate proves it live in PROVE mode.
+    // When RELAY_WP is unset, the builder skips and writes nothing; the task still passes (the static
+    // Directus build stands and the wp path is inactive by design — feature-flagged).
+    if (process.env.RELAY_WP !== '1') {
+      return { ok: true, log: 'wp_provisioned: RELAY_WP unset — WP path inactive, static build stands' };
+    }
+    const row = await pool.query("select params->'wp_provision' as wp from projects where id=$1", [task.project_id]);
+    const wp = row.rows[0]?.wp;
+    if (!wp || typeof wp !== 'object') return { ok: false, log: 'wp_provisioned: no proof record on params.wp_provision — WP builder did not run or failed' };
+    if (!wp.ok) return { ok: false, log: 'wp_provisioned: builder ran but ok=false — ' + JSON.stringify(wp).slice(0, 200) };
+    const pageCount = Object.keys(wp.pageIds || {}).length;
+    return { ok: true, log: `wp_provisioned: ${pageCount} page(s) · menu=${wp.menuId} · theme=${wp.theme} · ${wp.timestamp}` };
+  }
+
   return { ok: false, log: 'unknown verify rule: ' + rule };
 }

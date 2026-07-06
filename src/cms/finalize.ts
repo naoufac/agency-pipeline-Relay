@@ -3,9 +3,13 @@
 // runs the served_from_cms gate. On any failure the existing static files are left as-is (never breaks
 // a build). The chosen CMS is params.cms (set by the selector at plan time); if that CMS isn't
 // operational yet, resolveBuildable falls back to the proven Directus and the event says so — no faking.
+//
+// BUILDER SELECTION: when params.builder is set to a non-directus value (e.g. 'wordpress'), the
+// builder registry handles delivery and we skip the Directus CMS path. params.cms STAYS 'directus'.
+// The Directus path is the default (params.builder absent or 'directus') — byte-identical to before.
 import pg from 'pg';
 import { fileURLToPath } from 'node:url';
-import { resolveBuildable } from './registry.ts';
+import { resolveBuildable, resolveBuilder } from './registry.ts';
 import { servedFromCms } from './gate.ts';
 import { isCmsName, type SiteModel, type BuildCtx, type CmsName } from './types.ts';
 import { SITES } from '../verify.ts';
@@ -18,6 +22,32 @@ export async function cmsFinalize(pool: pg.Pool, projectId: string, sitesDirOver
   const r = (await pool.query('select brief, params from projects where id=$1', [projectId])).rows[0];
   if (!r) return { ok: false, cms: '?', log: 'no such project' };
   const params = r.params || {};
+
+  // BUILDER DISPATCH: if params.builder is set to a non-directus value, delegate to the builder
+  // registry. params.cms STAYS 'directus' (never reassigned). The Directus path follows unchanged
+  // for the default case (params.builder absent or 'directus').
+  const builderId: string = params.builder || 'directus';
+  if (builderId !== 'directus') {
+    const builder = resolveBuilder(builderId);
+    // Build a minimal ctx — the WP builder derives its own ctx from the DB anyway.
+    const sitesDir = sitesDirOverride || fileURLToPath(SITES);
+    const ctx: BuildCtx = {
+      projectId, brief: r.brief, archetype: params.archetype || 'site',
+      theme: params.theme || 'modern', sitesDir, schemaForms: params.schema_forms,
+      layout: params.layout, locale: params.locale,
+      siteBase: params.slug ? `https://${params.slug}.naples.agency` : undefined,
+      localBusiness: !!params.localBusiness, bizType: params.bizType,
+      bizFacts: params.site ? extractBusinessFacts({ pages: params.site.pages || [], brand: params.brand || params.site?.brand }) : undefined,
+    };
+    try {
+      const res = await builder.finalize(pool, projectId, ctx);
+      await ev(pool, projectId, null, res.ok ? 'cms_built' : 'cms_build_failed', `builder:${builderId} · ${res.log}`).catch(() => {});
+      return { ok: res.ok, cms: 'directus', builtOn: builderId, fellBackFrom: null, log: `builder:${builderId} · ${res.log}` };
+    } catch (e: any) {
+      await ev(pool, projectId, null, 'cms_build_failed', `builder:${builderId} · ${String(e?.message ?? e)}`).catch(() => {});
+      return { ok: false, cms: 'directus', builtOn: builderId, log: String(e?.message ?? e) };
+    }
+  }
   const site = params.site;
   if (!site || !Array.isArray(site.pages) || !site.pages.length)
     return { ok: false, cms: String(params.cms ?? '?'), log: 'no composed site model (params.site) — nothing to finalize' };
