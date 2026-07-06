@@ -581,6 +581,39 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       catch (e: any) { console.error('site data insert', dataM[1], dataM[2], e?.message ?? e); return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: 'could not save — please check the form and try again' })); }
     }
+    // ---- FULL-STACK APP API (RELAY_APP_API=1 only) — GET/POST /api/app/:projectId/:table[/:id] ----
+    // WHY here: the produced app's frontend needs a real REST API over the DB provisioned in the
+    // 'database' step. This block is the routing layer; all SQL safety is enforced inside appdb.ts
+    // (identifier validation, catalog allowlist, parameterized queries, PRIVATE_READ/SENSITIVE guards).
+    // Feature-flagged: when RELAY_APP_API is unset the entire block is skipped so the existing 24
+    // gates and the default directus_site pipeline are completely unaffected.
+    // Pattern: /api/app/<uuid>/<table> or /api/app/<uuid>/<table>/<integer-id>
+    // The TABLE_RE guard in handleAppApi rejects injection-y names before any DB query runs.
+    if (process.env.RELAY_APP_API === '1') {
+      const appM = path.match(/^\/api\/app\/([0-9a-f-]{36})\/([a-zA-Z_][a-zA-Z0-9_]{0,62})(?:\/(\d+))?$/);
+      if (appM) {
+        // Rate-limit: reads share the generous READ_HITS cap; writes share the spam-guarding FORM_HITS cap.
+        const isWrite = req.method === 'POST';
+        const ip = clientIp(req);
+        if (isWrite && formLimited(ip)) return send(res, 429, 'application/json', '{"ok":false,"error":"too many submissions — try again shortly"}');
+        if (!isWrite && readLimited(ip)) return send(res, 429, 'application/json', '{"rows":[],"error":"rate limited"}');
+        const [, appProjectId, appTable, appRowId = null] = appM;
+        // Read the body only for POST (streaming; same idiom as the existing site data handler).
+        let appBody = '';
+        if (isWrite) { for await (const c of req) appBody += c; }
+        const { handleAppApi } = await import('./app/api.ts');
+        let appResp;
+        try {
+          appResp = await handleAppApi(pool, appProjectId, appTable, appRowId, { method: req.method, url, body: appBody });
+        } catch (e: any) {
+          console.error('app api', appProjectId, appTable, e?.message ?? e);
+          return send(res, 500, 'application/json', '{"error":"internal error"}');
+        }
+        if (appResp === null) return send(res, 404, 'application/json', '{"error":"not found"}');
+        return send(res, appResp.status, appResp.contentType, appResp.body);
+      }
+    }
+
     // ---- FS1 · receipts: resolve a pasted code to its receipt page; or mail every link for an email ----
     const rfindM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/receipt\/([0-9a-f]{16,64})$/i);
     if (rfindM && req.method === 'GET') {
