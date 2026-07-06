@@ -630,8 +630,9 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     if (process.env.RELAY_APP_API === '1') {
       const appM = path.match(/^\/api\/app\/([0-9a-f-]{36})\/([a-zA-Z_][a-zA-Z0-9_]{0,62})(?:\/(\d+))?$/);
       if (appM) {
-        // Rate-limit: reads share the generous READ_HITS cap; writes share the spam-guarding FORM_HITS cap.
-        const isWrite = req.method === 'POST';
+        // Rate-limit: reads share the generous READ_HITS cap; writes (POST/PUT/PATCH/DELETE) share
+        // the spam-guarding FORM_HITS cap. T30 adds PUT/PATCH/DELETE to the write surface.
+        const isWrite = req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH' || req.method === 'DELETE';
         const ip = clientIp(req);
         if (isWrite && formLimited(ip)) return send(res, 429, 'application/json', '{"ok":false,"error":"too many submissions — try again shortly"}');
         if (!isWrite && readLimited(ip)) return send(res, 429, 'application/json', '{"rows":[],"error":"rate limited"}');
@@ -643,9 +644,9 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         // where ownerOf returns null (those stay 'public' for backward compat).
         const appOwner = await ownerOf(appProjectId);
         const appAudience: 'owner' | 'public' = (user && appOwner != null && user.id === appOwner) ? 'owner' : 'public';
-        // Read the body only for POST (streaming; same idiom as the existing site data handler).
+        // T30: read the body for POST/PUT/PATCH (DELETE has no body; streaming idiom from site data handler).
         let appBody = '';
-        if (isWrite) { for await (const c of req) appBody += c; }
+        if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') { for await (const c of req) appBody += c; }
         const { handleAppApi } = await import('./app/api.ts');
         let appResp;
         try {
