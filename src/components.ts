@@ -193,7 +193,7 @@ p{margin:0 0 1rem}
 .hero-ledger .hero-ledger-grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,4vw,56px);align-items:start}
 .hero-ledger .hero-head-col{grid-column:1/3}
 .hero-ledger h1{font-size:clamp(3rem,10vw,7.5rem);line-height:.92;letter-spacing:var(--display-tracking,-.04em);font-weight:var(--display-weight,700);margin:0 0 .15em;max-width:12ch}
-.hero-ledger .hero-ledger-sub{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(20px,4vw,56px);align-items:start;padding-top:clamp(20px,3vw,40px);border-top:1px solid var(--line)}
+.hero-ledger .hero-ledger-sub{display:grid;grid-template-columns:.8fr 1.2fr;gap:clamp(20px,4vw,56px);align-items:start;padding-top:clamp(20px,3vw,40px);border-top:1px solid var(--line)}.hero-ledger .hero-lead-col{max-width:52ch}
 .hero-ledger .hero-lead-col .lead{margin:0 0 1.6rem}
 .hero-ledger .hero-rule-col .eyebrow{display:block;margin-bottom:.8rem}
 @media(max-width:760px){
@@ -406,11 +406,11 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     // Entirely on-bg typography — contrast guaranteed by the theme palette, same as center/split.
     if (v === 'ledger') return `<header class="hero-ledger"><div class="container">
       <div class="hero-ledger-grid">
-        <div class="hero-head-col">${eyebrow}<h1>${esc(s.headline)}</h1></div>
+        <div class="hero-head-col"><h1>${esc(s.headline)}</h1></div>
       </div>
       <div class="hero-ledger-sub">
+        <div class="hero-rule-col">${eyebrow}</div>
         <div class="hero-lead-col">${lead}${cta}</div>
-        <div class="hero-rule-col"></div>
       </div>
     </div></header>`;
     // image (default): full-bleed photo + overlay. The `on-image` (white text) treatment is applied
@@ -723,20 +723,26 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
   testimonials: (s, o) => {
     const mode = o?.sectionModes?.testimonials || 'grid';
     const items: any[] = (s.items || []).slice(0, 6);
+    const by = (t: any) => `<div class="qby"><b>${esc(t.name)}</b>${t.role ? `<span class="muted">${esc(t.role)}</span>` : ''}</div>`;
     if (mode === 'spotlight' && items.length > 0) {
+      // ONE quote commands the space, attributed to ITS author only; the remaining quotes render as
+      // compact cards below — never an orphan name without its words (art-direction review 2026-07-06).
       const [first, ...rest] = items;
-      const restAttrs = rest.map((t: any) => `<div class=”spotlight-by”><b>${esc(t.name)}</b>${t.role ? `<span class=”muted”>${esc(t.role)}</span>` : ''}</div>`).join('');
-      return `<section class=”section testimonials-spotlight”><div class=”container”>
-    ${s.title ? `<h2 style=”text-align:center;margin-bottom:2rem”>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class=”lead muted” style=”text-align:center”>${esc(s.intro)}</p>` : ''}
-    <p class=”spotlight-quote” style=”margin-top:2.4rem”>”${esc(first.quote)}”</p>
-    <div class=”spotlight-attr”><div class=”spotlight-by”><b>${esc(first.name)}</b>${first.role ? `<span class=”muted”>${esc(first.role)}</span>` : ''}</div>${restAttrs}</div>
+      const restCards = rest.length ? `<div class="grid grid-${Math.min(rest.length, 3)}" style="margin-top:2.6rem">${rest.map((t: any) => `<div class="card quote">
+      <p class="qtext">\u201c${esc(t.quote)}\u201d</p>${by(t)}
+    </div>`).join('')}</div>` : '';
+      return `<section class="section testimonials-spotlight"><div class="container">
+    ${s.title ? `<h2 style="text-align:center;margin-bottom:2rem">${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted" style="text-align:center">${esc(s.intro)}</p>` : ''}
+    <p class="spotlight-quote" style="margin-top:2.4rem">\u201c${esc(first.quote)}\u201d</p>
+    <div class="spotlight-attr">${`<div class="spotlight-by"><b>${esc(first.name)}</b>${first.role ? `<span class="muted">${esc(first.role)}</span>` : ''}</div>`}</div>
+    ${restCards}
   </div></section>`;
     }
     // grid (default)
-    return `<section class=”section testimonials-grid”><div class=”container”>
-    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class=”lead muted”>${esc(s.intro)}</p>` : ''}
-    <div class=”grid grid-3” style=”margin-top:2.4rem”>${items.map((t: any) => `<div class=”card quote”>
-      <p class=”qtext”>”${esc(t.quote)}”</p><div class=”qby”><b>${esc(t.name)}</b>${t.role ? `<span class=”muted”>${esc(t.role)}</span>` : ''}</div>
+    return `<section class="section testimonials-grid"><div class="container">
+    ${s.title ? `<h2>${esc(s.title)}</h2>` : ''}${s.intro ? `<p class="lead muted">${esc(s.intro)}</p>` : ''}
+    <div class="grid grid-3" style="margin-top:2.4rem">${items.map((t: any) => `<div class="card quote">
+      <p class="qtext">\u201c${esc(t.quote)}\u201d</p>${by(t)}
     </div>`).join('')}</div></div></section>`;
   },
   // faq — CSS-only accordion (native <details>)

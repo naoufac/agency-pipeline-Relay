@@ -6,6 +6,7 @@
 // ARC F: also gates new hero variants (poster, ledger), the minimal card variant, and the three
 // section-mode dimensions (features grid|rail, testimonials grid|spotlight, stats row|inline).
 // Deterministic, no server needed. Exit 1 on any failure. Run: npm run layout:check.
+import { readFileSync } from 'node:fs';
 import { chooseLayout, HERO_VARIANTS, CARD_VARIANTS } from './layout.ts';
 import { renderPage } from './render.ts';
 import { DS_CSS, SECTIONS } from './components.ts';
@@ -423,6 +424,27 @@ ok('the search box is accessible + safe (aria from the locale dict)', rendered.i
 ok('DS_CSS contains .video-facade rule', DS_CSS.includes('.video-facade'));
 ok('DS_CSS contains aspect-ratio:16/9 for the video facade', DS_CSS.includes('aspect-ratio:16/9'));
 ok('DS_CSS contains .video-caption rule', DS_CSS.includes('.video-caption'));
+
+// ---- ART-DIRECTION REVIEW 2026-07-06: markup hygiene the marker-greps missed ----
+{
+  // CURLY-QUOTE ATTRIBUTES: class=”x” never applies in a browser — the CSS is silently dead while
+  // substring marker greps still pass. Ban typographic quotes as attribute delimiters at the source.
+  const compSrc = readFileSync(new URL('./components.ts', import.meta.url), 'utf8');
+  ok('components.ts: no curly-quote attribute delimiters (class=”…” renders UNSTYLED)', !/(?:class|style|href|src)=[”“]/.test(compSrc));
+  // and in the rendered output: the spotlight section must carry REAL (straight-quoted) classes
+  const spotHtml = renderPage({ brand: { name: 'X', tokens: {} }, sections: [
+    { type: 'hero', eyebrow: 'Since 1987', headline: 'H', lead: 'L', cta: 'C' },
+    { type: 'testimonials', title: 'T', items: [
+      { quote: 'Q1', name: 'A', role: 'R1' }, { quote: 'Q2', name: 'B', role: 'R2' } ] } ] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', theme: 'editorial',
+      layout: { hero: 'ledger', nav: 'standard', band: false, sectionModes: { testimonials: 'spotlight' } } as any });
+  ok('spotlight: straight-quoted class attributes in output', spotHtml.includes('class="section testimonials-spotlight"') && spotHtml.includes('class="spotlight-quote"'));
+  ok('spotlight: the featured quote is attributed to ITS author only', spotHtml.includes('spotlight-by') && !/spotlight-by[^]*spotlight-by/.test(spotHtml.split('spotlight-attr')[1].split('grid')[0] || ''));
+  ok('spotlight: remaining quotes render WITH their words (no orphan names)', spotHtml.includes('Q2') && spotHtml.includes('card quote'));
+  // LEDGER editorial split: eyebrow lives in the left rule column, lead+cta in the right column
+  ok('ledger: eyebrow in rule-col, lead in lead-col (editorial split, no dead right column)',
+    /hero-rule-col">\s*<span class="eyebrow"/.test(spotHtml) && /hero-rule-col[^]*hero-lead-col/.test(spotHtml));
+}
 
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
