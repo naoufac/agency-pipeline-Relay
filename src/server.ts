@@ -629,8 +629,24 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1", [did, JSON.stringify(brand)]);
         return send(res, 200, 'application/json', '{"ok":true,"design":null}');
       }
-      const design = designFromTokens(b.tokens || b.design || b, (b.source === 'canva' ? 'canva' : b.source === 'figma' ? 'figma' : 'tokens'));
-      if (!hasDesign(design)) return send(res, 400, 'application/json', '{"ok":false,"error":"no usable design tokens found — paste your Figma/Canva colour + font export"}');
+      // LIVE FIGMA: paste a file URL → fetch + map → the SAME token shape (needs FIGMA_TOKEN in env).
+      let tokenInput: any = b.tokens || b.design || b;
+      let source: 'figma' | 'canva' | 'tokens' = (b.source === 'canva' ? 'canva' : b.source === 'figma' ? 'figma' : 'tokens');
+      if (typeof b.figmaUrl === 'string' && b.figmaUrl.trim()) {
+        const { figmaUrlToTokens } = await import('./figma.ts');
+        try { tokenInput = await figmaUrlToTokens(b.figmaUrl, process.env.FIGMA_TOKEN || ''); source = 'figma'; }
+        catch (e: any) {
+          const code = String(e?.message || '');
+          const msg = code === 'figma-not-connected' ? 'Figma is not connected yet — paste your exported tokens instead, or ask the operator to connect Figma.'
+            : code === 'figma-unauthorized' ? 'Relay could not read that Figma file (check sharing / the token).'
+            : code === 'figma-file-not-found' ? 'That Figma file was not found.'
+            : code === 'figma-bad-url' ? 'That does not look like a Figma file URL.'
+            : 'Could not reach Figma — try again, or paste your exported tokens.';
+          return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: msg }));
+        }
+      }
+      const design = designFromTokens(tokenInput, source);
+      if (!hasDesign(design)) return send(res, 400, 'application/json', '{"ok":false,"error":"no usable design tokens found — name your Figma colour styles (Background/Primary/Text) or paste a token export"}');
       brand.design = design;
       await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1", [did, JSON.stringify(brand)]);
       await pool.query("insert into run_events(project_id, type, detail) values ($1,'design_applied',$2)", [did, `palette:${Object.keys(design.palette || {}).length} fonts:${design.fonts ? 1 : 0} source:${design.source}`]).catch(() => {});

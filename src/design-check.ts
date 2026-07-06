@@ -94,7 +94,7 @@ ok('render: the design PALETTE feeds the contrast derivation (not a blind append
 // ---- 7. INTAKE: the owner-only endpoint that attaches a design, merged into the canonical brand ----
 const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
 ok('server: /design endpoint exists, OWNER-only for writes, rate-capped', /\/design\$\/\)/.test(serverSrc) && serverSrc.includes('user.id !== proj.owner_id') && /\/design\$[\s\S]{0,1200}limited\(FORM_HITS/.test(serverSrc));
-ok('server: intake runs paste through designFromTokens (same validator) + rejects empty', serverSrc.includes('designFromTokens(b.tokens || b.design || b') && /hasDesign\(design\)\)[\s\S]{0,120}no usable design tokens/.test(serverSrc));
+ok('server: intake runs paste through designFromTokens (same validator) + rejects empty', serverSrc.includes('b.tokens || b.design || b') && serverSrc.includes('designFromTokens(tokenInput, source)') && /hasDesign\(design\)\)[\s\S]{0,140}no usable design tokens/.test(serverSrc));
 ok('server: the design MERGES into the canonical brand (name/tokens survive), applies without a rebuild', /brand\.design = design/.test(serverSrc) && serverSrc.includes("jsonb_set(params, '{brand}'"));
 ok('server: a clear removes just the design', /b\.clear === true[\s\S]{0,80}delete brand\.design/.test(serverSrc));
 ok('server: the intake caps the payload size (no giant token file)', /raw\.length > 512_000[\s\S]{0,60}design too large/.test(serverSrc));
