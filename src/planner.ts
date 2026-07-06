@@ -8,6 +8,72 @@ import { shapeFor, type Shape } from './landing.ts';
 import { chooseLayout } from './layout.ts';
 import { evaluateScope } from './scope.ts';
 
+// ─── COMPLEXITY-DYNAMIC PLANNING (ARC E) ─────────────────────────────────────
+// Pure, deterministic complexity scoring from brief text.  No LLM.  Signals:
+//  • Explicit page/section counts ("5 pages", "10 sections") from the brief.
+//  • Store or app archetype (data-backed = more tasks = more complexity).
+//  • Booking / calendar terms (scheduling = extra business-logic task).
+//  • Multilingual mention (i18n = extra overhead).
+//  • Product-variant mention (variant model = extra schema task).
+//  • Blog / news mention (article model = extra content task).
+// Score maps to pagesMax: 1-3 → 5 (today's floor), 4-6 → 6, 7-8 → 7, ≥9 → 8.
+// Ceiling hard-coded at 8.  NEVER below 5.
+
+export type Complexity = { score: number; pagesMax: number; reasons: string[] };
+
+export function complexityOf(brief: string): Complexity {
+  const b = ' ' + String(brief || '').toLowerCase() + ' ';
+  const reasons: string[] = [];
+  let score = 1;   // baseline: any site starts at 1
+
+  // explicit numeric page / section requests
+  const pageMatch = b.match(/\b(\d+)\s*(pages?|sections?|screens?)\b/);
+  if (pageMatch) {
+    const n = Number(pageMatch[1]);
+    if (n >= 7) { score += 4; reasons.push(`brief requests ${n} pages/sections`); }
+    else if (n >= 5) { score += 2; reasons.push(`brief requests ${n} pages/sections`); }
+    else if (n >= 3) { score += 1; reasons.push(`brief requests ${n} pages/sections`); }
+  }
+
+  // store archetype (catalog + cart + checkout = inherently larger)
+  if (/\b(shop|store|e-?commerce|e-?shop|catalog(ue)?|checkout|\bcart\b|merch|webshop|sell online|sell products?|product catalog)\b/.test(b)) {
+    score += 2; reasons.push('store/e-commerce archetype');
+  }
+
+  // app archetype (data model, auth, dynamic pages)
+  if (/\b(app|application|platform|saas|dashboard|portal|marketplace|directory|listings?|\bcrm\b|\berp\b|tracker|tracking|membership|subscription|on[- ]?demand|fleet|jobs? board|classifieds)\b/.test(b)) {
+    score += 2; reasons.push('app/platform archetype');
+  }
+
+  // booking / calendar / scheduling (owner integrations, calendar feed)
+  if (/\b(book(ing)?s?|reservations?|appointments?|scheduling|calendar|slots?|availability)\b/.test(b)) {
+    score += 1; reasons.push('booking/calendar terms');
+  }
+
+  // multilingual mention
+  if (/\b(multilingual|multilingua|bilingual|multi-?language|translated?|languages?|locali[sz]|i18n|international)\b/.test(b)) {
+    score += 1; reasons.push('multilingual');
+  }
+
+  // product variants
+  if (/\b(variants?|size options?|color options?|colours? options?|sku|options? like (size|colour|color))\b/.test(b)) {
+    score += 1; reasons.push('product variants');
+  }
+
+  // blog / news / articles
+  if (/\b(blog|news|articles?|posts?|editorial|magazine|journal|newsletter)\b/.test(b)) {
+    score += 1; reasons.push('blog/news content');
+  }
+
+  // clamp score to 1-10
+  score = Math.max(1, Math.min(10, score));
+
+  // score → pagesMax: NEVER below 5, hard ceiling 8
+  const pagesMax = score <= 3 ? 5 : score <= 6 ? 6 : score <= 8 ? 7 : 8;
+
+  return { score, pagesMax, reasons };
+}
+
 type Task = { seq: number; title: string; department: string; verify: string; depends_on: number[]; artifact: string | null };
 export type Page = { slug: string; title: string };
 type Plan = { tasks: Task[]; pages: Page[]; theme: ThemeName; archetype: Archetype; shape: Shape; notes?: string[] };
@@ -44,25 +110,31 @@ Rules:
 - "theme": the design language that best fits the brief — editorial (law/finance/architecture/luxury — serif, refined), modern (saas/product/tech — geometric sans), warm (cafe/bakery/wellness/craft — soft, rounded), bold (agency/fitness/events/fashion — oversized, high-energy), minimal (portfolio/photography/studio — spare). Pick exactly one.
 - "archetype": "site" for a presentation/marketing site; "app" when the brief is software with data (delivery app, booking, marketplace, directory, SaaS, dashboard); "store" for shops/e-commerce/catalogs. If "app" or "store", INCLUDE a "database" task whose output is a runnable PostgreSQL schema for the brief's entities — it is verified by actually applying the SQL.
 - "shape": "landing" when the brief asks for a landing/sales/squeeze/one-page conversion page — a landing project has EXACTLY ONE page: [{"slug":"index","title":"Home"}]. Otherwise "multi".
-- "pages": 2 to 5 pages tailored to the brief. The FIRST page MUST be {"slug":"index","title":"Home"}. Slugs are lowercase, url-safe, no extension (e.g. "about","services","menu","contact","pricing").
+- "pages": 2 to 8 pages tailored to the brief (the system will cap to the brief's complexity; aim for what genuinely fits). The FIRST page MUST be {"slug":"index","title":"Home"}. Slugs are lowercase, url-safe, no extension (e.g. "about","services","menu","contact","pricing").
 - "tasks": 4 to 7 THINKING steps only (research, strategy, branding, content/IA, copywriting, media, design, and database for app/store) in dependency order; depends_on references only earlier seq. Do NOT include build or QA tasks — those are added automatically, one build per page.
 - Adapt pages + tasks to THIS brief (a restaurant: Home/Menu/About/Contact; a SaaS: Home/Features/Pricing/Docs; a delivery app: Home/How-it-works/Restaurants/Sign-up + a database).
 - Keep titles concrete. JSON only.`;
 
 const slugify = (s: string) => String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 24) || 'page';
 
-function normPages(arr: any): Page[] {
-  let pages: Page[] = Array.isArray(arr) ? arr.slice(0, 5).map((p: any) => ({ slug: slugify(p.slug || p.title), title: String(p.title || p.slug || 'Page').slice(0, 40) })) : [];
+// normPages: cap at pagesMax (complexity-derived ceiling, min 5, max 8).
+// The LLM may propose fewer pages — this ceiling raises the ROOF, never pads to it.
+function normPages(arr: any, pagesMax: number = 5): Page[] {
+  const cap = Math.max(5, Math.min(8, pagesMax));   // safety: never below 5, never above 8
+  let pages: Page[] = Array.isArray(arr) ? arr.slice(0, cap).map((p: any) => ({ slug: slugify(p.slug || p.title), title: String(p.title || p.slug || 'Page').slice(0, 40) })) : [];
   pages = pages.filter((p, i, a) => p.slug && a.findIndex(x => x.slug === p.slug) === i);
   if (!pages.length) pages = [{ slug: 'index', title: 'Home' }];
   if (pages[0].slug !== 'index') { pages = pages.filter(p => p.slug !== 'index'); pages.unshift({ slug: 'index', title: 'Home' }); }
-  return pages.slice(0, 5);
+  return pages.slice(0, cap);
 }
 
 function validate(plan: any, brief: string): Plan | null {
   const list = Array.isArray(plan?.tasks) ? plan.tasks : null;
   if (!list || !list.length) return null;
-  let pages = normPages(plan.pages);
+  // ARC E: derive the complexity ceiling from the brief FIRST so normPages respects it.
+  // complexityOf is pure and deterministic — same brief → same ceiling, always.
+  const cx = complexityOf(brief);
+  let pages = normPages(plan.pages, cx.pagesMax);
   const theme = themeFor(plan?.theme, brief);            // LLM value trusted only if in the closed set
   const archetype = archetypeFor(plan?.archetype, brief); // same: validated, else classified from the brief
   const shape = shapeFor(plan?.shape, brief);             // same: landing detected in CODE, never LLM whim
@@ -88,13 +160,16 @@ function validate(plan: any, brief: string): Plan | null {
   // checkout is matched by its EXACT slug: the cart runtime's Proceed button targets checkout.html
   // literally, so only a page slugged "checkout" satisfies the contract (site_model gates this too).
   if (archetype === 'store' && shape !== 'landing') {
+    // Use cx.pagesMax so a complex store (variants + blog) gets more brochure pages while
+    // still guaranteeing cart + checkout.  Cap floor = 6 (cart + checkout + at least 4 others).
+    const storeCap = Math.max(6, cx.pagesMax);
     const hasCart = pages.some(p => /cart|basket|bag/.test(p.slug));
     const hasCo = pages.some(p => p.slug === 'checkout');
     const need = (hasCart ? 0 : 1) + (hasCo ? 0 : 1);
-    if (need) pages = pages.slice(0, 6 - need);
+    if (need) pages = pages.slice(0, storeCap - need);
     if (!hasCart) pages.push({ slug: 'cart', title: 'Cart' });
     if (!hasCo) pages.push({ slug: 'checkout', title: 'Checkout' });
-    pages = pages.slice(0, 6);
+    pages = pages.slice(0, storeCap);
   }
 
   // thinking tasks only (drop any build/qa the LLM emitted)
@@ -194,7 +269,9 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
   const cms = 'directus';
   const layout = chooseLayout(theme, archetype, brief);   // STRUCTURE, brief-rooted, once per project
   const scope = evaluateScope(brief, archetype);
-  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief) };
+  // ARC E: persist complexity so the board and KPI view can show it without re-computing.
+  const complexity = complexityOf(brief);
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief), complexity: { score: complexity.score, pagesMax: complexity.pagesMax } };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
@@ -214,12 +291,14 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
   const { plan: result, usedLLM } = await buildPlan(brief);
   const { tasks, pages, theme, archetype, shape } = result;
   const scope = evaluateScope(brief, archetype);
+  const complexity = complexityOf(brief);   // ARC E: refresh complexity on every replan (brief may have changed)
   const params: any = {
     planner: usedLLM ? 'llm' : 'template', pages, archetype, shape, cms: 'directus',
     theme: prev.theme || theme, brand: prev.brand,           // identity continuity across rebuilds
     slug: prev.slug,                                         // the SUBDOMAIN is identity too — a rebuild may never move the site
     layout: prev.layout || chooseLayout(prev.theme || theme, archetype, brief),  // keep the site's structure across rebuilds
     rebuilds: Number(prev.rebuilds || 0) + 1, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief),
+    complexity: { score: complexity.score, pagesMax: complexity.pagesMax },  // ARC E: board/KPI can show complexity
   };
   await pool.query('delete from tasks where project_id=$1', [projectId]);
   await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);
