@@ -28,11 +28,13 @@ const ok = (name: string, cond: boolean, extra = '') => {
 // 1. DETERMINISM: same brief always yields the same floor
 // ────────────────────────────────────────────────────────────────────────────
 {
+  // T1: a brief with "landing page" now correctly maps to landing_page deliverable.
+  // The determinism contract (same brief → same result) remains unchanged.
   const brief = 'a simple landing page for a Naples plumber';
   const a = detectDeliverable(brief);
   const b = detectDeliverable(brief);
   ok('determinism: same brief → same deliverable', a === b, `${a} vs ${b}`);
-  ok('plain/landing brief → directus_site', a === 'directus_site', `got ${a}`);
+  ok('landing page brief → landing_page (T1)', a === 'landing_page', `got ${a}`);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -81,11 +83,11 @@ const ok = (name: string, cond: boolean, extra = '') => {
   ok('email launch campaign → campaign', d === 'campaign', `got ${d}`);
 }
 
-// Simple landing page → directus_site
+// T1: landing page brief → landing_page deliverable (updated: landing_page now supersedes directus_site)
 {
   const brief = 'a simple landing page for a personal portfolio — one page, minimal, clean';
   const d = detectDeliverable(brief);
-  ok('simple landing page → directus_site', d === 'directus_site', `got ${d}`);
+  ok('simple landing page → landing_page', d === 'landing_page', `got ${d}`);
 }
 
 // E-commerce with explicit "woocommerce" mention
@@ -285,6 +287,185 @@ for (const [brief, delivId] of [
 
   const bakery = detectNeeds('a simple bakery website: home, menu, about, contact', 'site', 'directus_site');
   ok('plain site has NO data steps (just content)', !bakery.includes('database') && !bakery.includes('policies'), bakery.join(','));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T4-A: LANDING_PAGE deliverable — exactly 1 page + spine present + compose/render/qa present
+// WHY: a landing page must be shape-forced to ONE page (conversion page shape invariant).
+// The spine (understand→research→branding→design→qa) must also be present.
+// compose+render must be there because it's still a Directus render (site gates apply).
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const landingBriefs = [
+    'a landing page for our new product launch — one-page, conversion-focused, hero + CTA',
+    'une page de vente pour notre nouvelle application — atterrissage, conversion, simple',
+    'una pagina di atterraggio per il lancio del prodotto — pagina singola, CTA forte',
+    'page de vente pour notre boutique de luxe — one page, design premium',
+    'squeeze page for email sign-up campaign — one page, minimal, clean',
+  ];
+
+  for (const brief of landingBriefs) {
+    const d = detectDeliverable(brief);
+    ok(`landing brief → landing_page: "${brief.slice(0, 50)}"`, d === 'landing_page', `got ${d}`);
+    const needs = detectNeeds(brief, DELIVERABLES[d].archetypeCompat, d);
+    const tasks = composeChain(d, needs, [{ slug: 'index', title: 'Home' }]);
+    const depts = tasks.map(t => t.department);
+
+    // Spine must be present
+    for (const spine of ['strategy', 'research', 'branding', 'design', 'qa']) {
+      ok(`landing_page spine '${spine}' present`, depts.includes(spine), `depts: ${depts.join(',')}`);
+    }
+
+    // compose + render must be present (it's still a Directus render)
+    ok('landing_page: compose present', depts.includes('compose'), `depts: ${depts.join(',')}`);
+    ok('landing_page: render present', depts.includes('render'), `depts: ${depts.join(',')}`);
+
+    // CRITICAL: exactly 1 render task (shape-forced to 1 page)
+    const renderCount = tasks.filter(t => t.department === 'render').length;
+    ok('landing_page: exactly 1 render task (1 page forced)', renderCount === 1, `got ${renderCount} render tasks`);
+
+    // NO data steps (a landing page is not a data deliverable)
+    ok('landing_page: no database step', !depts.includes('database'), `depts: ${depts.join(',')}`);
+  }
+
+  // T4-A: applyDeliverable forces 1 page in the plan (critical invariant)
+  {
+    const landingOrch = await orchestrate('landing page for our SaaS product — one-page, hero, CTA');
+    ok('landing_page orchestration deliverable', landingOrch.deliverable === 'landing_page', `got ${landingOrch.deliverable}`);
+    const multiPageBuilt = {
+      tasks: [], pages: [
+        { slug: 'index', title: 'Home' },
+        { slug: 'features', title: 'Features' },
+        { slug: 'pricing', title: 'Pricing' },
+      ],
+      theme: 'modern' as any, archetype: 'site' as any, shape: 'landing' as any,
+    };
+    const { applyDeliverable } = await import('./orchestrator.ts');
+    const applied = applyDeliverable(multiPageBuilt, landingOrch);
+    ok('landing_page: applyDeliverable forces 1 page', applied.pages.length === 1, `got ${applied.pages.length} pages`);
+    ok('landing_page: forced page is index', applied.pages[0]?.slug === 'index', `got ${applied.pages[0]?.slug}`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T4-B: BRAND_IDENTITY deliverable — classified + NO render/compose in chain + spine present
+// WHY: a brand identity brief yields a brand package ONLY. No compose/render steps.
+// The chain ends after design_guidelines + brand_guidelines. qa is present but site-consistent.
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const brandBriefs = [
+    'brand identity for our startup — logo design, palette, typography, visual identity guidelines',
+    'identité de marque pour notre entreprise — logo, charte graphique, identité visuelle',
+    'identità del marchio per la nostra startup — guida del brand, identità visiva, nome',
+    'branding only — we need a brand name, wordmark, and brand style guide, no website',
+    'visual identity design — logotype, colour palette, typography, brand guidelines document',
+  ];
+
+  for (const brief of brandBriefs) {
+    const d = detectDeliverable(brief);
+    ok(`brand brief → brand_identity: "${brief.slice(0, 50)}"`, d === 'brand_identity', `got ${d}`);
+    const needs = detectNeeds(brief, DELIVERABLES[d].archetypeCompat, d);
+    const tasks = composeChain(d, needs, [{ slug: 'index', title: 'Home' }]);
+    const depts = tasks.map(t => t.department);
+
+    // Spine must be present
+    for (const spine of ['strategy', 'research', 'branding', 'design', 'qa']) {
+      ok(`brand_identity spine '${spine}' present`, depts.includes(spine), `depts: ${depts.join(',')}`);
+    }
+
+    // CRITICAL: NO compose/render steps (not a website)
+    ok('brand_identity: NO compose step', !depts.includes('compose'), `depts: ${depts.join(',')}`);
+    ok('brand_identity: NO render step', !depts.includes('render'), `depts: ${depts.join(',')}`);
+
+    // brand_guidelines dept must be present
+    ok('brand_identity: design/brand_guidelines step present', depts.filter(d => d === 'design').length >= 2,
+      `design steps: ${depts.filter(d => d === 'design').join(',')}`);
+
+    // No data steps
+    ok('brand_identity: no database step', !depts.includes('database'), `depts: ${depts.join(',')}`);
+    ok('brand_identity: no policies step', !depts.includes('policies'), `depts: ${depts.join(',')}`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T4-C: CHAIN REASON — non-empty + names the deliverable for every deliverable type
+// WHY: chainReason is displayed to owners on the board. It MUST (a) be non-empty,
+// (b) name the deliverable, (c) include "chain:" to show the step sequence.
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const chainReasonCases: [string, string][] = [
+    ['landing page for our product — one-page conversion focused', 'landing_page'],
+    ['brand identity for our startup — logo, palette, guidelines, no website', 'brand_identity'],
+    ['une boutique en ligne de lingerie — vendre, panier, paiement, checkout', 'wp_woocommerce'],
+    ['a bakery news blog with articles, recipes and a multi-author newsroom', 'wp_site'],
+    ['email campaign newsletter blast social media posts ad creative', 'campaign'],
+    ['a SaaS dashboard and booking platform with user accounts and fleet tracking', 'fullstack_app'],
+  ];
+
+  for (const [brief, expectedDeliverable] of chainReasonCases) {
+    const result = await orchestrate(brief);
+    ok(`chainReason: deliverable matches for "${brief.slice(0, 40)}"`,
+      result.deliverable === expectedDeliverable, `got ${result.deliverable}`);
+    ok(`chainReason: non-empty for ${expectedDeliverable}`,
+      typeof result.chainReason === 'string' && result.chainReason.length > 0,
+      `chainReason: "${result.chainReason}"`);
+    ok(`chainReason: names the deliverable (${expectedDeliverable})`,
+      result.chainReason.includes(expectedDeliverable),
+      `chainReason: "${result.chainReason}"`);
+    ok(`chainReason: includes "chain:" keyword`,
+      result.chainReason.includes('chain:'),
+      `chainReason: "${result.chainReason}"`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T4-D: DETERMINISM — chainReason is deterministic (same brief → same chainReason)
+// WHY: the board displays chainReason; it must not flicker between page loads.
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const deterministicBriefs = [
+    'landing page for our SaaS product launch — one-page hero + CTA',
+    'brand identity for a French fashion startup — logo et charte graphique seulement',
+    'una boutique online per vendere prodotti di moda — carrello, pagamento, catalogo',
+    'a news blog with articles and editorial content — WordPress multi-author',
+  ];
+
+  for (const brief of deterministicBriefs) {
+    const r1 = await orchestrate(brief);
+    const r2 = await orchestrate(brief);
+    ok(`determinism: same deliverable for "${brief.slice(0, 40)}"`,
+      r1.deliverable === r2.deliverable, `${r1.deliverable} vs ${r2.deliverable}`);
+    ok(`determinism: same chainReason for "${brief.slice(0, 40)}"`,
+      r1.chainReason === r2.chainReason, `"${r1.chainReason}" vs "${r2.chainReason}"`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T4-E: SPINE PRESENT in landing_page and brand_identity chains (via buildPlan back-compat)
+// WHY: buildPlan must also produce valid spines for new deliverables (not just composeChain).
+// ────────────────────────────────────────────────────────────────────────────
+{
+  for (const [brief, expectedDel] of [
+    ['landing page for our new product — one page conversion focused hero CTA', 'landing_page'],
+    ['brand identity only — logo design, visual identity, brand guidelines, no website', 'brand_identity'],
+  ] as [string, string][]) {
+    const { plan: p, orchestration: o } = await buildPlan(brief);
+    ok(`buildPlan: ${expectedDel} classified correctly`, o.deliverable === expectedDel, `got ${o.deliverable}`);
+    const taskDepts = p.tasks.map((t: any) => t.department);
+    for (const spine of ['branding', 'research', 'qa']) {
+      ok(`buildPlan ${expectedDel}: spine '${spine}' present`, taskDepts.includes(spine),
+        `depts: ${taskDepts.join(',')}`);
+    }
+    if (expectedDel === 'landing_page') {
+      ok(`buildPlan landing_page: compose present`, taskDepts.includes('compose'), `depts: ${taskDepts.join(',')}`);
+      ok(`buildPlan landing_page: render present`, taskDepts.includes('render'), `depts: ${taskDepts.join(',')}`);
+      ok(`buildPlan landing_page: 1 page`, p.pages.length === 1, `got ${p.pages.length} pages`);
+    }
+    if (expectedDel === 'brand_identity') {
+      ok(`buildPlan brand_identity: NO compose`, !taskDepts.includes('compose'), `depts: ${taskDepts.join(',')}`);
+      ok(`buildPlan brand_identity: NO render`, !taskDepts.includes('render'), `depts: ${taskDepts.join(',')}`);
+    }
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ import { archetypeFor, needsData } from './archetype.ts';
 
 export type DeliverableId =
   | 'directus_site'
+  | 'landing_page'
+  | 'brand_identity'
   | 'wp_site'
   | 'wp_woocommerce'
   | 'fullstack_app'
@@ -41,7 +43,8 @@ export type CapId =
   | 'wp_provision'
   | 'ecom_catalog'
   | 'app_api'
-  | 'campaign_assets';
+  | 'campaign_assets'
+  | 'brand_guidelines';
 
 export interface Deliverable {
   id: DeliverableId;
@@ -74,6 +77,10 @@ export interface OrchestrationResult {
   builder: string;
   detectedNeeds: CapId[];
   reason: string;
+  /** T3/T19: human-readable "why" string — deliverable + signals + chain summary.
+   * e.g. "wp_woocommerce (FR ecom signals: boutique, vendre) · chain: research->brand->...->wp"
+   * Non-empty guaranteed: at minimum reports the deliverable and its chain head. */
+  chainReason: string;
   archetype: Archetype;
 }
 
@@ -157,6 +164,11 @@ export const CAPABILITIES: Record<CapId, Capability> = {
     id: 'campaign_assets', department: 'content', verify: 'json',
     kind: 'branch', dependsOn: ['research'],
   },
+  // T2: brand_guidelines — the visual/identity deliverable for brand_identity projects
+  brand_guidelines: {
+    id: 'brand_guidelines', department: 'design', verify: 'min:280',
+    kind: 'branch', dependsOn: ['design_guidelines'],
+  },
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -167,8 +179,11 @@ export const CAPABILITIES: Record<CapId, Capability> = {
 // ────────────────────────────────────────────────────────────────────────────
 
 // Priority order for tie-breaking (most-specific first, mirrors archetype.ts store>app ordering).
+// landing_page and brand_identity are placed BEFORE directus_site because they are more specific
+// than the baseline; brand_identity is checked before landing_page since "branding only" is very
+// explicit. Both score from zero so they only win when their signals are unambiguous.
 const PRIORITY: DeliverableId[] = [
-  'wp_woocommerce', 'fullstack_app', 'wp_site', 'campaign', 'directus_site',
+  'wp_woocommerce', 'fullstack_app', 'wp_site', 'campaign', 'brand_identity', 'landing_page', 'directus_site',
 ];
 
 export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
@@ -179,8 +194,10 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 1; // constant baseline — this is THE floor
-      // boosters that keep it winning over wp_site for the simplest briefs
-      if (/\b(landing|one[- ]?page|simple site|coming soon|brochure|portfolio|business card)\b/.test(b)) score += 3;
+      // T1 NOTE: "landing" / "one-page" signals have been removed from this booster because
+      // landing_page is now a first-class deliverable that handles those briefs.
+      // directus_site still wins for plain/brochure/portfolio briefs that don't trigger landing_page.
+      if (/\b(simple site|coming soon|brochure|portfolio|business card)\b/.test(b)) score += 3;
       return score;
     },
     stack: 'directus',
@@ -190,6 +207,60 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     upgradesTo: ['wp_site', 'wp_woocommerce', 'fullstack_app'],
   },
 
+  // ── T1: Landing page (single high-conversion page, archetype=site, builder=directus) ──
+  // WHY: "landing" / "one-page" / "page de vente" / "atterrissage" signals warrant a
+  // shape-forced single-page plan (1 page, no multi-page nav), still rendered via Directus.
+  // Confidence tie-break: each matched signal adds 3 points; a plain site that also says
+  // "landing" should cleanly beat directus_site's baseline-1.
+  landing_page: {
+    id: 'landing_page',
+    label: 'Landing page',
+    detect(brief: string): number {
+      const b = ' ' + brief.toLowerCase() + ' ';
+      let score = 0;
+      // EN signals: landing, one-page, squeeze page, sales page, coming soon, conversion page
+      const enMatches = (b.match(/\b(landing[- ]?page|one[- ]?page|squeeze[- ]?page|sales[- ]?page|coming[- ]?soon|conversion[- ]?page|product[- ]?page|hero[- ]?page|sign[- ]?up page|launch page)\b/g) || []).length;
+      // FR signals: page de vente, page d'atterrissage, atterrissage, page unique, page de capture
+      const frMatches = (b.match(/\b(page de vente|atterrissage|page d.atterrissage|page unique|page de capture|page de lancement)\b/g) || []).length;
+      // IT signals: pagina di atterraggio, pagina unica, pagina di vendita, pagina singola
+      const itMatches = (b.match(/\b(pagina di atterraggio|pagina unica|pagina di vendita|pagina singola|pagina promozionale|pagina lancio)\b/g) || []).length;
+      score += (enMatches + frMatches + itMatches) * 3;
+      return score;
+    },
+    stack: 'directus',
+    builder: 'directus',
+    archetypeCompat: 'site',
+    branchCaps: ['content_copy'],
+    upgradesTo: ['wp_site', 'directus_site'],
+  },
+
+  // ── T2: Brand identity (name/palette/type/guidelines ONLY — no rendered site) ──
+  // WHY: a "brand identity" / "logo" / "branding only" brief should yield a brand package
+  // (name, palette, typography, guidelines document) with NO compose/render/qa-site steps.
+  // Builder is 'campaign' (no renderer needed); the chain ends at design_guidelines + brand_guidelines.
+  // Confidence: each signal adds 3 points so it decisively beats directus_site baseline.
+  brand_identity: {
+    id: 'brand_identity',
+    label: 'Brand identity package',
+    detect(brief: string): number {
+      const b = ' ' + brief.toLowerCase() + ' ';
+      let score = 0;
+      // EN signals: brand identity, logo design, branding only, visual identity, brand guidelines, brand name
+      const enMatches = (b.match(/\b(brand identity|logo design|branding only|visual identity|brand guidelines?|brand name|identity design|brand pack(age)?|logotype|wordmark|brand style guide)\b/g) || []).length;
+      // FR signals: identité de marque, identité visuelle, logo, charte graphique, nom de marque, guide de marque
+      const frMatches = (b.match(/\b(identit[ée] de marque|identit[ée] visuelle|charte graphique|nom de marque|guide de marque|logo uniquement|seulement le logo|branding seul)\b/g) || []).length;
+      // IT signals: identità del marchio, identità visiva, guida del brand, pacchetto brand, nome del marchio
+      const itMatches = (b.match(/\b(identit[àa] del marchio|identit[àa] visiva|guida del brand|pacchetto brand|nome del marchio|solo il logo|branding senza sito)\b/g) || []).length;
+      score += (enMatches + frMatches + itMatches) * 3;
+      return score;
+    },
+    stack: 'campaign',  // no web renderer — just docs/assets
+    builder: 'campaign',
+    archetypeCompat: 'site',
+    branchCaps: ['brand_guidelines'],
+    upgradesTo: [],
+  },
+
   // ── WordPress CMS site (blog/news/content-heavy) ──────────────────────
   wp_site: {
     id: 'wp_site',
@@ -197,8 +268,14 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      // EN + FR + IT content-site signals (Naples/French clients are the real base, not English demos)
-      const matches = (b.match(/\b(blog|news|magazine|editorial|content site|publish|articles?|cms|wordpress|multi-author|newsroom|press|actualit[ée]s?|revue|journal|r[ée]daction|rivista|notizie|editoriale|articoli?|pubblicazione)\b/g) || []).length;
+      // T3: expanded EN + FR + IT content-site signals.
+      // EN: blog, news, magazine, editorial, CMS, WordPress, publish, multi-author, newsroom, press,
+      //     content hub, media site, column, contributor, author, posts, publication, web magazine.
+      // FR: actualités, revue, journal, rédaction, chronique, auteurs, billet, contenu éditorial,
+      //     site de presse, tribune, blog d'entreprise, publications.
+      // IT: rivista, notizie, editoriale, articoli, pubblicazione, cronaca, redazione, sito di notizie,
+      //     giornale online, webzine, contributi, contenuti.
+      const matches = (b.match(/\b(blog|news|magazine|editorial|content[- ]?site|content[- ]?hub|publish|articles?|cms|wordpress|multi[- ]?author|newsroom|press|column|contributor|author|posts?|media[- ]?site|web[- ]?magazine|actualit[ée]s?|revue|journal|r[ée]daction|chronique|auteurs?|billet|contenu[- ]?[ée]ditorial|site de presse|tribune|blog d.entreprise|publications?|rivista|notizie|editoriale|articoli?|pubblicazione|cronaca|redazione|sito di notizie|giornale online|webzine|contributi|contenuti)\b/g) || []).length;
       // cap at 4 so a single signal doesn't blow past woocommerce
       score += Math.min(4, matches * 2);
       return score;
@@ -217,9 +294,14 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      // EN + FR + IT ecom signals. FR: boutique en ligne, vendre, panier, paiement, achat, prestashop.
-      // IT: negozio, vendere, carrello, pagamento. Plain "boutique"/"negozio" + a sell/cart/pay word = ecom.
-      const matches = (b.match(/\b(shop|store|e-?commerce|e-?shop|woo(commerce)?|online store|sell (online|products?)|checkout|\bcart\b|catalog(ue)?|webshop|merch|boutique en ligne|vendre|vente|panier|paiement|achat|prestashop|magasin|negozio|vendere|vendita|carrello|pagamento|acquist\w*)\b/g) || []).length;
+      // T3: expanded EN + FR + IT ecom signals.
+      // EN: shop, store, e-commerce, webshop, cart, checkout, catalog, products, sell online, woocommerce,
+      //     marketplace for goods, merchandise, add to cart, order, shipping, inventory, stock.
+      // FR: boutique en ligne, vendre, vente, panier, paiement, achat, commande, livraison, produits,
+      //     catalogue, magasin en ligne, article en vente, prix, promotions, stock.
+      // IT: negozio, vendere, vendita, carrello, pagamento, acquisto, ordine, spedizione, prodotti,
+      //     catalogo, listino, inventario, merce, articoli in vendita, shop online.
+      const matches = (b.match(/\b(shop|store|e-?commerce|e-?shop|woo(commerce)?|online[- ]?store|sell (online|products?)|checkout|\bcart\b|catalog(ue)?|webshop|merch|merchandise|inventory|stock|shipping|livraison|commande|boutique en ligne|vendre|vente|panier|paiement|achat|prix|promotions|magasin en ligne|prestashop|negozio|vendere|vendita|carrello|pagamento|acquist\w*|ordine|spedizione|catalogo|listino|inventario)\b/g) || []).length;
       score += Math.min(6, matches * 3);
       return score;
     },
@@ -237,9 +319,14 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      // EN + FR + IT app signals. FR: appli, plateforme, tableau de bord, réservation, suivi.
-      // IT: applicazione, piattaforma, cruscotto, prenotazione, tracciamento.
-      const matches = (b.match(/\b(app|appli|application|platform|plateforme|piattaforma|saas|dashboard|tableau de bord|cruscotto|booking|reservation|r[ée]servation|prenotazione|settlement|tracker|tracking|suivi|tracciamento|portal|portail|marketplace|directory|annuaire|crm|erp|scheduling|planning|on[- ]?demand|fleet|flotte|api|backend|full[- ]?stack)\b/g) || []).length;
+      // T3: expanded EN + FR + IT app signals.
+      // EN: app, application, platform, SaaS, dashboard, booking, tracker, portal, marketplace,
+      //     directory, CRM, ERP, scheduling, fleet, backend, API, full-stack, member area, admin panel.
+      // FR: appli, application, plateforme, tableau de bord, réservation, suivi, portail, annuaire,
+      //     planning, flotte, gestion, logiciel, outil, espace membre, panneau admin.
+      // IT: applicazione, piattaforma, cruscotto, prenotazione, tracciamento, portale, directory,
+      //     pianificazione, flotta, gestione, software, strumento, area membri, pannello admin.
+      const matches = (b.match(/\b(app|appli|application|platform|plateforme|piattaforma|saas|dashboard|tableau de bord|cruscotto|booking|reservation|r[ée]servation|prenotazione|settlement|tracker|tracking|suivi|tracciamento|portal|portail|marketplace|directory|annuaire|crm|erp|scheduling|planning|on[- ]?demand|fleet|flotte|api|backend|full[- ]?stack|member[- ]?area|admin[- ]?panel|gestion|logiciel|outil|espace[- ]?membre|panneau[- ]?admin|gestione|software|strumento|area[- ]?membri|pannello[- ]?admin|iscrizione|abbonamento|subscription|membership)\b/g) || []).length;
       score += Math.min(6, matches * 3);
       return score;
     },
@@ -257,7 +344,14 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     detect(brief: string): number {
       const b = ' ' + brief.toLowerCase() + ' ';
       let score = 0;
-      const matches = (b.match(/\b(email campaign|newsletter blast|social (media )?(campaign|posts?)|ad creative|video ad|mailing|drip campaign|marketing assets|flyer|banner ads?)\b/g) || []).length;
+      // T3: expanded EN + FR + IT campaign signals.
+      // EN: email campaign, newsletter blast, social media campaign, ad creative, video ad,
+      //     mailing, drip campaign, marketing assets, flyer, banner ads, promotional email.
+      // FR: campagne email, campagne emailing, campagne publicitaire, newsletter, mailing,
+      //     publicité, création publicitaire, réseaux sociaux, posts sponsorisés, annonce.
+      // IT: campagna email, newsletter, mailing, campagna pubblicitaria, annuncio, creatività,
+      //     social media, post sponsorizzati, banner, volantino, materiale promozionale.
+      const matches = (b.match(/\b(email[- ]?campaign|newsletter[- ]?blast|social[- ]?(media[- ]?)?(campaign|posts?)|ad[- ]?creative|video[- ]?ad|mailing|drip[- ]?campaign|marketing[- ]?assets|flyer|banner[- ]?ads?|promotional[- ]?email|campagne[- ]?email|campagne[- ]?emailing|campagne[- ]?publicitaire|newsletter|publicit[ée]|cr[ée]ation[- ]?publicitaire|r[ée]seaux[- ]?sociaux|posts?[- ]?sponsoris[ée]s?|annonce|campagna[- ]?email|campagna[- ]?pubblicitaria|annuncio|creativit[àa]|post[- ]?sponsorizzati|materiale[- ]?promozionale)\b/g) || []).length;
       score += Math.min(9, matches * 3);
       return score;
     },
@@ -268,6 +362,63 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     upgradesTo: [],
   },
 };
+
+// ────────────────────────────────────────────────────────────────────────────
+// SIGNAL EXTRACTOR — T3: extract the matched signal words from a brief for a
+// given deliverable, so chainReason can name them (e.g. "FR ecom signals: boutique, vendre").
+// WHY: a human needs to be able to audit why the orchestrator chose a deliverable.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Regex patterns per deliverable (mirrors the detect() patterns but returns capture groups).
+const SIGNAL_PATTERNS: Partial<Record<DeliverableId, RegExp>> = {
+  landing_page:   /\b(landing[- ]?page|one[- ]?page|squeeze[- ]?page|sales[- ]?page|coming[- ]?soon|conversion[- ]?page|product[- ]?page|atterrissage|page de vente|page d.atterrissage|page unique|page de capture|pagina di atterraggio|pagina unica|pagina di vendita|pagina singola)\b/gi,
+  brand_identity: /\b(brand identity|logo design|branding only|visual identity|brand guidelines?|logotype|wordmark|identit[ée] de marque|identit[ée] visuelle|charte graphique|identit[àa] del marchio|identit[àa] visiva|guida del brand)\b/gi,
+  wp_site:        /\b(blog|news|magazine|editorial|wordpress|multi[- ]?author|newsroom|actualit[ée]s?|revue|journal|r[ée]daction|rivista|notizie|editoriale|articoli?|pubblicazione|redazione)\b/gi,
+  wp_woocommerce: /\b(shop|store|e-?commerce|checkout|\bcart\b|catalog(ue)?|webshop|boutique en ligne|vendre|panier|paiement|negozio|vendere|carrello|pagamento|acquist\w*|inventory|spedizione)\b/gi,
+  fullstack_app:  /\b(saas|dashboard|platform|booking|reservation|r[ée]servation|prenotazione|tracker|marketplace|crm|erp|plateforme|tableau de bord|piattaforma|cruscotto|tracciamento|portale|subscription|membership)\b/gi,
+  campaign:       /\b(email[- ]?campaign|newsletter|mailing|drip[- ]?campaign|ad[- ]?creative|flyer|campagne[- ]?email|campagne[- ]?publicitaire|campagna[- ]?email|campagna[- ]?pubblicitaria)\b/gi,
+};
+
+function extractSignals(brief: string, deliverable: DeliverableId): string[] {
+  const pat = SIGNAL_PATTERNS[deliverable];
+  if (!pat) return [];
+  const raw = brief.match(pat) || [];
+  // deduplicate, lowercase, cap at 5 so the string stays readable
+  return [...new Set(raw.map(s => s.toLowerCase().replace(/\s+/g, ' ')))].slice(0, 5);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// CHAIN REASON BUILDER — T3/T19: produce a human-readable "why" string.
+// Format: "<deliverable> (<lang> <type> signals: <word>, <word>) · chain: step1->step2->..."
+// WHY: the board shows this to owners so they can audit the routing decision.
+// ────────────────────────────────────────────────────────────────────────────
+
+function buildChainReason(
+  deliverable: DeliverableId,
+  brief: string,
+  chain: { department: string }[],
+  llmReason?: string,
+): string {
+  const del = DELIVERABLES[deliverable];
+  const signals = extractSignals(brief, deliverable);
+
+  // Detect dominant language for the label
+  const b = ' ' + brief.toLowerCase() + ' ';
+  const frScore = (b.match(/\b(le|la|les|un|une|des|du|est|pour|avec|votre|notre|de|en|et|ou|je|nous|vous|ils|boutique|vendre|marque|site|annuaire)\b/g) || []).length;
+  const itScore = (b.match(/\b(il|la|le|un|una|dei|del|della|per|con|vostro|nostro|di|in|e|o|io|noi|voi|loro|negozio|vendere|marchio|sito|directory)\b/g) || []).length;
+  const lang = frScore >= 4 ? 'FR' : itScore >= 4 ? 'IT' : 'EN';
+
+  const signalPart = signals.length > 0
+    ? ` (${lang} signals: ${signals.join(', ')})`
+    : '';
+
+  // Chain summary: department sequence, abbreviated
+  const chainSteps = chain.map(t => t.department).join('->');
+
+  let reason = `${deliverable}${signalPart} · chain: ${chainSteps}`;
+  if (llmReason) reason += ` · llm: ${llmReason.slice(0, 80)}`;
+  return reason;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // FLOOR DETECTOR
@@ -298,6 +449,18 @@ export function detectDeliverable(brief: string): DeliverableId {
 export function detectNeeds(brief: string, archetype: Archetype, deliverable: DeliverableId): CapId[] {
   const needs = new Set<CapId>();
   const b = ' ' + brief.toLowerCase() + ' ';
+
+  // T1: landing_page — only content_copy + its own compose/render in composeChain; no data steps.
+  if (deliverable === 'landing_page') {
+    needs.add('content_copy');
+    return [...needs];
+  }
+
+  // T2: brand_identity — brand_guidelines ONLY; no site/data/render steps.
+  if (deliverable === 'brand_identity') {
+    needs.add('brand_guidelines');
+    return [...needs];
+  }
 
   // content_copy is enabled for every deliverable that lists it
   const del = DELIVERABLES[deliverable];
@@ -417,6 +580,33 @@ export function composeChain(
     return renumber(tasks);
   }
 
+  // T2: brand_identity — spine + brand_guidelines; NO compose/render/qa-site
+  // WHY: the client wants a brand package ONLY (name, palette, type, guidelines).
+  // There is no website to render. The chain ends after design_guidelines + brand_guidelines.
+  if (deliverable === 'brand_identity') {
+    const bgSeq = emit('Brand guidelines document (name, palette, typography, usage)', 'design', 'min:280', [designSeq]);
+    emit('QA — brand guidelines review', 'qa', 'site_consistent', [bgSeq]);
+    return renumber(tasks);
+  }
+
+  // T1: landing_page — spine + content_copy + a SINGLE compose + render + qa
+  // WHY: a landing page is shape-forced to ONE page (no multi-page nav). The chain is
+  // the standard spine augmented by content_copy, then a single compose+render pair.
+  // This is still a Directus render so it passes the same site gates.
+  if (deliverable === 'landing_page') {
+    // content_copy for conversion-focused copy
+    if (needs.has('content_copy')) {
+      const copySeq = emit('Conversion copy (hero, CTA, social proof, benefits)', 'content', 'json', [researchSeq]);
+      thinkingSeqs.push(copySeq);
+    }
+    // force exactly ONE page (the landing page shape invariant)
+    const landingPages = [{ slug: 'index', title: 'Home' }];
+    const composeSeq = emit('Compose the landing page (one CMS → single page)', 'compose', 'site_model', [...thinkingSeqs]);
+    const rSeq = emit('Render the Home page', 'render', 'site_renders', [composeSeq], 'index.html');
+    emit('QA — acceptance (1 nav · 1 logo · 1 palette, every page)', 'qa', 'site_consistent', [rSeq]);
+    return renumber(tasks);
+  }
+
   // wp_provision (WordPress-based deliverables: after compose)
   // We emit compose first, then wp_provision depends on it
   const composeSeq = emit(
@@ -526,7 +716,13 @@ Valid ids: ${upgradeSet}|directus_site. Default to directus_site for any plain/s
 
   const detectedNeeds = detectNeeds(brief, archetype, deliverable) as CapId[];
 
-  return { deliverable, stack: del.stack, builder: del.builder, detectedNeeds, reason, archetype };
+  // T3/T19: build the human-readable chainReason from the assembled chain.
+  // We compose a preview chain (with default 1-page) purely to extract the department sequence.
+  const previewChain = composeChain(deliverable, detectedNeeds, [{ slug: 'index', title: 'Home' }]);
+  const llmReasonForChain = reason.startsWith('llm') ? reason : undefined;
+  const chainReason = buildChainReason(deliverable, brief, previewChain, llmReasonForChain);
+
+  return { deliverable, stack: del.stack, builder: del.builder, detectedNeeds, reason, chainReason, archetype };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -546,12 +742,25 @@ export function applyDeliverable(
     return built;
   }
 
+  // T1: landing_page — force exactly ONE page before composing the chain.
+  // WHY: the shape invariant is 1 page; we must not pass built.pages (which the LLM may have
+  // proposed as multi-page) into composeChain — that would emit multiple render tasks.
+  const chainPages = orchestration.deliverable === 'landing_page'
+    ? [{ slug: 'index', title: 'Home' }]
+    : built.pages;
+
   // For other deliverables, use composeChain to build the task list.
   // The spine + branch caps are assembled from the orchestration result.
-  const tasks = composeChain(orchestration.deliverable, orchestration.detectedNeeds, built.pages);
+  const tasks = composeChain(orchestration.deliverable, orchestration.detectedNeeds, chainPages);
+
+  // T1: landing_page also forces the page set to exactly one page in the plan.
+  const finalPages = orchestration.deliverable === 'landing_page'
+    ? [{ slug: 'index', title: 'Home' }]
+    : built.pages;
 
   return {
     ...built,
+    pages: finalPages,
     tasks,
     // Archetype is promoted if the orchestration requires it
     archetype: orchestration.archetype,

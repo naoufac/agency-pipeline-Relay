@@ -294,10 +294,13 @@ export async function persistPlan(
   // For the classic directus_site path these are informational; for new deliverables they drive
   // builder selection in runner.ts (Worker B/C read params.builder to pick their finalize path).
   const orchestrationParams = orchestration ? {
-    deliverable:  orchestration.deliverable,   // 'directus_site'|'wp_site'|'wp_woocommerce'|'fullstack_app'|'campaign'
+    deliverable:  orchestration.deliverable,   // 'directus_site'|'wp_site'|'wp_woocommerce'|'fullstack_app'|'campaign'|'landing_page'|'brand_identity'
     builder:      orchestration.builder,        // registry key: 'directus'|'wordpress'|'app'|'campaign'
     stack:        orchestration.stack,          // 'directus'|'wordpress'|'woocommerce'|'node-postgres'|'campaign'
-    chainReason:  orchestration.reason,         // human-readable why
+    // T3/T19: chainReason is the human-readable "why" string built by buildChainReason() in
+    // orchestrator.ts — includes deliverable + matched signals + chain step sequence.
+    // Stored in params so the board can show it; also emitted as a run_event below.
+    chainReason:  orchestration.chainReason,    // e.g. "wp_woocommerce (FR signals: boutique) · chain: strategy->research->..."
     capabilities: orchestration.detectedNeeds,  // CapId[] that fired
   } : {};
   const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief), complexity: { score: complexity.score, pagesMax: complexity.pagesMax }, ...orchestrationParams };
@@ -306,6 +309,13 @@ export async function persistPlan(
   const projectId: string = p.rows[0].id;
   await writeDag(pool, projectId, tasks);
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'planned',$2)", [projectId, `${tasks.length} tasks · ${pages.length} pages · ${archetype}${shape === 'landing' ? ' · LANDING' : ''} · ${theme} · cms:${cms} · ${usedLLM ? 'LLM planner' : 'template'}`]);
+  // T19: emit 'orchestrated' event with deliverable, stack, and chainReason so the board can
+  // show WHY this deliverable was chosen. Detail format: "<deliverable> · <stack> · <chainReason>".
+  // This fires for EVERY project (even directus_site) so the board always has routing context.
+  if (orchestration) {
+    const orchDetail = `${orchestration.deliverable} · ${orchestration.stack} · ${orchestration.chainReason}`.slice(0, 500);
+    await pool.query("insert into run_events(project_id, type, detail) values ($1,'orchestrated',$2)", [projectId, orchDetail]);
+  }
   await pool.query("insert into run_events(project_id, type, detail) values ($1,'scoped',$2)", [projectId, `D${scope.difficulty} · includes: ${scope.includes.map(i => i.name).join(', ')} · not included: ${scope.excludes.map(e => e.ask).join(', ')}`.slice(0, 400)]);
   for (const n of (result.notes || [])) await pool.query("insert into run_events(project_id, type, detail) values ($1,'plan_repair',$2)", [projectId, n]).catch(() => {});
   return { projectId, taskCount: tasks.length };
