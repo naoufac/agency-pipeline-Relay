@@ -276,7 +276,8 @@ function clampSeedPks(model: any, repairs: string[] = []): any {
 }
 
 // the ONLY section types the renderer knows — mirror of SECTIONS in components.ts. Keep in sync.
-const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form', 'logos', 'offer', 'products', 'cart', 'checkout']);
+// ARC D: 'video' added (YouTube facade + direct .mp4/.webm; sanitization enforced in the renderer).
+const KNOWN = new Set(['hero', 'features', 'split', 'gallery', 'cta', 'pricing', 'testimonials', 'faq', 'stats', 'collection', 'feed', 'form', 'logos', 'offer', 'products', 'cart', 'checkout', 'video']);
 const CATALOG_PAGE = /^(index|home|shop|store|products?|listings?|menu|catalog|browse|directory|gallery|work)$/;
 
 const str = (v: any): string => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
@@ -422,7 +423,31 @@ function repairSection(s: any, ctx: SpecCtx, repairs: string[]): any | null {
       break;  // fully deterministic components — copy fields only
     case 'feed':
       break;  // reads public submissions; renderer defaults the form name to "listing"
-  }
+    case 'video': {
+      // ARC D: normalize video section fields.
+      // youtubeId: ONLY when the brief explicitly mentioned video/YouTube — extract from a pasted URL
+      // deterministically if needed. The renderer's sanitization (/^[A-Za-z0-9_-]{6,20}$/) is the
+      // enforcement guard; this step normalizes the shape so the LLM doesn't have to know URL formats.
+      if (nonEmpty(s.youtubeId)) {
+        const raw = str(s.youtubeId);
+        // extract id from a full YouTube URL if the composer pasted the whole link
+        const m = raw.match(/(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/shorts\/)([A-Za-z0-9_-]{6,20})/);
+        if (m) { s.youtubeId = m[1]; } else { s.youtubeId = raw; }
+        // renderer validates the final value — if it fails the regex it renders nothing (safe)
+        delete s.src;  // only one mode at a time; youtubeId wins
+      } else if (nonEmpty(s.src)) {
+        // src must be https and end .mp4/.webm — pre-validate here to give meaningful repair messages
+        const src = str(s.src);
+        if (!/^https:\/\/.+\.(mp4|webm)$/i.test(src)) { repairs.push(`video section: src "${src.slice(0, 60)}" is not https .mp4/.webm — dropped`); return null; }
+        delete s.youtubeId;
+      } else {
+        // no playable content — drop silently (no crash, no empty section)
+        repairs.push('dropped video section with neither youtubeId nor src');
+        return null;
+      }
+      break;
+    }
+  }  // end switch
   return s;
 }
 

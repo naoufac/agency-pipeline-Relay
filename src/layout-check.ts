@@ -159,5 +159,150 @@ ok('the search box is accessible + safe (aria from the locale dict)', rendered.i
   ok('og:image stays relative when siteBase is not known', withoutBase.includes('og:image" content="icon-512.png"'));
 }
 
+// ============================================================================
+// ARC D · VIDEO SECTION GATES
+// All assertions must hold at render time (no server, no live DB).
+// INVARIANT: no iframe tag / youtube-nocookie URL in any src attribute before click.
+// ============================================================================
+import { SECTIONS } from './components.ts';
+
+// (A) Valid YouTube facade
+{
+  const html = SECTIONS.video({ youtubeId: 'dQw4w9WgXcQ', title: 'Watch this', poster: 'concert stage', caption: 'Live 2024' });
+  ok('video: valid youtubeId renders a facade (not empty)', html.length > 0);
+  ok('video: facade has NO <iframe> pre-click', !/<iframe/i.test(html));
+  ok('video: youtube-nocookie URL NOT in any src= attribute pre-click', !/ src="[^"]*youtube-nocookie/.test(html));
+  ok('video: nocookie URL is only in data-src (safe for pre-click)', html.includes('data-src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'));
+  ok('video: play button overlay present (via CSS ::after — no inline play element needed)', html.includes('video-facade'));
+  ok('video: title rendered', html.includes('Watch this'));
+  ok('video: caption rendered', html.includes('Live 2024'));
+  ok('video: aria-label on the button', html.includes('aria-label='));
+  ok('video: poster image present (YouTube hqdefault fallback)', html.includes('hqdefault.jpg') || html.includes('data-q="concert stage"'));
+}
+
+// (B) Valid YouTube facade with q()-based poster
+{
+  const html = SECTIONS.video({ youtubeId: 'abcDEF12345', title: 'Demo', poster: 'product demo video' });
+  ok('video: q() poster via data-q when poster string provided', html.includes('data-q="product demo video"'));
+}
+
+// (C) Direct .mp4 video — must have controls, preload=metadata, playsinline, NO autoplay
+{
+  const html = SECTIONS.video({ src: 'https://cdn.example.com/promo.mp4', title: 'Our story', caption: 'Filmed on location' });
+  ok('video: direct mp4 renders <video> element', /<video/.test(html));
+  ok('video: direct mp4 has controls attribute', /\bcontrols\b/.test(html));
+  ok('video: direct mp4 has preload="metadata"', html.includes('preload="metadata"'));
+  ok('video: direct mp4 has playsinline', html.includes('playsinline'));
+  ok('video: direct mp4 has NO autoplay attribute', !/\bautoplay\b/.test(html));
+  ok('video: direct mp4 caption rendered', html.includes('Filmed on location'));
+  ok('video: direct mp4 source tag with correct type', html.includes('type="video/mp4"'));
+}
+
+// (D) Direct .webm video
+{
+  const html = SECTIONS.video({ src: 'https://cdn.example.com/promo.webm' });
+  ok('video: webm source type correct', html.includes('type="video/webm"'));
+  ok('video: webm has controls, no autoplay', /\bcontrols\b/.test(html) && !/\bautoplay\b/.test(html));
+}
+
+// (E) HOSTILE FIXTURES — all must render empty string, never throw, never emit unsanitized input
+{
+  // javascript: URL as youtubeId
+  const jsId = SECTIONS.video({ youtubeId: 'javascript:alert(1)' });
+  ok('video: hostile youtubeId (javascript:) renders empty (sanitized)', jsId === '');
+
+  // youtubeId too long
+  const longId = SECTIONS.video({ youtubeId: 'a'.repeat(25) });
+  ok('video: youtubeId > 20 chars renders empty', longId === '');
+
+  // youtubeId too short
+  const shortId = SECTIONS.video({ youtubeId: 'abc' });
+  ok('video: youtubeId < 6 chars renders empty', shortId === '');
+
+  // youtubeId with script breakout attempt
+  const xssId = SECTIONS.video({ youtubeId: '"><script>alert(1)</script>' });
+  ok('video: youtubeId with XSS chars renders empty (not in whitelist)', xssId === '');
+  ok('video: hostile youtubeId does NOT emit <script>', !xssId.includes('<script>'));
+
+  // src with javascript: protocol
+  const jsSrc = SECTIONS.video({ src: 'javascript:alert(1)' });
+  ok('video: src with javascript: protocol renders empty', jsSrc === '');
+
+  // src without https
+  const httpSrc = SECTIONS.video({ src: 'http://cdn.example.com/vid.mp4' });
+  ok('video: src with http:// (not https) renders empty', httpSrc === '');
+
+  // src without .mp4/.webm extension
+  const badExt = SECTIONS.video({ src: 'https://cdn.example.com/vid.avi' });
+  ok('video: src with .avi extension renders empty', badExt === '');
+
+  // src with onerror injection attempt
+  const onerrorSrc = SECTIONS.video({ src: 'https://cdn.example.com/vid.mp4" onerror="alert(1)' });
+  ok('video: src with onerror injection renders empty (fails regex)', onerrorSrc === '');
+
+  // </script> breakout in youtubeId field
+  const scriptBreak = SECTIONS.video({ youtubeId: '</script><script>evil()' });
+  ok('video: youtubeId </script> breakout renders empty', scriptBreak === '');
+
+  // onerror attribute in poster/title (must be escaped — no raw < > " in attribute context)
+  // esc() converts: < → &lt;  > → &gt;  " → &quot;  & → &amp;
+  // The injected title lands in an h2 text node and in aria-label (attribute), so " > < must be escaped.
+  const xssTitle = SECTIONS.video({ youtubeId: 'dQw4w9WgXcQ', title: '"><img onerror=alert(1)>' });
+  // the < from the hostile title must be escaped to &lt; (so <img never becomes a real tag)
+  ok('video: XSS in title: < is escaped to &lt; in rendered output', xssTitle.includes('&lt;') || xssTitle.includes('&gt;'));
+  // the " from the hostile title must be escaped to &quot; in attribute contexts
+  ok('video: XSS in title: " is escaped to &quot; in aria-label attribute', xssTitle.includes('&quot;') || !xssTitle.includes('""><img'));
+
+  // no youtubeId and no src → empty
+  const empty = SECTIONS.video({ title: 'No video here' });
+  ok('video: no youtubeId and no src renders empty string', empty === '');
+
+  // malformed/null youtubeId
+  const nullId = SECTIONS.video({ youtubeId: null, title: 'Null id' });
+  ok('video: null youtubeId renders empty', nullId === '');
+}
+
+// (F) spec.ts KNOWN pin — 'video' must be accepted (not dropped) by normalizeSpec
+{
+  const { normalizeSpec } = await import('./spec.ts');
+  const r = normalizeSpec({ brand: { name: 'X', tokens: { bg: '#fff', primary: '#111' } }, sections: [
+    { type: 'hero', headline: 'Welcome' },
+    { type: 'video', youtubeId: 'dQw4w9WgXcQ', title: 'Watch' },
+    { type: 'features', items: [{ title: 'A', body: 'b' }] },
+  ] });
+  ok('spec: video section type is in KNOWN (not dropped)', r.spec && r.spec.sections.some((s: any) => s.type === 'video'));
+  ok('spec: normalizeSpec video → no errors', r.errors.length === 0);
+
+  // youtubeId extracted from a full YouTube URL at normalize stage
+  const rUrl = normalizeSpec({ brand: { name: 'X', tokens: {} }, sections: [
+    { type: 'hero', headline: 'Hi' },
+    { type: 'video', youtubeId: 'https://youtu.be/dQw4w9WgXcQ', title: 'Watch' },
+    { type: 'features', items: [{ title: 'A', body: 'b' }] },
+  ] });
+  const vidSec = rUrl.spec && rUrl.spec.sections.find((s: any) => s.type === 'video');
+  ok('spec: youtubeId extracted from full URL at normalize stage', vidSec && vidSec.youtubeId === 'dQw4w9WgXcQ', JSON.stringify(vidSec));
+
+  // invalid src (http) → dropped with a repair
+  const rBad = normalizeSpec({ brand: { name: 'X', tokens: {} }, sections: [
+    { type: 'hero', headline: 'Hi' },
+    { type: 'video', src: 'http://not-https.com/video.mp4', title: 'Bad' },
+    { type: 'features', items: [{ title: 'A', body: 'b' }] },
+  ] });
+  ok('spec: video with non-https src is dropped', !rBad.spec?.sections.some((s: any) => s.type === 'video'));
+
+  // video with neither youtubeId nor src → dropped
+  const rNone = normalizeSpec({ brand: { name: 'X', tokens: {} }, sections: [
+    { type: 'hero', headline: 'Hi' },
+    { type: 'video', title: 'Watch nothing' },
+    { type: 'features', items: [{ title: 'A', body: 'b' }] },
+  ] });
+  ok('spec: video with no youtubeId and no src is dropped', !rNone.spec?.sections.some((s: any) => s.type === 'video'));
+}
+
+// (G) DS_CSS contains the video styles
+ok('DS_CSS contains .video-facade rule', DS_CSS.includes('.video-facade'));
+ok('DS_CSS contains aspect-ratio:16/9 for the video facade', DS_CSS.includes('aspect-ratio:16/9'));
+ok('DS_CSS contains .video-caption rule', DS_CSS.includes('.video-caption'));
+
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

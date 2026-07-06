@@ -253,6 +253,19 @@ body.l-cards-overlay .collection .card.has-img>:not(img):not(a.p-imglink):last-c
 body.l-cards-overlay .collection .card.has-img .muted,body.l-cards-overlay .products .card.has-img .muted,body.l-cards-overlay .feed .card.has-img .muted{color:rgba(255,255,255,.85)}
 body.l-cards-overlay .collection .card.has-img .btn,body.l-cards-overlay .products .card.has-img .btn,body.l-cards-overlay .feed .card.has-img .btn{position:relative;z-index:3}
 body.l-cards-overlay .collection .card.has-img p,body.l-cards-overlay .products .card.has-img p,body.l-cards-overlay .feed .card.has-img p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* ARC D · VIDEO SECTION — privacy-safe, mobile-first, 16:9 aspect-ratio */
+/* .video-facade: the click-to-load poster for YouTube. NO iframe pre-click — zero third-party requests
+   until the visitor taps play. The youtube-nocookie URL lives ONLY in data-src (read on click). */
+.video-wrap{max-width:100%;margin:1.6rem 0}
+.video-facade{position:relative;display:block;width:100%;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;cursor:pointer;background:#0b1220}
+.video-facade img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:var(--radius)}
+/* play button overlay — centered, AA-legible on any photo */
+.video-facade::after{content:'▶';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:clamp(2.8rem,8vw,4.2rem);color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.65);pointer-events:none}
+.video-facade:hover img{filter:brightness(.85)}
+/* on click: the facade is removed and the iframe (injected by the inline handler) fills the slot */
+.video-facade .vf-frame{position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:var(--radius)}
+.video-direct{width:100%;aspect-ratio:16/9;border-radius:var(--radius);display:block;background:#0b1220}
+.video-caption{font-size:.88rem;color:var(--muted);margin-top:.6rem}
 `;
 
 // DS_CSS: backward-compat alias so existing check imports keep working.
@@ -637,6 +650,59 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
       ${s.guarantee ? `<p class="muted" style="font-size:.9rem;margin-top:1rem">${esc(s.guarantee)}</p>` : ''}
     </div>
   </div></section>`,
+  // ARC D · VIDEO — privacy-safe embedded video. Two modes:
+  //   YouTube: click-to-load facade — the poster image is shown pre-click with a play overlay;
+  //            the youtube-nocookie.com iframe is injected ONLY on click via a tiny inline handler.
+  //            INVARIANT: zero iframe tags, zero youtube-nocookie URLs in src attributes pre-click.
+  //            The nocookie URL lives exclusively in data-src on the facade element.
+  //   Direct:  <video controls preload="metadata" playsinline> — never autoplay (gate enforced).
+  // Sanitization is the ENFORCEMENT (not LLM guidance):
+  //   - youtubeId must match /^[A-Za-z0-9_-]{6,20}$/ (else renders empty string, never throws)
+  //   - src must be https and end .mp4 or .webm (else renders empty string)
+  //   - all values pass through esc(); user-controlled input never reaches an unescaped attribute
+  // A malformed video section renders as empty string — it NEVER throws and NEVER emits unsanitized input.
+  video: (s) => {
+    // guard: title/eyebrow/caption are display-only, always escaped
+    const title = s.title ? `<h2>${esc(s.title)}</h2>` : '';
+    const eyebrow = s.eyebrow ? `<span class="eyebrow">${esc(s.eyebrow)}</span>` : '';
+    const caption = s.caption ? `<p class="video-caption">${esc(s.caption)}</p>` : '';
+    // YOUTUBE branch — facade pattern
+    if (s.youtubeId != null) {
+      // HARD SANITIZE: only [A-Za-z0-9_-]{6,20} reaches the DOM; anything else is silently dropped
+      if (!/^[A-Za-z0-9_-]{6,20}$/.test(String(s.youtubeId ?? ''))) return '';
+      const vid = esc(String(s.youtubeId));
+      // nocookie URL is in data-src ONLY — never in src — so NO third-party request fires pre-click
+      const nocookieUrl = `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&rel=0`;
+      // poster: use caller-supplied photo query (via q()) or fall back to YouTube's own hqdefault thumbnail
+      // YouTube's own thumbnail is a first-party image (i.ytimg.com) — acceptable as a performance fallback
+      const poster = s.poster
+        ? `<img data-q="${esc(s.poster)}" alt="${esc(s.poster)}" loading="lazy">`
+        : `<img src="https://i.ytimg.com/vi/${vid}/hqdefault.jpg" alt="${esc(s.title || 'Watch video')}" loading="lazy">`;
+      // inline click handler: replaces the facade with the iframe ON CLICK — zero JS until then.
+      // The iframe is built from data-src (not hard-coded src) so the pre-click HTML contains NO nocookie URL in any src attribute.
+      const handler = `var f=this;var fr=document.createElement('iframe');fr.className='vf-frame';fr.allow='autoplay;fullscreen';fr.allowFullscreen=true;fr.src=f.getAttribute('data-src');f.innerHTML='';f.appendChild(fr)`;
+      return `<section class="section" id="video"><div class="container">
+        ${eyebrow}${title}
+        <div class="video-wrap"><button class="video-facade" data-src="${esc(nocookieUrl)}" onclick="${esc(handler)}" aria-label="${esc(s.title || 'Play video')}" type="button">${poster}</button>${caption}</div>
+      </div></section>`;
+    }
+    // DIRECT VIDEO branch — .mp4 or .webm, https only
+    if (s.src != null) {
+      const src = String(s.src ?? '');
+      // HARD SANITIZE: must be https and end with .mp4 or .webm; else render nothing
+      if (!/^https:\/\/.+\.(mp4|webm)$/i.test(src)) return '';
+      const poster = s.poster
+        ? `<img data-q="${esc(s.poster)}" alt="${esc(s.poster)}" loading="lazy" style="display:none" id="vp-${esc(String(s.youtubeId || src).slice(-8))}">`
+        : '';
+      // never autoplay (INVARIANT: no autoplay attribute emitted)
+      return `<section class="section" id="video"><div class="container">
+        ${eyebrow}${title}
+        <div class="video-wrap"><video class="video-direct" controls preload="metadata" playsinline${s.poster ? ` data-poster-q="${esc(s.poster)}"` : ''}>${poster}<source src="${esc(src)}" type="${src.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4'}"></video>${caption}</div>
+      </div></section>`;
+    }
+    // neither youtubeId nor src — render nothing (never throws)
+    return '';
+  },
   // LIVE DB read: a list rendered from the project's REAL database table (data-table). Empty-state at
   // build/gate time (file://); filled from /api/site/:id/data/:table when served over HTTP.
   collection: (s, o) => {
