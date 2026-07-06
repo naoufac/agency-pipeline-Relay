@@ -461,6 +461,10 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const aid = url.searchParams.get('id') || '';
       if (!/^[0-9a-f-]{36}$/.test(aid)) return send(res, 404, 'application/json', '{"error":"not found"}');
       if (!canSee(user, await ownerOf(aid))) return send(res, 404, 'application/json', '{"error":"not found"}');
+      // An Android package is ONLY for a full-stack APP deliverable — never a marketing website.
+      // (A TWA button on every site was noise. The board hides the button too; this is the backstop.)
+      const apkDlv = (await pool.query("select params->>'deliverable' as d from projects where id=$1", [aid])).rows[0]?.d;
+      if (apkDlv !== 'fullstack_app') return send(res, 200, 'application/json', JSON.stringify({ available: false, reason: 'not-an-app' }));
       if (req.method === 'POST') {
         // packaging is a 25-min gradle run (a core + memory) — a resource-consuming WRITE, so it
         // needs the OWNER (canSee admits anon on ownerless legacy projects, fine for reads, NOT for

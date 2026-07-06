@@ -102,10 +102,19 @@ ok('apkStatus: no artifact → apk:false, no url invented', await (async () => {
   if (saved !== undefined) process.env.RELAY_KS_PASS = saved; else delete process.env.RELAY_KS_PASS;
 }
 
-// ---- android by default: the runner packages every finished production build ----
+// ---- android is an APP-DELIVERABLE thing, NOT a button on every website ----
 {
   const runner = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
   ok('runner: auto-packages after done+review (RELAY_APK_AUTO gate)', runner.includes('packageProjectAsync') && runner.includes('RELAY_APK_AUTO'));
+  // the fix: APK build is gated on the fullstack_app deliverable — a marketing site never gets one.
+  ok('runner: auto-APK gated on deliverable === fullstack_app (no APK on websites)',
+    /dlv === 'fullstack_app' && process\.env\.RELAY_APK_AUTO/.test(runner));
+  const srv = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+  ok('server: /api/apk refuses non-fullstack_app deliverables (returns not-an-app)',
+    srv.includes("apkDlv !== 'fullstack_app'") && srv.includes('not-an-app'));
+  const appjs = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+  ok('board: APK spot rendered empty for non-app deliverables (available===false)',
+    appjs.includes('st.available === false') && /available === false[^]{0,80}apkSpot\.innerHTML = ''/.test(appjs));
   const canary = readFileSync(new URL('./canary.ts', import.meta.url), 'utf8');
   ok('canary: asserts apk_built + serves /app.apk on the subdomain', canary.includes("type='apk_built'") && canary.includes("path: '/app.apk'"));
   ok('canary: sweeps old packaging workdirs', canary.includes('/root/apk-builds/'));
@@ -128,7 +137,7 @@ ok('server: subdomain Host-routing exists (the APK origin resolves)', server.inc
 }
 {
   const i = server.indexOf("path === '/api/apk'");
-  const route = i >= 0 ? server.slice(i, i + 1200) : '';
+  const route = i >= 0 ? server.slice(i, i + 1700) : '';   // widened: the deliverable gate lengthened the route
   ok('server: /api/apk exists and is ownership-gated (404, never leaked)', i >= 0 && route.includes('canSee') && route.includes('ownerOf'));
   ok('server: POST /api/apk requires the OWNER + an IP cap (a WRITE that spawns a 25-min gradle, never anon)', route.includes("user.id !== owner") && route.includes('APK_HITS'));
   ok('server: POST /api/apk goes through packageProjectAsync (in-flight capped)', route.includes('packageProjectAsync'));

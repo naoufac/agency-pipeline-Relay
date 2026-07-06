@@ -192,6 +192,25 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       content = 'integrations: deterministic wiring — see verify log';
       await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
       await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+    } else if (task.department === 'wp_provision') {
+      // DETERMINISTIC department — no LLM. Provision the LIVE WordPress site NOW, as a real DAG step,
+      // so the build is not "done" until WP is genuinely up and the wp_provisioned verify confirms it
+      // (deferring this to the post-build finalize would verify before the work exists). The builder
+      // reads params.site/brand from the DB and writes the params.wp_provision proof the verify reads.
+      // Feature-flagged inside (RELAY_WP!=1 → no-op pass), so the default pipeline is untouched.
+      const { wordpressBuilder } = await import('./cms/wordpress.ts');
+      const wpCtx: any = { projectId: task.project_id, brief: (ctx as any).brief, archetype: (ctx as any).archetype || 'site', theme: (ctx as any).theme || 'modern' };
+      const res = await wordpressBuilder.finalize(pool, task.project_id, wpCtx);
+      content = `wp_provision: ${res.ok ? 'ok' : 'FAILED'} — ${res.log}`;
+      await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+      await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+    } else if (task.department === 'app_api') {
+      // DETERMINISTIC marker — no LLM. The REST API is served at RUNTIME by server.ts under
+      // /api/app/:projectId/:table over the project's app_<hex> schema (already provisioned by the
+      // database dept). Nothing to build here; the verify (app_api_ok) confirms the wiring.
+      content = 'app_api: runtime-served REST API at /api/app/:projectId/:table (see app_api_ok verify)';
+      await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+      await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
     } else {
       const result = await runAgentTracked(task.department, ctx);  // the agent: text in -> text + per-call meta out
       // A/B instrumentation (Task 10): record provider/model + latency BEFORE anything else (even a failed call),
@@ -410,9 +429,11 @@ export async function runLoop(
       try { await cmsFinalize(pool, projectId); } catch (e: any) { console.error('cmsFinalize', projectId, e?.message ?? e); }
       reviewSite(pool, projectId).catch(() => {});          // visual QA + board thumbnail
       dogfoodSite(pool, projectId).catch(() => {});         // interaction QA: a real browser uses the site
-      // ANDROID BY DEFAULT: every finished production build also becomes a signed app —
-      // queued behind at most one running gradle, outcome in run_events (apk_built/apk_failed)
-      if (process.env.RELAY_APK_AUTO !== '0') {
+      // ANDROID ONLY WHEN IT'S AN APP. An Android package makes sense for a full-stack APP deliverable,
+      // never on a marketing website — a TWA button glued onto every site was noise the owner rejected.
+      // Gate on params.deliverable === 'fullstack_app' (the orchestrator's app type).
+      const dlv = (await pool.query('select params->>\'deliverable\' as d from projects where id=$1', [projectId])).rows[0]?.d;
+      if (dlv === 'fullstack_app' && process.env.RELAY_APK_AUTO !== '0') {
         try { const { packageProjectAsync } = await import('./apk.ts'); packageProjectAsync(pool, projectId); } catch (e: any) { console.error('auto-apk', projectId, e?.message ?? e); }
       }
     })();

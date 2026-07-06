@@ -292,6 +292,9 @@ function project(id, tab, seq){
       const apkUI = async () => {
         try {
           const st = await j('/api/apk?id='+id);
+          // Android is an APP-deliverable thing only — the server says available:false for a website.
+          // Render nothing: no "Make Android app" button on marketing sites.
+          if (st.available === false) { apkSpot.innerHTML = ''; return true; }
           if (st.apk) { apkSpot.innerHTML = `<a class="btn btn-ghost" href="${esc(st.url)}" title="Signed Android app — install and it opens fullscreen">📱 Android app</a>`; return true; }
           if (st.building) { apkSpot.innerHTML = `<button class="btn btn-ghost" disabled>📱 Packaging…</button>`; return false; }
           apkSpot.innerHTML = `<button class="btn btn-ghost" id="mkapk" title="Package this site as a signed Android app (~2 min)">📱 Make Android app</button>`;

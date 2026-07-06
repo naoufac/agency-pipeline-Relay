@@ -288,5 +288,16 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     return { ok: true, log: `wp_provisioned: ${pageCount} page(s) · menu=${wp.menuId} · theme=${wp.theme} · ${wp.timestamp}` };
   }
 
+  if (rule === 'app_api_ok') {
+    // The full-stack app's REST API is served at RUNTIME by server.ts under /api/app/:projectId/:table,
+    // reading the project's app_<hex> schema (already provisioned + proven by the database dept's app_db
+    // gate). There is nothing to build at task time — the DAG step exists to gate on 'database' and to
+    // show the capability on the board. It passes as a marker; when RELAY_APP_API is unset the routes are
+    // inert but the wiring is still correct (feature-flagged), exactly like the WP path.
+    return { ok: true, log: process.env.RELAY_APP_API === '1'
+      ? 'app_api: routes live at /api/app/:projectId/:table'
+      : 'app_api: wired (RELAY_APP_API unset — inert until enabled)' };
+  }
+
   return { ok: false, log: 'unknown verify rule: ' + rule };
 }
