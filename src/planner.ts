@@ -7,6 +7,7 @@ import { archetypeFor, needsData, FACADE_PAGE, type Archetype } from './archetyp
 import { shapeFor, type Shape } from './landing.ts';
 import { chooseLayout } from './layout.ts';
 import { evaluateScope } from './scope.ts';
+import { orchestrate, applyDeliverable, type OrchestrationResult } from './orchestrator.ts';
 
 // ─── COMPLEXITY-DYNAMIC PLANNING (ARC E) ─────────────────────────────────────
 // Pure, deterministic complexity scoring from brief text.  No LLM.  Signals:
@@ -254,9 +255,21 @@ async function llmPlan(brief: string): Promise<Plan | null> {
 
 // pure plan (NO database) — the LLM planner with the template fallback, both through validate(). Reused by
 // plan() and by the eval harness (src/eval.ts) so the harness measures the REAL planning path DB-free.
-export async function buildPlan(brief: string): Promise<{ plan: Plan; usedLLM: boolean }> {
+// Now also threads orchestrate() as an advisory layer that annotates params; validate() remains the
+// task-set authority for the classic directus_site path (identity guarantee: default → byte-identical DAG).
+export async function buildPlan(brief: string): Promise<{ plan: Plan; usedLLM: boolean; orchestration: OrchestrationResult }> {
+  // Run orchestration FIRST (fast, deterministic floor; LLM upgrade is optional/advisory).
+  // WHY we pass the same `llm` handle: same call chain, same timeout ladder, same no-web flag.
+  const orchestration = await orchestrate(brief, { llm: async (sys, user, maxTok, flags) => llm(sys, user, maxTok, flags) });
+
   const llmResult = await llmPlan(brief);
-  return { plan: llmResult || validate({ tasks: FB_THINKING, pages: FB_PAGES }, brief)!, usedLLM: !!llmResult };
+  const basePlan = llmResult || validate({ tasks: FB_THINKING, pages: FB_PAGES }, brief)!;
+
+  // applyDeliverable is a NO-OP for directus_site (returns basePlan unchanged).
+  // For other deliverables it replaces the build tail — but validate()'s spine thinking is preserved.
+  const plan = applyDeliverable(basePlan, orchestration) as Plan;
+
+  return { plan, usedLLM: !!llmResult, orchestration };
 }
 
 // persistPlan: write a pre-built plan to the DB and return the new project ID.
@@ -266,17 +279,28 @@ export async function buildPlan(brief: string): Promise<{ plan: Plan; usedLLM: b
 export async function persistPlan(
   pool: pg.Pool,
   brief: string,
-  built: { plan: Plan; usedLLM: boolean },
+  built: { plan: Plan; usedLLM: boolean; orchestration?: OrchestrationResult },
 ): Promise<{ projectId: string; taskCount: number }> {
-  const { plan: result, usedLLM } = built;
+  const { plan: result, usedLLM, orchestration } = built;
   const { tasks, pages, theme, archetype, shape } = result;
   // ONE CMS, forced in code — never selected, never rotated, never named by an LLM.
+  // CRITICAL: this literal 'directus' is what cms:check.ts:22 asserts. It MUST stay here.
   const cms = 'directus';
   const layout = chooseLayout(theme, archetype, brief);
   const scope = evaluateScope(brief, archetype);
   // ARC E: persist complexity so the board and KPI view can show it without re-computing.
   const complexity = complexityOf(brief);
-  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief), complexity: { score: complexity.score, pagesMax: complexity.pagesMax } };
+  // Orchestration metadata (new, additive keys — never changes the cms key).
+  // For the classic directus_site path these are informational; for new deliverables they drive
+  // builder selection in runner.ts (Worker B/C read params.builder to pick their finalize path).
+  const orchestrationParams = orchestration ? {
+    deliverable:  orchestration.deliverable,   // 'directus_site'|'wp_site'|'wp_woocommerce'|'fullstack_app'|'campaign'
+    builder:      orchestration.builder,        // registry key: 'directus'|'wordpress'|'app'|'campaign'
+    stack:        orchestration.stack,          // 'directus'|'wordpress'|'woocommerce'|'node-postgres'|'campaign'
+    chainReason:  orchestration.reason,         // human-readable why
+    capabilities: orchestration.detectedNeeds,  // CapId[] that fired
+  } : {};
+  const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief), complexity: { score: complexity.score, pagesMax: complexity.pagesMax }, ...orchestrationParams };
 
   const p = await pool.query('insert into projects(brief, params) values ($1,$2) returning id', [brief, params]);
   const projectId: string = p.rows[0].id;
@@ -300,7 +324,7 @@ export async function plan(pool: pg.Pool, brief: string): Promise<string> {
 // old build (site/schema_forms/cms_built) are dropped and recomputed by the new run.
 export async function replan(pool: pg.Pool, projectId: string, brief: string): Promise<void> {
   const prev = (await pool.query('select params from projects where id=$1', [projectId])).rows[0]?.params || {};
-  const { plan: result, usedLLM } = await buildPlan(brief);
+  const { plan: result, usedLLM, orchestration } = await buildPlan(brief);
   const { tasks, pages, theme, archetype, shape } = result;
   const scope = evaluateScope(brief, archetype);
   const complexity = complexityOf(brief);   // ARC E: refresh complexity on every replan (brief may have changed)
@@ -315,6 +339,14 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
                              // rebuild would 404 the feed and permanently orphan subscribed apps
     bizType: prev.bizType,   // keep the schema.org @type through the rebuild window until the
                              // branding task re-derives it (live renders must not degrade meanwhile)
+    // ORCHESTRATOR: preserve the substrate identity across rebuilds — a rebuild must NEVER silently
+    // switch from WordPress to Directus or vice versa (that would destroy the live site).
+    // These are re-derived from the new brief if missing from the previous build.
+    deliverable: prev.deliverable || orchestration?.deliverable,
+    builder:     prev.builder     || orchestration?.builder,
+    stack:       prev.stack       || orchestration?.stack,
+    chainReason: orchestration?.reason,
+    capabilities: orchestration?.detectedNeeds,
   };
   await pool.query('delete from tasks where project_id=$1', [projectId]);
   await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);
