@@ -293,8 +293,15 @@ export const wordpressBuilder: Builder = {
         else { notes.push('menu:reused'); }
       } catch { menuId = wp(`menu create ${JSON.stringify(menuName)} --porcelain`).trim(); }
 
-      // Add each page to the menu in order (idempotent: clear first, re-add).
-      try { wp(`menu item delete $(wp --allow-root --path=${WP_PATH} menu item list ${menuId} --field=db_id --format=csv 2>/dev/null || echo '')`); } catch {}
+      // Add each page to the menu in order (idempotent: clear existing items first, then re-add).
+      // Do the reset as SEPARATE in-container wp calls — never a nested $(wp …) subshell (that ran on
+      // the HOST, which has no wp-cli, and a `menu item delete` with an empty arg list blocks on stdin
+      // with no TTY → an 180s hang; live-caught 2026-07-06).
+      try {
+        const itemsCsv = wp(`menu item list ${menuId} --field=db_id --format=csv`);
+        const dbIds = itemsCsv.split('\n').map(s => s.trim()).filter(s => /^\d+$/.test(s));
+        for (const dbId of dbIds) { try { wp(`menu item delete ${dbId}`); } catch {} }
+      } catch {}
       for (const page of site.pages) {
         const pid = pageIds[page.slug];
         if (pid) { try { wp(`menu item add-post ${menuId} ${pid} --title=${JSON.stringify(page.title || page.slug)}`); } catch {} }

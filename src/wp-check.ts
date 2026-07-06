@@ -45,6 +45,12 @@ ok(!wpSrc.includes("from '../server.ts'") && !wpSrc.includes("'../server'"),
 ok(wpSrc.includes('ensureWpCli'), "wordpress.ts: idempotent wp-cli bootstrap");
 ok(wpSrc.includes('teardownProject'), "wordpress.ts: teardown by meta key (isolated teardown)");
 ok(wpSrc.includes('wp_provision'), "wordpress.ts: writes params.wp_provision proof");
+// ANTI-HANG: the menu reset must be SEPARATE in-container wp calls, never a nested $(wp …) subshell.
+// The subshell ran wp on the HOST (no wp-cli) and `menu item delete` with an empty arg list blocked
+// on stdin with no TTY → an 180s deadlock that stalled the whole build (live-caught 2026-07-06).
+ok(!/menu item delete \$\(wp/.test(wpSrc), "wordpress.ts: NO nested $(wp …) subshell in menu reset (deadlock)");
+ok(wpSrc.includes('menu item list') && /for \(const dbId of dbIds\)/.test(wpSrc),
+  "wordpress.ts: menu reset lists db_ids then deletes each explicitly (no empty-arg delete)");
 
 // 2. The registry must still have exactly ONE CMS (directus) after adding the builder registry.
 const { REGISTRY, CMS_ORDER, resolveBuilder } = await import('./cms/registry.ts');
