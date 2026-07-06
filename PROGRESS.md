@@ -1305,3 +1305,25 @@ skips attributed scripts so no eval). Threaded through BOTH the build render (st
 live-served pages (what Google crawls). jsonld:check (19) = suite 23; full check green. Shipped 3cd7b78.
 LIVE PROOF on hearthline: home = Organization + WebSite (correct URL, Organization not LocalBusiness for
 an online store); product-1 = Product "Hearth" · Offer 24.00 USD · InStock + BreadcrumbList. All valid JSON.
+
+## 2026-07-06 — Progress LOCKED (baseline bd787fa) + Article structured data
+
+LOCK: prod deployed to the certified baseline (was bd787fa, now ed10f10), board 200, full gate suite
+green (23 suites). All state durable in git + this file — a fresh context resumes from here.
+Then proceeded: Article schema.org on blog/recipe/news posts (headline, ISO datePublished from
+created_at, author Person, publisher brand, absolute image) — the same deterministic pattern as Product,
+detected on the 'article' section. jsonld:check 19→21. Full check green. Shipped ed10f10.
+LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napoletano della nonna Maria" ·
+datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
+
+### RESUME POINTER (fresh context starts here)
+· System healthy; prod = ed10f10; 23 gate suites green; nightly canary/backup/watchdog armed.
+· Recent arcs COMPLETE + certified: booking lifecycle (confirm/decline/cancel/remind, owner status),
+  project chat, design→reality (token/preset/Figma-URL ingestion, contrast-safe, rebuild-survival,
+  in-app preview), SEO structured data (Organization/LocalBusiness/WebSite/Product/Breadcrumb/Article).
+· Figma live import is BUILT + audited; blocked only on the operator setting FIGMA_TOKEN + a file URL.
+· OWNER-GATED (do NOT start without explicit word): Stripe v2, Play Store publishing, apex naples.agency
+  flip (env RELAY_HOME_SLUG + DNS; the existing apex page must never be stomped from code).
+· Next candidate SEO increments: LocalBusiness openingHours+telephone+address from the hours/contact
+  data; sitemap lastmod; FAQ schema on FAQ pages. Discipline: build → gate → deploy → prove on real
+  output → adversarially audit each new surface.
