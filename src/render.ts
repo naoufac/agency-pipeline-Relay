@@ -7,7 +7,7 @@ import { DEFAULT_LAYOUT, isHeroVariant, isCardVariant, type Layout } from './lay
 import { PRIVATE_READ } from './schema.ts';
 import { metaDescription } from './seo.ts';
 import { designTypeVars, fontLink, hasDesign } from './design.ts';
-import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd } from './jsonld.ts';
+import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd } from './jsonld.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -120,6 +120,14 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     const img = Object.keys(r).find((k) => /image|photo|picture|cover|thumb/i.test(k) && typeof r[k] === 'string' && (/^https?:/.test(r[k]) || String(r[k]).startsWith('/')));
     const pk = Object.keys(r).find((k) => /^(price|amount|cost)$/i.test(k));
     ld.push(productLd({ name: String(r.title || r.name || ctx.title), description: r.description || r.body, image: img ? r[img] : undefined, price: pk ? r[pk] : undefined, currency: (loc && loc !== 'en') ? 'EUR' : 'USD', inStock: typeof r.stock === 'number' ? r.stock > 0 : undefined, base: ctx.siteBase, brandName: brand }));
+  }
+  const artSec = ((spec && spec.sections) || []).find((s: any) => s && s.type === 'article' && s.row && typeof s.row === 'object');
+  if (artSec) {
+    const r = artSec.row;
+    const img = Object.keys(r).find((k) => /image|photo|cover|picture|thumb/i.test(k) && typeof r[k] === 'string' && (/^https?:/.test(r[k]) || String(r[k]).startsWith('/')));
+    const bodyKey = ['excerpt', 'summary', 'body', 'content', 'text'].find((k) => typeof r[k] === 'string' && r[k].trim());
+    const author = ['author', 'author_name', 'byline', 'writer'].map((k) => r[k]).find((v) => typeof v === 'string' && v.trim());
+    ld.push(articleLd({ headline: String(r.title || r.name || r.headline || ctx.title), image: img ? r[img] : undefined, datePublished: r.published_at || r.date || r.created_at, author: author as string, description: bodyKey ? r[bodyKey] : undefined, base: ctx.siteBase, url: ctx.slug + '.html', publisher: brand }));
   }
   const bc = breadcrumbLd({ pages: ctx.pages || [], slug: ctx.slug, title: ctx.title, base: ctx.siteBase });
   if (bc && !isHome) ld.push(bc);

@@ -1,7 +1,7 @@
 // jsonld:check — schema.org STRUCTURED DATA. Proves the generators emit VALID JSON-LD, the renderer
 // injects the right types per page (Organization+WebSite on home, Product on a product page, Breadcrumb
 // on inner pages), values are injection-safe, and local-business classification is deterministic.
-import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, isLocalBusiness } from './jsonld.ts';
+import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, isLocalBusiness } from './jsonld.ts';
 import { renderPage } from './render.ts';
 
 let pass = 0, fail = 0;
@@ -45,6 +45,13 @@ const pdp = renderPage({ brand: { name: 'Acme', tokens: { bg: '#fff', primary: '
 const pdpLd = parseLd(pdp);
 ok('render PDP: emits a Product with the real price + InStock', pdpLd.some((x) => x['@type'] === 'Product' && x.name === 'Sea Salt Candle' && x.offers?.price === '24.00' && x.offers?.availability === 'https://schema.org/InStock'), JSON.stringify(pdpLd));
 ok('render: every emitted ld+json block is valid JSON (no broken structured data)', [home, inner, pdp].every((h) => { try { parseLd(h); return true; } catch { return false; } }));
+
+// ---- Article on a blog/recipe post ----
+const artGen = articleLd({ headline: 'How we roast', image: '/roast.jpg', datePublished: '2026-01-15T10:00:00Z', author: 'Nao', description: 'A guide to roasting', base, url: 'post-3.html', publisher: 'Acme' });
+ok('Article: headline + ISO datePublished + author + publisher + absolute image', artGen['@type'] === 'Article' && artGen.datePublished === '2026-01-15T10:00:00.000Z' && artGen.author.name === 'Nao' && artGen.publisher.name === 'Acme' && artGen.image === base + '/roast.jpg');
+const post = renderPage({ brand: { name: 'Acme', tokens: { bg: '#fff', primary: '#111' } }, sections: [{ type: 'article', row: { title: 'Sourdough 101', body: 'Long body about bread…', author: 'Mira', created_at: '2026-02-01T08:00:00Z', cover_image: '/bread.jpg' } }] }, { pages, slug: 'post-1', title: 'Sourdough 101', theme: 'modern', siteBase: base });
+const postLd = parseLd(post);
+ok('render post: emits an Article with the post title + author + date', postLd.some((x) => x['@type'] === 'Article' && x.headline === 'Sourdough 101' && x.author?.name === 'Mira' && !!x.datePublished), JSON.stringify(postLd));
 
 // ---- wiring: localBusiness is a build property; the live + build renders thread siteBase ----
 const plannerSrc = (await import('node:fs')).readFileSync(new URL('./planner.ts', import.meta.url), 'utf8');

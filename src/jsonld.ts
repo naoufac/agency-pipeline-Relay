@@ -41,6 +41,20 @@ export function productLd(a: { name: string; description?: string; image?: strin
   return ld;
 }
 
+// a blog/news/recipe post → Article (rich cards, "top stories" eligibility). datePublished from the
+// row's created_at; author + publisher when known.
+export function articleLd(a: { headline: string; image?: string; datePublished?: string; author?: string; description?: string; base?: string; url?: string; publisher?: string }): any {
+  const iso = a.datePublished ? new Date(a.datePublished) : null;
+  return clean({ '@context': 'https://schema.org', '@type': 'Article',
+    headline: String(a.headline).slice(0, 110),
+    image: a.image ? abs(a.base, a.image) : undefined,
+    datePublished: iso && !isNaN(+iso) ? iso.toISOString() : undefined,
+    description: a.description ? String(a.description).replace(/\s+/g, ' ').slice(0, 300) : undefined,
+    author: a.author ? { '@type': 'Person', name: String(a.author).slice(0, 80) } : undefined,
+    publisher: a.publisher ? { '@type': 'Organization', name: a.publisher } : undefined,
+    mainEntityOfPage: a.url ? abs(a.base, a.url) : undefined });
+}
+
 // LOCAL-BUSINESS detection from the brief (a physical-location service → LocalBusiness, else Organization).
 const LOCAL_BIZ = /\b(barbershops?|barbers?|salons?|spas?|restaurants?|cafe|café|baker(?:y|ies)|pubs?|brewer(?:y|ies)|bistros?|diners?|pizzeria|taqueria|clinics?|dental|dentists?|doctors?|physio\w*|chiropract\w*|veterinar\w*|\bvet\b|gyms?|fitness|yoga|pilates|studios?|boutiques?|hotels?|motels?|florists?|repair\w*|garages?|mechanics?|plumb\w*|electrician\w*|hvac|contractors?|landscap\w*|laundr\w*|realtors?|realty|real estate|butchers?|grocer\w*|\bdeli\b|nail\s?salons?|hair\s?salons?|massage|tattoo\w*|opticians?|pharmac\w*|hardware stores?|booksh\w*|bookstores?)\b/i;
 export const isLocalBusiness = (brief: string): boolean => LOCAL_BIZ.test(String(brief || ''));
