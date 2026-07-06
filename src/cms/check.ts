@@ -34,7 +34,7 @@ const directus = readFileSync(new URL('./directus.ts', import.meta.url), 'utf8')
 ok(directus.includes('siteBase: ctx.siteBase') && directus.includes('bizType: ctx.bizType') && directus.includes('bizFacts: ctx.bizFacts'),
   'directus adapter: renderPage carries siteBase + bizType + bizFacts');
 const fin = readFileSync(new URL('./finalize.ts', import.meta.url), 'utf8');
-ok(/siteBase: params\.slug \? `https:\/\/\$\{params\.slug\}\.naples\.agency` : undefined/.test(fin) && /bizType: params\.bizType/.test(fin) && fin.includes('bizFacts: extractBusinessFacts(') && fin.includes('params.bizType || bizTypeFor(r.brief)'),
+ok(/siteBase: params\.slug \? `https:\/\/\$\{params\.slug\}\.naples\.agency` : undefined/.test(fin) && /bizType: params\.bizType/.test(fin) && fin.includes('bizFacts: extractBusinessFacts(') && fin.includes("jsonb_set(params, '{bizType}'") && fin.includes('bizTypeFor(r.brief)'),
   'finalize: BuildCtx carries siteBase + bizType + whole-site bizFacts from params');
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS — one pipeline, one CMS.');

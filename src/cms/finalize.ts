@@ -22,6 +22,14 @@ export async function cmsFinalize(pool: pg.Pool, projectId: string, sitesDirOver
   if (!site || !Array.isArray(site.pages) || !site.pages.length)
     return { ok: false, cms: String(params.cms ?? '?'), log: 'no composed site model (params.site) — nothing to finalize' };
 
+  // CMS-first: ONE stored bizType that every projection (static build, live render, finalize) reads.
+  // Legacy projects predate the field — derive it from the brief ONCE and persist it, so the live
+  // render path (which reads params.bizType directly) agrees with this re-serve forever after.
+  if (!params.bizType) {
+    params.bizType = bizTypeFor(r.brief);
+    await pool.query("update projects set params = jsonb_set(params, '{bizType}', to_jsonb($2::text), true) where id=$1 and (params->>'bizType') is null", [projectId, params.bizType]);
+  }
+
   const chosen: CmsName = isCmsName(params.cms) ? params.cms : 'directus';
   const { name: builtOn, entry, fellBackFrom } = resolveBuildable(chosen);
   const sitesDir = sitesDirOverride || fileURLToPath(SITES);
@@ -30,7 +38,7 @@ export async function cmsFinalize(pool: pg.Pool, projectId: string, sitesDirOver
     siteBase: params.slug ? `https://${params.slug}.naples.agency` : undefined,
     // legacy projects predate params.bizType (minted at branding) — derive from the brief so a
     // re-serve upgrades their JSON-LD instead of falling back to generic LocalBusiness
-    localBusiness: !!params.localBusiness, bizType: params.bizType || bizTypeFor(r.brief),
+    localBusiness: !!params.localBusiness, bizType: params.bizType,
     bizFacts: extractBusinessFacts({ pages: site.pages, brand: params.brand || site.brand }) };
   const model: SiteModel = { pages: site.pages, brand: params.brand || site.brand, data: site.data };
   const tag = fellBackFrom ? `assigned ${fellBackFrom} (not operational yet) → built on ${builtOn}` : `built on ${builtOn}`;
