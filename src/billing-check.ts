@@ -22,6 +22,7 @@ import {
   balanceCents,
   spentTodayCents,
   debitCents,
+  refundCents,
   quoteCents,
   isOperator,
   billingEnabled,
@@ -272,6 +273,33 @@ try {
       `select kind, amount_cents from billing_ledger where user_id=$1 and kind='debit'`, [uid8])).rows;
     ok('e2e: one debit row exists', rows.length === 1, `rows=${rows.length}`);
     ok('e2e: debit row has correct negative amount', rows[0].amount_cents === -cost13, `amount=${rows[0].amount_cents}`);
+  }
+
+  // ---- refund: a debited action that never happened gets its mirror 'adjust' row ----
+  {
+    const uid9 = await scratchUser();
+    const before = await balanceCents(pool, uid9);                       // triggers grant
+    const cost = quoteCents('rebuild');
+    const dr = await debitCents(pool, uid9, cost, 'rebuild that will not start', null);
+    ok('refund: debit landed first', dr.ok === true, JSON.stringify(dr));
+    await refundCents(pool, uid9, cost, 'refund: rebuild did not start (busy)', null);
+    const after = await balanceCents(pool, uid9);
+    ok('refund: balance restored exactly', after === before, `before=${before} after=${after}`);
+    const kinds = (await pool.query(
+      `select kind, amount_cents from billing_ledger where user_id=$1 order by created_at`, [uid9])).rows;
+    ok('refund: ledger keeps BOTH rows (append-only, no row mutated)',
+      kinds.some(r => r.kind === 'debit' && r.amount_cents === -cost) &&
+      kinds.some(r => r.kind === 'adjust' && r.amount_cents === cost),
+      JSON.stringify(kinds));
+  }
+
+  // ---- source-pins: both rebuild trigger paths refund when startRebuild refuses ----
+  {
+    const serverSrc = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+    ok('server: /api/rebuild refunds when the rebuild does not start',
+      /rebuildDebited\) await refundCents/.test(serverSrc));
+    ok('server: chat rebuild hook refunds when the rebuild does not start',
+      /chatDebited\)[^\n]*\n\s*await refundCents/.test(serverSrc));
   }
 
 } catch (e: any) {

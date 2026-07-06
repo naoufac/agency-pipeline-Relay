@@ -5,7 +5,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
 import { plan, buildPlan, persistPlan } from './planner.ts';
-import { ensureBillingTables, balanceCents, spentTodayCents, debitCents, quoteCents, isOperator, billingEnabled, formatInsufficientFunds } from './billing.ts';
+import { ensureBillingTables, balanceCents, spentTodayCents, debitCents, refundCents, quoteCents, isOperator, billingEnabled, formatInsufficientFunds } from './billing.ts';
 import { runLoop } from './runner.ts';
 import { startRebuild } from './rebuild.ts';
 import { computeKpi } from './kpi.ts';
@@ -329,6 +329,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
             if (!pr) return { started: false, reason: 'project not found' };
             // ARC A: check rebuild credit before starting. For chat, we return a declined rebuild
             // so the chat module can post the polite out-of-credit reply as the assistant message.
+            let chatDebited = 0;
             if (!isOperator(user) && billingEnabled()) {
               const cost = quoteCents('rebuild');
               const dr = await debitCents(pool, user.id, cost, `chat-rebuild: ${projectId}`, projectId);
@@ -336,9 +337,12 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
                 const bal = await balanceCents(pool, user.id);
                 return { started: false, reason: formatInsufficientFunds(bal, cost) };
               }
+              chatDebited = cost;
             }
             const amended = `${pr.brief} · UPDATE: ${changeText.slice(0, 500)}`;
             const r = await startRebuild(pool, projectId, amended);   // ONE safe path: plan → sweep → run, per-project lock
+            if (!r.started && chatDebited)   // paid for a rebuild that never started — give it back
+              await refundCents(pool, user.id, chatDebited, `refund: chat rebuild did not start (${r.reason || 'busy'})`, projectId);
             if (r.started) chat.announceWhenDone(pool, sidQ, projectId).catch(() => {});   // the session hears the outcome
             return r;
           },
@@ -863,6 +867,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!pr || !canSee(user, pr.owner_id)) return send(res, 404, 'application/json', '{"error":"project not found"}');
 
       // ARC A: owner signed-in non-operator → debit rebuild cost before starting.
+      let rebuildDebited = 0;
       if (user && !isOperator(user) && billingEnabled()) {
         const cost = quoteCents('rebuild');
         const dr = await debitCents(pool, user.id, cost, `rebuild: ${id}`, id);
@@ -870,13 +875,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           const bal = await balanceCents(pool, user.id);
           return send(res, 402, 'application/json', JSON.stringify({ error: formatInsufficientFunds(bal, cost) }));
         }
+        rebuildDebited = cost;
       }
 
       // ONE safe path: plans first, sweeps the previous generation's pages ONLY after the plan
       // succeeds (stale slugs would mix two navigations and fail site_consistent), never sweeps when
       // builds are paused, and a per-project lock serializes concurrent triggers.
       const rb = await startRebuild(pool, id, brief || pr.brief);
-      if (!rb.started) return send(res, 409, 'application/json', JSON.stringify({ error: rb.reason || 'this project is still building' }));
+      if (!rb.started) {
+        // the debit paid for a rebuild that never started (busy/paused) — give it back
+        if (rebuildDebited) await refundCents(pool, user!.id, rebuildDebited, `refund: rebuild did not start (${rb.reason || 'busy'})`, id);
+        return send(res, 409, 'application/json', JSON.stringify({ error: rb.reason || 'this project is still building' }));
+      }
       return send(res, 200, 'application/json', JSON.stringify({ id }));
     }
 

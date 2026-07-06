@@ -176,6 +176,25 @@ export async function debitCents(
   }
 }
 
+// ---- refund ----
+
+// refundCents: compensating 'adjust' row for a debit whose action never happened (e.g. a rebuild
+// debited up-front but startRebuild refused because the project was still building). Append-only
+// discipline holds: we never touch the original debit row, we add its mirror image.
+export async function refundCents(
+  pool:      pg.Pool,
+  userId:    string,
+  cents:     number,
+  reason:    string,
+  projectId: string | null,
+): Promise<void> {
+  await pool.query(
+    `insert into billing_ledger(user_id, kind, amount_cents, reason, project_id)
+     values ($1, 'adjust', $2::int, $3, $4)`,
+    [userId, cents, reason, projectId],
+  );
+}
+
 // ---- operator check ----
 
 // isOperator: the named operator email is never billed or blocked.
