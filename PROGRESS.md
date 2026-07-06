@@ -1317,23 +1317,27 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = 6f4932c; FULL 23-suite gate green ON PROD (spec 191 · layout 155 · jsonld 92 ·
-  billing 93 · analytics 49 · all 0-failed); SIGTERM drain proven; vault shipping; canary armed.
-· 2026-07-06 BOSS SESSION 4 — FLEET UPGRADE SWEEP (the big one):
-  - Batch re-finalized ALL 70 legacy permanent sites through the CMS: 65 upgraded to the current head
-    (analytics beacon + per-page canonical + external hashed css + specific schema.org @type + enriched
-    business facts), 5 refused by the served_from_cms gate ("CMS title not present in served services" —
-    legacy round-trip edge; capstone-legal/palazzo/olea-and-co/castellano/the-corner-table-2) and left
-    SAFELY on their previous build (all 5 verified 200; the finalize guard held).
-  - Sample verification live: claybound=Store, nenna=Restaurant, openchair=HairSalon, SaaS=Organization;
-    beacon+canonical+ds-css on 6/6 sampled.
-  - Minimal cards got their numbered 01/02/03 eyebrows (pure CSS counters, client-rendered cards count
-    too), gated (layout 155).
-· ANALYTICS LIVE fleet-wide: every re-finalized site now measures visitors (dedupe one/page/day, hashed,
-  raw IP never stored); owners see today/7d/30d + top pages on the board.
-· KNOWN EDGE (do not re-chase blindly): the 5 gate-refused sites share a services-page round-trip
-  mismatch in the CMS read-back — investigate as ONE class if they matter; their sites serve fine.
-· FIGMA: token in, needs one real file URL from the owner to certify e2e.
-· OWNER-GATED (explicit word only): Stripe v2, Play Store, apex naples.agency flip.
-· NEXT CANDIDATES: the 5-site round-trip class, BYO custom domains, funnel distribution (the machine is
-  ready for real clients — every produced site is now measurable, cached, schema-rich, and billed).
+· System healthy; prod = 922ccca; FULL 26-suite gate green (orchestrator 155 · appapi 23 · wp 30 live/
+  22 dry · +23 originals all 0-failed); RELAY_APP_API=1 + RELAY_WP=1 armed in prod .env.
+· 2026-07-06 PIVOT — THE ORCHESTRATOR (north star in docs/NORTH-STAR.md). Relay = a media-agency
+  replacement; the client's ask defines the deliverable; build on substrates the LLM masters.
+  - src/orchestrator.ts: DELIVERABLES registry {directus_site, wp_site, wp_woocommerce, fullstack_app,
+    campaign} + CAPABILITIES (forced spine understand->research->branding->design->build->qa + dynamic
+    branches). orchestrate(brief) -> {deliverable, stack, project-dictated steps}. Deterministic floor +
+    LLM upgrade-only (mirrors archetypeFor). Multilingual EN/FR/IT. PROVEN on real briefs: courier
+    settlement->fullstack_app, FR boutique->wp_woocommerce, IT trattoria prenotazioni->site+booking,
+    IT rivista->wp_site, email->campaign, bakery->directus_site. "Project dictates its steps" fixed:
+    no more blog-with-calendar / campaign-with-schema nonsense.
+  - WordPress substrate (src/cms/wordpress.ts, builder registry in cms/types+registry+finalize): drives
+    the LIVE relay-wp container via wp-cli (WP-CLI 2.12.0), slug-scoped isolation, feature-flag RELAY_WP.
+    PROVEN LIVE: created+read-back+tore-down a real page in the container (30/30).
+  - Full-stack app API (src/app/api.ts, RELAY_APP_API): real list/get/create over the app_<hex> schema,
+    all SQL safety via appdb.ts. PROVEN LIVE IN PROD: GET /api/app/<id>/categories returned real Postgres
+    rows. This is the "app = real, not a TWA button" proof.
+  - Default site pipeline BYTE-IDENTICAL (directus_site is a no-op passthrough); all 23 original gates green.
+  - Owner cleared the factory: kept only the 20 newest sites (was 82); 213 orphan dirs swept; 839M->202M.
+· NEXT (honest — pieces proven, stitching remains): run a NEW wp_site/fullstack_app brief FULLY through
+  the runner end-to-end (per-task exec of wp_provision/app_api branches + finalize ordering); PrestaShop as
+  a real FR-ecom builder (FR ecom currently -> WooCommerce, works); REMOVE the Android-APK-on-every-site
+  (make it an app-deliverable thing, per owner); board UI showing deliverable/stack/chain reasoning.
+· OWNER-GATED: Stripe v2, Play Store, apex flip. FIGMA token in, needs one real file URL to certify.
