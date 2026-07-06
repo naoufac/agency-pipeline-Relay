@@ -21,7 +21,7 @@ import { apkStatus, packageProjectAsync } from './apk.ts';
 import { ensureAuthTables, requestMagic, verifyMagic, userFromCookie, logout, sessionCookie, clearCookie, canSee, type User } from './auth.ts';
 import { startTgDoor } from './tg-door.ts';
 import { L } from './i18n.ts';
-import { esc } from './components.ts';
+import { esc, DS_CSS_BODY, dsCssHash } from './components.ts';
 
 const pool = makePool();
 const PORT = Number(process.env.PORT || 8787);
@@ -299,6 +299,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           : 'public, max-age=3600';
         res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': cacheControl });
         res.end(readFileSync(f));
+        return;
+      }
+      // LEGACY-SITE SELF-HEAL: sites built BEFORE the external-CSS change have no ds-<hash8>.css on
+      // disk, but their LIVE-rendered pages (PDP/article/receipt) now link the CURRENT design-system
+      // file. The name is content-addressed, so when the requested hash equals the hash of the CSS
+      // this server was built with, serving it from memory is always byte-correct — no site dir is
+      // ever wrong, old or new. (Foreign/stale hashes still 404: a different hash means different
+      // bytes we do not have.)
+      const dsm = rel.match(/\/assets\/ds-([0-9a-f]{8})\.css$/);
+      if (dsm && dsm[1] === dsCssHash(DS_CSS_BODY)) {
+        res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable' });
+        res.end(DS_CSS_BODY);
         return;
       }
       return send(res, 404, 'text/plain', 'site not found');
