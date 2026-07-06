@@ -191,3 +191,15 @@ create unique index if not exists billing_one_grant
   on billing_ledger(user_id) where kind = 'grant';
 -- Fast balance queries and per-user history.
 create index if not exists billing_ledger_user_idx on billing_ledger(user_id, created_at desc);
+
+-- ===== ARC H: anonymous build cap (DB-persisted) =====
+-- One row per anonymous build attempt. ip_hash = sha256(ip || RELAY_IP_SALT) — raw IPs never stored.
+-- Rows older than 48h are pruned opportunistically on each insert (billing.ts anonRunDbLimited).
+-- WHY: the in-memory ANON_RUN_HITS map resets on every deploy; persisting to a table ensures the
+-- 2-free-builds/IP/24h cap survives restarts. The salt makes hashes irreversible without the key.
+create table if not exists anon_runs (
+  ip_hash  text        not null,
+  at       timestamptz not null default now()
+);
+-- Index on (ip_hash, at): both the 24h COUNT query and the >48h DELETE use this key.
+create index if not exists anon_runs_ip_at_ix on anon_runs(ip_hash, at);

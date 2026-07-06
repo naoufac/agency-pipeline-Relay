@@ -5,7 +5,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
 import { plan, buildPlan, persistPlan } from './planner.ts';
-import { ensureBillingTables, balanceCents, spentTodayCents, debitCents, refundCents, quoteCents, isOperator, billingEnabled, formatInsufficientFunds } from './billing.ts';
+import { ensureBillingTables, balanceCents, spentTodayCents, debitCents, refundCents, quoteCents, isOperator, billingEnabled, formatInsufficientFunds, anonRunDbLimited } from './billing.ts';
 import { runLoop } from './runner.ts';
 import { startRebuild } from './rebuild.ts';
 import { computeKpi } from './kpi.ts';
@@ -57,7 +57,8 @@ function purgeRateMaps(): void {
     if (!arr.some((t) => now - t < RATE_WINDOW_MS)) m.delete(ip);
   }
 }
-setInterval(purgeRateMaps, RATE_WINDOW_MS).unref?.();
+const _purgeInterval = setInterval(purgeRateMaps, RATE_WINDOW_MS);
+_purgeInterval.unref?.();
 const rateLimited = (ip: string) => limited(RUN_HITS, RUN_MAX_PER_IP, ip);   // /api/run: full builds spend LLM tokens, tight
 // anonBuildLimited: returns true when an anonymous IP has exhausted the 24-h free build cap.
 // Called ONLY for unauthenticated requests (signed-in users are covered by credit debit instead).
@@ -846,7 +847,11 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many briefs — max 5 per 15 min. Try again shortly.' }));
       // ARC A: anonymous builds are the lead-gen shop window but are capped at 2/IP/day.
       // Signed-in users (even out-of-credit ones) skip this gate — they get a 402 instead.
+      // Two-layer check: in-memory fast pre-check (no DB round-trip for obvious repeat offenders),
+      // then DB-persisted check (survives restarts — daily deploys would otherwise reset the cap).
+      // The in-memory map still runs so frequent IPs never hit Postgres at all on re-check.
       if (!user && anonBuildLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Anonymous build limit reached — sign in for unlimited access (you get $30 free credit).' }));
+      if (!user && await anonRunDbLimited(pool, ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Anonymous build limit reached — sign in for unlimited access (you get $30 free credit).' }));
       const active = (await pool.query("select count(distinct project_id)::int n from tasks where status in ('ready','running','verifying')")).rows[0].n;
       if (active >= MAX_ACTIVE_PROJECTS) return send(res, 429, 'application/json', JSON.stringify({ error: 'Relay is at capacity right now — a few sites are still building. Try again in a moment.' }));
       let raw = ''; for await (const c of req) raw += c;
@@ -954,6 +959,43 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
 function hashStr(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) { h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; } return h; }
 server.listen(PORT, '0.0.0.0', () => console.log('Relay on http://0.0.0.0:' + PORT));
 
+// Registry of long-lived intervals that must be cleared on shutdown so the event loop can drain
+// before process.exit. Both purgeRateMaps and the reminder sweep are already .unref()'d (they
+// won't keep the process alive alone), but clearing them on SIGTERM prevents any in-flight tick
+// from extending the drain window and hitting the hard failsafe below.
+const shutdownIntervals: ReturnType<typeof setInterval>[] = [_purgeInterval];
+
+// GRACEFUL SHUTDOWN: handle SIGTERM (systemd stop) and SIGINT (Ctrl-C / docker stop).
+// WHY: without this, systemd's stop timeout expires and sends SIGKILL, which hard-kills any
+// in-flight request mid-write (half-committed DB rows, partial SSE streams). With this handler:
+//   1. server.close() stops accepting NEW connections immediately.
+//   2. In-flight requests are allowed to complete naturally (Node drains open keep-alive sockets).
+//   3. pool.end() closes the pg connection pool gracefully — lets in-flight queries finish.
+//   4. process.exit(0) after pool drain signals success to systemd.
+//   5. A hard 8-second failsafe (unref'd) force-exits if pool.end() hangs (e.g. a runaway query).
+//      8s is shorter than systemd's default 90s stop timeout so the unit stops cleanly, not killed.
+function gracefulShutdown(sig: string): void {
+  console.log(`Relay ${sig}: stopping — draining in-flight requests`);
+  // Clear all long-lived intervals so no new ticks fire during drain.
+  for (const iv of shutdownIntervals) clearInterval(iv);
+  // Stop accepting new connections; callback fires when the last active request finishes.
+  server.close(async () => {
+    console.log('Relay: HTTP server closed — ending pg pool');
+    try { await pool.end(); } catch (e: any) { console.error('pool.end error', e?.message); }
+    console.log('Relay: pool drained — exiting clean');
+    process.exit(0);
+  });
+  // Hard failsafe: if the pool or an in-flight request doesn't drain within 8 s, force-exit.
+  // unref() so this timer alone does NOT keep the process alive — it only fires if we're stuck.
+  const failsafe = setTimeout(() => {
+    console.error('Relay: shutdown failsafe triggered after 8 s — force-exiting');
+    process.exit(1);
+  }, 8000);
+  failsafe.unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
 // restart-safe: on boot, resume any project that still has unfinished tasks
 (async () => {
   try {
@@ -984,7 +1026,9 @@ import('./lifecycle.ts').then((m) => {
       finally { sweeping = false; }
     };
     setTimeout(run, 3 * 60_000).unref?.();
-    setInterval(run, 30 * 60_000).unref?.();
+    const _reminderInterval = setInterval(run, 30 * 60_000);
+    _reminderInterval.unref?.();
+    shutdownIntervals.push(_reminderInterval);
   }
 }).catch((e) => console.error('lifecycle', e?.message));
 pool.query("create table if not exists dogfood_reviews (id bigserial primary key, project_id uuid, passed boolean not null default false, summary text, issues jsonb not null default '[]'::jsonb, checked jsonb not null default '{}'::jsonb, at timestamptz not null default now())").catch(() => {});
@@ -1006,5 +1050,7 @@ const recoverBlocked = async () => {
     if (r.rows.length) console.log('recover: re-running', r.rows.length, 'blocked project(s)');
   } catch (e: any) { console.error('recoverBlocked', e?.message); }
 };
-setInterval(recoverBlocked, 300000).unref?.();  // every 5 min
+const _recoverInterval = setInterval(recoverBlocked, 300000);  // every 5 min
+_recoverInterval.unref?.();
+shutdownIntervals.push(_recoverInterval);
 startTgDoor(pool);
