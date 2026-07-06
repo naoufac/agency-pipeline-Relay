@@ -156,7 +156,10 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     const raw = readFileSync(path, 'utf8');
     const html = raw.toLowerCase();
     if (!/<html|<!doctype/.test(html.slice(0, 400)) || !/<body|<div|<section/.test(html)) return { ok: false, log: 'not valid HTML structure' };
-    if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(raw))
+    // ARC C: the ds-<hash8>.css link is ALLOWED — it is a relative ref to the per-site assets/ dir
+    // (never an http/https URL). All other external asset references remain banned.
+    const rawNoDs = raw.replace(/<link\b[^>]*href="assets\/ds-[0-9a-f]{8}\.css"[^>]*>/gi, '');
+    if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(rawNoDs))
       return { ok: false, log: 'broken: external/unbundled asset reference — all CSS/fonts must be inlined' };
     const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
     if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };

@@ -50,6 +50,10 @@ const ok = (name: string, cond: boolean, extra = '') => { if (cond) pass++; else
   ok('page head carries apple-touch-icon', html.includes('apple-touch-icon'));
   ok('sw registration is protocol-guarded (file:// gates render without it)', html.includes("'serviceWorker' in navigator") && html.includes('location.protocol'));
   ok('no external asset introduced (relative refs only)', !/<link\b[^>]*href\s*=\s*["']?https?:/i.test(html));
+  // ARC C: the ds-<hash8>.css link must be present (renderPage emits it) and :root must be inline
+  ok('ARC C: ds-<hash8>.css link present in rendered page head', /href="assets\/ds-[0-9a-f]{8}\.css"/.test(html));
+  ok('ARC C: :root token vars are inline in <style> (design-check contract)', /<style>[^<]*:root\{/.test(html));
+  ok('ARC C: DS_CSS body NOT inlined in <style> (no box-sizing rule inline)', !html.includes('*{box-sizing:border-box}'));
 }
 
 // ---- the REAL icon paint: exact-size PNGs from the brand initial on the brand primary ----

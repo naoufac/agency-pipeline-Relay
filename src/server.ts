@@ -269,7 +269,12 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {
         const ext = (f.split('.').pop() || '').toLowerCase();
-        res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'public, max-age=3600' });
+        // ARC C: the hashed DS CSS file is content-addressed — same name = same bytes forever.
+        // Serve it with immutable so CDNs and browsers cache it indefinitely. Any CSS change
+        // produces a new hash and a new filename, so no stale asset is ever served.
+        const isImmutableAsset = /\/assets\/ds-[0-9a-f]{8}\.css$/.test(rel);
+        const cc = isImmutableAsset ? 'public, max-age=31536000, immutable' : 'public, max-age=3600';
+        res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': cc });
         res.end(readFileSync(f));
         return;
       }

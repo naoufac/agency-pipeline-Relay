@@ -1,5 +1,6 @@
 // The SKELETON — hand-built, responsive, accessible, token-driven section components.
 // The LLM never writes these; it only chooses sections + copy + brand tokens. Structure can't be wrong.
+import { createHash } from 'node:crypto';
 import { FONT_FACES } from './fonts.ts';
 import { SLOT_TABLE } from './schema.ts';
 import { L, curSym, columnLabel, fmtMoney } from './i18n.ts';
@@ -8,8 +9,20 @@ export const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '
 const q = (query: string, cls = '') => `<img data-q="${esc(query)}" alt="" class="${cls}" loading="lazy">`;
 const humanize = (s: string) => String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-// Design-system CSS. Responsive, CSS-only hamburger (no JS), fixed spacing/type scale. Inlined per page.
-export const DS_CSS = FONT_FACES + `
+// ARC C — EXTERNAL CACHEABLE CSS
+// dsCssHash: sha256 of the EXACT css text, first 8 hex chars → deterministic filename.
+// renderPage uses this to emit the href; runner.ts uses this to write the file.
+// Both callers use the SAME function on the SAME string, so they always agree without I/O.
+export function dsCssHash(cssText: string): string {
+  return createHash('sha256').update(cssText).digest('hex').slice(0, 8);
+}
+
+// DS_CSS_BODY: FONT_FACES (base64 @font-face blocks) + the static design-system rules.
+// This is the text written to assets/ds-<hash8>.css — one file per site, immutably cached.
+// The :root{} token block (theme tokens + palette) stays INLINE on every page (design-check
+// reads --bg/--text from the HTML; that contract must not break).
+// DS_CSS is kept as an alias so existing check imports (theme-check, layout-check) still work.
+export const DS_CSS_BODY = FONT_FACES + `
 *{box-sizing:border-box}html{scroll-behavior:smooth}
 body{margin:0;font-family:var(--font-body),system-ui,-apple-system,sans-serif;font-size:var(--body-size,1rem);color:var(--text);background:var(--bg);line-height:var(--body-leading,1.6);-webkit-font-smoothing:antialiased}
 img{max-width:100%;display:block}a{color:inherit}
@@ -235,6 +248,11 @@ body.l-cards-overlay .collection .card.has-img .muted,body.l-cards-overlay .prod
 body.l-cards-overlay .collection .card.has-img .btn,body.l-cards-overlay .products .card.has-img .btn,body.l-cards-overlay .feed .card.has-img .btn{position:relative;z-index:3}
 body.l-cards-overlay .collection .card.has-img p,body.l-cards-overlay .products .card.has-img p,body.l-cards-overlay .feed .card.has-img p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 `;
+
+// DS_CSS: backward-compat alias so existing check imports keep working.
+// Checks that import DS_CSS assert on its CONTENT (art-direction vars, rule presence) —
+// they must NOT inline it into pages. renderPage uses DS_CSS_BODY via the external file.
+export const DS_CSS = DS_CSS_BODY;
 
 export function navBar(brand: string, pages: any[], current: string, ctaText?: string, ctaHref = '#', variant = 'standard', locale?: string) {
   const links = pages.map(p => `<li><a href="${esc(p.slug)}.html"${p.slug === current ? ' aria-current="page"' : ''}>${esc(p.title)}</a></li>`).join('');
