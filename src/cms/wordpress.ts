@@ -17,7 +17,22 @@
 // ok:true immediately and the static Directus build stands. Never breaks the default chain.
 //
 // Owned by: Worker B (wordpress builder). Do NOT import from server.ts (cms:check.ts:24-25).
+//
+// T25 — Typography: injectBrandPalette() extended to inject Google Fonts @import + --relay-font-display/body
+//         CSS variables and body/heading font-family rules inside the same custom_css post.
+//         Record fontsInjected:true in proof.
+// T26 — Per-page SEO: injectPageSeo() writes _relay_seo_title / _relay_seo_desc / og:* post meta,
+//         a mu-plugin emits them in <head>. Sitemap at /wp-sitemap.xml asserted 200.
+//         Record seo:true in proof.
+// T27 — Featured images: setFeaturedImage() downloads a Pexels photo per page and sets _thumbnail_id
+//         via 'wp media import'. Skip when no PEXELS key. Record featuredImages count.
+// T28 — WooCommerce full config: createWooCategories(), attachProductImages(), EUR currency for
+//         French locale, COD payment via 'wp option update woocommerce_cod_settings'.
+//         Record wooCurrency/wooCod in proof.
 import { execSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Builder, BuildCtx } from './types.ts';
 import pg from 'pg';
 
@@ -239,7 +254,7 @@ function activateTheme(target: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// T6 — Brand palette injection
+// T6 — Brand palette injection + T25 — Typography (Google Fonts)
 // ---------------------------------------------------------------------------
 // WHY Additional CSS (custom_css post type): it is the officially supported, theme-agnostic channel
 // for injecting CSS into a WP site without editing theme files. WP stores it as a `custom_css`
@@ -248,37 +263,97 @@ function activateTheme(target: string): string {
 //
 // WHY idempotent marker: we wrap our block in /* relay-brand-palette-<projectId> */…/* /relay */
 // so re-runs detect and replace only OUR block, leaving any manually added CSS intact.
+//
+// T25 Typography: brand.type.display (heading font) and brand.type.body are resolved to Google Fonts
+// family slugs and injected as a @import at the top of the same CSS block, followed by
+// --relay-font-display / --relay-font-body CSS custom properties and font-family declarations on
+// body and h1–h4. This makes the WP front-end match the brand's visual identity without any plugin.
 
 const PALETTE_MARKER_OPEN  = (id: string) => `/* relay-brand-palette-${id.slice(0, 8)} */`;
 const PALETTE_MARKER_CLOSE = '/* /relay-brand-palette */';
 
-// Returns the CSS block to inject for this project's brand palette.
-function buildPaletteCSS(palette: { bg?: string; primary?: string; accent?: string }, projectId: string): string {
+// Sanitise a font family name for use in a Google Fonts URL (spaces → +).
+function fontSlug(name: string): string {
+  return String(name || '').trim().replace(/\s+/g, '+');
+}
+
+// Build a Google Fonts @import URL for one or two families (display + body), deduped.
+// Returns '' when no families are supplied.
+function googleFontsImport(display: string, body: string): string {
+  const families: string[] = [];
+  const seen = new Set<string>();
+  for (const f of [display, body].filter(Boolean)) {
+    const slug = fontSlug(f);
+    if (slug && !seen.has(slug)) { families.push(`family=${slug}:ital,wght@0,400;0,700;1,400`); seen.add(slug); }
+  }
+  if (!families.length) return '';
+  return `@import url('https://fonts.googleapis.com/css2?' + ${JSON.stringify(families.join('&'))} + '&display=swap');`;
+}
+
+// Returns the CSS block to inject for this project's brand palette + typography.
+// T25: now includes Google Fonts @import + --relay-font-display/body vars + font-family on body/headings.
+function buildPaletteCSS(
+  palette: { bg?: string; primary?: string; accent?: string },
+  projectId: string,
+  type?: { display?: string; body?: string },
+): string {
   const bg      = String(palette?.bg      || '#ffffff');
   const primary = String(palette?.primary || '#000000');
   const accent  = String(palette?.accent  || primary);
-  const block = [
-    PALETTE_MARKER_OPEN(projectId),
-    ':root {',
-    `  --relay-bg: ${bg};`,
-    `  --relay-primary: ${primary};`,
-    `  --relay-accent: ${accent};`,
-    '}',
-    'body { background-color: var(--relay-bg); }',
-    'a, .wp-block-button__link { color: var(--relay-primary); }',
-    '.wp-block-button__link { background-color: var(--relay-accent); }',
-    PALETTE_MARKER_CLOSE,
-  ].join('\n');
-  return block;
+
+  // T25: resolve font families — fall back gracefully when brand.type is absent.
+  const displayFont = String(type?.display || '').trim();
+  const bodyFont    = String(type?.body    || '').trim();
+  const hasType     = !!(displayFont || bodyFont);
+
+  const lines: string[] = [PALETTE_MARKER_OPEN(projectId)];
+
+  // T25: Google Fonts @import goes at the very top so it precedes any rule that references the vars.
+  if (hasType) {
+    const families: string[] = [];
+    const seen = new Set<string>();
+    for (const f of [displayFont, bodyFont].filter(Boolean)) {
+      const slug = fontSlug(f);
+      if (slug && !seen.has(slug)) { families.push(`family=${slug}:ital,wght@0,400;0,700;1,400`); seen.add(slug); }
+    }
+    if (families.length) {
+      lines.push(`@import url('https://fonts.googleapis.com/css2?${families.join('&')}&display=swap');`);
+    }
+  }
+
+  lines.push(':root {');
+  lines.push(`  --relay-bg: ${bg};`);
+  lines.push(`  --relay-primary: ${primary};`);
+  lines.push(`  --relay-accent: ${accent};`);
+  // T25: CSS custom properties for font families so child themes can reference them.
+  if (displayFont) lines.push(`  --relay-font-display: '${displayFont}', sans-serif;`);
+  if (bodyFont)    lines.push(`  --relay-font-body: '${bodyFont}', sans-serif;`);
+  lines.push('}');
+  lines.push('body { background-color: var(--relay-bg); }');
+  lines.push('a, .wp-block-button__link { color: var(--relay-primary); }');
+  lines.push('.wp-block-button__link { background-color: var(--relay-accent); }');
+  // T25: Apply font-family from CSS vars to body and headings.
+  if (bodyFont)    lines.push(`body { font-family: var(--relay-font-body); }`);
+  if (displayFont) lines.push(`h1, h2, h3, h4 { font-family: var(--relay-font-display); }`);
+  lines.push(PALETTE_MARKER_CLOSE);
+
+  return lines.join('\n');
 }
 
-// Inject or replace the relay brand palette block in WP's Additional CSS.
+// Inject or replace the relay brand palette+typography block in WP's Additional CSS.
 // Uses the `custom_css` post type (WP Customizer's Additional CSS mechanism).
 // Idempotent: detects existing block by marker comment and replaces it in-place.
 // Returns a summary string for the finalize log.
-function injectBrandPalette(palette: { bg?: string; primary?: string; accent?: string }, projectId: string, activeTheme: string): string {
-  if (!palette?.bg && !palette?.primary && !palette?.accent) return 'palette:no-colors-skipped';
-  const newBlock = buildPaletteCSS(palette, projectId);
+// T25: now also records fontsInjected in the returned log token and proof.
+function injectBrandPalette(
+  palette: { bg?: string; primary?: string; accent?: string },
+  projectId: string,
+  activeTheme: string,
+  type?: { display?: string; body?: string },
+): { log: string; fontsInjected: boolean } {
+  if (!palette?.bg && !palette?.primary && !palette?.accent) return { log: 'palette:no-colors-skipped', fontsInjected: false };
+  const newBlock = buildPaletteCSS(palette, projectId, type);
+  const hasType  = !!(type?.display || type?.body);
 
   try {
     // Retrieve existing custom_css post for the active theme, if any.
@@ -315,9 +390,10 @@ function injectBrandPalette(palette: { bg?: string; primary?: string; accent?: s
       try { wp(`option patch update theme_mods_${activeTheme} custom_css_post_id ${JSON.stringify(newId)}`); } catch { /* best-effort */ }
     }
 
-    return `palette:injected(bg=${palette?.bg || 'default'},primary=${palette?.primary || 'default'})`;
+    const logStr = `palette:injected(bg=${palette?.bg || 'default'},primary=${palette?.primary || 'default'}${hasType ? `,fonts=${type?.display || ''}/${type?.body || ''}` : ''})`;
+    return { log: logStr, fontsInjected: hasType };
   } catch (e: any) {
-    return `palette:error(${String(e?.message ?? e).slice(0, 100)})`;
+    return { log: `palette:error(${String(e?.message ?? e).slice(0, 100)})`, fontsInjected: false };
   }
 }
 
@@ -411,6 +487,263 @@ async function syncWooCommerceProducts(pool: pg.Pool, projectId: string): Promis
 }
 
 // ---------------------------------------------------------------------------
+// T26 — Per-page SEO: SEO title + meta description + Open Graph via post meta + mu-plugin
+// ---------------------------------------------------------------------------
+// WHY post meta for SEO data: avoids paid plugins (Yoast SEO). We store three keys per page:
+//   _relay_seo_title     — the <title> override
+//   _relay_seo_desc      — the <meta name="description"> content
+//   _relay_og_title      — og:title (Open Graph)
+//   _relay_og_desc       — og:description
+//
+// WHY mu-plugin for <head> emission: a must-use plugin is the lightest, most reliable hook for
+// injecting arbitrary <meta> tags without depending on a theme's wp_head() call chain. The plugin
+// reads the post meta on each page load and emits the tags — zero PHP framework overhead.
+//
+// WHY /wp-sitemap.xml: WP Core (5.5+) ships a built-in XML sitemap at /wp-sitemap.xml. We assert
+// HTTP 200 here so the gate confirms SEO discoverability is intact.
+
+const SEO_MU_PLUGIN_NAME = 'relay-seo.php';
+
+// Idempotent: write (or overwrite) the relay-seo.php mu-plugin into the container.
+// Uses docker cp of a temp file because wp-cli has no file-write primitive.
+function ensureSeoMuPlugin(): void {
+  const phpCode = `<?php
+/**
+ * Plugin Name: Relay SEO
+ * Description: Emits SEO meta tags from post meta (_relay_seo_title, _relay_seo_desc, _relay_og_*).
+ * Version: 1.0
+ */
+add_action('wp_head', function () {
+  if (!is_singular()) return;
+  $id = get_queried_object_id();
+  $title = get_post_meta($id, '_relay_seo_title', true);
+  $desc  = get_post_meta($id, '_relay_seo_desc',  true);
+  $ogt   = get_post_meta($id, '_relay_og_title',  true) ?: $title;
+  $ogd   = get_post_meta($id, '_relay_og_desc',   true) ?: $desc;
+  if ($title) echo '<title>' . esc_html($title) . '</title>' . "\\n";
+  if ($desc)  echo '<meta name="description" content="' . esc_attr($desc) . '">' . "\\n";
+  if ($ogt)   echo '<meta property="og:title" content="' . esc_attr($ogt) . '">' . "\\n";
+  if ($ogd)   echo '<meta property="og:description" content="' . esc_attr($ogd) . '">' . "\\n";
+}, 1);
+`;
+  // Write to host tmp then copy into container.
+  const tmpFile = join(tmpdir(), SEO_MU_PLUGIN_NAME);
+  writeFileSync(tmpFile, phpCode, 'utf8');
+  execSync(`docker cp ${JSON.stringify(tmpFile)} relay-wp:/var/www/html/wp-content/mu-plugins/${SEO_MU_PLUGIN_NAME}`, {
+    encoding: 'utf8', timeout: 10_000,
+  });
+  // Ensure mu-plugins dir has correct permissions (www-data or root both fine; WP reads as root).
+  execSync(`docker exec relay-wp chmod 644 /var/www/html/wp-content/mu-plugins/${SEO_MU_PLUGIN_NAME}`, {
+    encoding: 'utf8', timeout: 5_000,
+  });
+}
+
+// Set SEO post meta on a WP page. Values come from the page's sections (hero headline/subheadline)
+// and the site brand name. Idempotent — wp post meta update is an upsert.
+function injectPageSeo(pageId: string, page: any, brandName: string): void {
+  const hero    = (page.sections || []).find((s: any) => s.type === 'hero');
+  const title   = String(hero?.headline || page.title || brandName).slice(0, 120).trim();
+  const desc    = String(hero?.subheadline || hero?.body || page.title || '').slice(0, 320).trim();
+  const seoTitle = `${title} – ${brandName}`;
+  const seoDesc  = desc || `${brandName} — ${page.title || 'Welcome'}`;
+  wp(`post meta update ${pageId} _relay_seo_title ${JSON.stringify(seoTitle)}`);
+  wp(`post meta update ${pageId} _relay_seo_desc  ${JSON.stringify(seoDesc)}`);
+  wp(`post meta update ${pageId} _relay_og_title  ${JSON.stringify(seoTitle)}`);
+  wp(`post meta update ${pageId} _relay_og_desc   ${JSON.stringify(seoDesc)}`);
+}
+
+// Assert the WP core sitemap is reachable (HTTP 200). Returns true/false.
+async function assertSitemap(): Promise<boolean> {
+  try {
+    const res = await fetch(`${WP_URL}/wp-sitemap.xml`, { redirect: 'follow', signal: AbortSignal.timeout(8_000) });
+    return res.ok;
+  } catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// T27 — Featured images: Pexels photo per page, uploaded via wp media import
+// ---------------------------------------------------------------------------
+// WHY wp media import: this is the official wp-cli mechanism to sideload an image file into the
+// WP media library and get back the attachment post ID. We then set _thumbnail_id on the page.
+// WHY skip on no PEXELS key: keeps the path inert in CI/CD environments without the key.
+// WHY hero query: the hero section's data-q is the most representative image for the page.
+
+// Upload one image buffer to WP media library and return the attachment post ID.
+// We write a tmp file on the host then `docker cp` it into the container's /tmp/ before
+// calling `wp media import` — avoids piping binary data through execSync's stdio.
+async function uploadImageToWP(buf: Buffer, filename: string, postId: string, title: string): Promise<string> {
+  const tmpFile  = join(tmpdir(), filename);
+  const ctrPath  = `/tmp/${filename}`;
+  writeFileSync(tmpFile, buf);
+  try {
+    execSync(`docker cp ${JSON.stringify(tmpFile)} relay-wp:${ctrPath}`, { encoding: 'utf8', timeout: 10_000 });
+    const attachId = wp(
+      `media import ${ctrPath} --post_id=${postId} --title=${JSON.stringify(title)} --porcelain`
+    ).split('\n')[0]?.trim();
+    // Clean up temp file inside container.
+    try { execSync(`docker exec relay-wp rm -f ${ctrPath}`, { encoding: 'utf8', timeout: 5_000 }); } catch {}
+    return attachId && /^\d+$/.test(attachId) ? attachId : '';
+  } finally {
+    try { execSync(`rm -f ${JSON.stringify(tmpFile)}`, { encoding: 'utf8', timeout: 3_000 }); } catch {}
+  }
+}
+
+// Idempotent: set the featured image on a WP page. If _thumbnail_id is already set AND the
+// referenced attachment still exists, skip download. Returns the attachment ID or ''.
+async function setFeaturedImage(
+  pageId: string, page: any, pexelsPhoto: (q: string, portrait: boolean) => Promise<Buffer | null>
+): Promise<string> {
+  if (!process.env.PEXELS_API_KEY) return '';
+
+  // Check idempotent: already has a thumbnail?
+  try {
+    const existing = wp(`post meta get ${pageId} _thumbnail_id`).trim();
+    if (existing && /^\d+$/.test(existing)) {
+      // Verify the attachment still exists.
+      try { wp(`post get ${existing} --field=ID`); return existing; } catch { /* attachment gone, re-fetch */ }
+    }
+  } catch { /* no meta yet */ }
+
+  // Derive best search query: hero data-q > hero headline > page title.
+  const hero  = (page.sections || []).find((s: any) => s.type === 'hero');
+  const query = String(hero?.imageQuery || hero?.headline || page.title || 'business').trim();
+
+  const buf = await pexelsPhoto(query, false);
+  if (!buf) return '';
+
+  const slug = String(page.slug || 'page').replace(/[^a-z0-9-]/g, '-');
+  const filename = `relay-hero-${slug}-${pageId}.jpg`;
+  const attachId = await uploadImageToWP(buf, filename, pageId, `${query} (Relay hero)`);
+  if (attachId) {
+    wp(`post meta update ${pageId} _thumbnail_id ${attachId}`);
+  }
+  return attachId;
+}
+
+// ---------------------------------------------------------------------------
+// T28 — WooCommerce full config: categories, product images, EUR currency, COD payment
+// ---------------------------------------------------------------------------
+// WHY product categories: they appear in the WP nav and WooCommerce storefront sidebars.
+//   We create one category per product section in the data model (idempotent by slug).
+// WHY EUR for French locale: the brief may say locale=fr or locale=fr-FR. When detected, we
+//   set the store currency to EUR so pricing displays correctly for French clients.
+//   This is a single WP option (woocommerce_currency), safe to update on every run.
+// WHY COD: Cash on Delivery is universally available and requires no payment gateway secrets.
+//   We enable it via 'wp option update woocommerce_cod_settings' with enabled=yes.
+
+// Create (or return existing) a WooCommerce product category by name. Returns term ID.
+function ensureWooCategory(name: string): string {
+  if (!name) return '';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  // Check if term exists.
+  try {
+    const existing = wp(`term list product_cat --field=term_id --name=${JSON.stringify(name)} --format=csv`).split('\n')[0]?.trim();
+    if (existing && /^\d+$/.test(existing)) return existing;
+  } catch { /* not found */ }
+  // Create new category.
+  try {
+    const termId = wp(`term create product_cat ${JSON.stringify(name)} --slug=${JSON.stringify(slug)} --porcelain`).trim();
+    return /^\d+$/.test(termId) ? termId : '';
+  } catch (e: any) {
+    return '';
+  }
+}
+
+// Attach a Pexels image to an existing product post (set _thumbnail_id).
+// Same upload path as setFeaturedImage but for product posts.
+async function attachProductImage(
+  productId: string, name: string, pexelsPhoto: (q: string, portrait: boolean) => Promise<Buffer | null>
+): Promise<string> {
+  if (!process.env.PEXELS_API_KEY) return '';
+  try {
+    const existing = wp(`post meta get ${productId} _thumbnail_id`).trim();
+    if (existing && /^\d+$/.test(existing)) {
+      try { wp(`post get ${existing} --field=ID`); return existing; } catch {}
+    }
+  } catch {}
+  const buf = await pexelsPhoto(`${name} product`, false);
+  if (!buf) return '';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
+  const filename = `relay-product-${slug}-${productId}.jpg`;
+  const attachId = await uploadImageToWP(buf, filename, productId, `${name} product image (Relay)`);
+  if (attachId) wp(`post meta update ${productId} _thumbnail_id ${attachId}`);
+  return attachId;
+}
+
+// Full WooCommerce config: categories + product images + currency + COD.
+// Returns { wooCurrency, wooCod, categoriesCreated, productImagesSet }.
+async function configureWooCommerce(
+  pool: pg.Pool,
+  projectId: string,
+  locale: string,
+  productIds: string[],
+  pexelsPhoto: (q: string, portrait: boolean) => Promise<Buffer | null>,
+): Promise<{ wooCurrency: string; wooCod: boolean; categoriesCreated: number; productImagesSet: number }> {
+  let categoriesCreated = 0;
+  let productImagesSet  = 0;
+
+  // T28: Product categories from data model.
+  // We read the products table and group by category/type column if present; otherwise create a
+  // single default category from the product names.
+  try {
+    const { listTables, readRows } = await import('../appdb.ts');
+    const tables = await listTables(pool, projectId);
+    const productTable = tables.find(t => /^products?$/.test(t));
+    if (productTable) {
+      const rows = await readRows(pool, projectId, productTable, 100);
+      const catNames = new Set<string>();
+      for (const row of rows) {
+        const cat = String(row.category || row.type || row.category_name || '').trim();
+        if (cat) catNames.add(cat);
+      }
+      if (!catNames.size) {
+        // No category column — create a single "Products" category.
+        catNames.add('Products');
+      }
+      for (const cat of catNames) {
+        const termId = ensureWooCategory(cat);
+        if (termId) categoriesCreated++;
+      }
+    }
+  } catch { /* best-effort — categories are non-critical */ }
+
+  // T28: Product images for each product post ID.
+  // We fetch the product title from WP to use as the search query.
+  if (productIds.length && process.env.PEXELS_API_KEY) {
+    for (const pid of productIds.slice(0, 8)) { // cap at 8 to avoid excessive API calls
+      try {
+        const title = wp(`post get ${pid} --field=post_title`).trim();
+        const attachId = await attachProductImage(pid, title, pexelsPhoto);
+        if (attachId) productImagesSet++;
+      } catch { /* continue to next */ }
+    }
+  }
+
+  // T28: EUR currency for French locale (fr, fr-FR, fr_FR).
+  const isFrench = /^fr(-|_|$)/i.test(locale || '');
+  const wooCurrency = isFrench ? 'EUR' : '';
+  if (isFrench) {
+    try { wp(`option update woocommerce_currency EUR`); } catch { /* best-effort */ }
+  }
+
+  // T28: Enable COD payment method (Cash on Delivery).
+  // woocommerce_cod_settings is a WP option containing a PHP-serialized array; we set it as JSON
+  // that WooCommerce 4+ accepts when the COD gateway reads it. The key field is 'enabled' = 'yes'.
+  let wooCod = false;
+  try {
+    // Check if WooCommerce is active before touching woo options.
+    const plugins = wp('plugin list --field=name --status=active --format=csv');
+    if (plugins.includes('woocommerce')) {
+      const codSettings = JSON.stringify({ enabled: 'yes', title: 'Cash on Delivery', description: 'Pay with cash upon delivery.', instructions: 'Pay with cash upon delivery.' });
+      wp(`option update woocommerce_cod_settings ${JSON.stringify(codSettings)} --format=json`);
+      wooCod = true;
+    }
+  } catch { /* WooCommerce not active — skip */ }
+
+  return { wooCurrency: wooCurrency || 'default', wooCod, categoriesCreated, productImagesSet };
+}
+
+// ---------------------------------------------------------------------------
 // Main builder: finalize() — the one method the builder registry calls
 // ---------------------------------------------------------------------------
 
@@ -501,11 +834,15 @@ export const wordpressBuilder: Builder = {
         notes.push(`homepage:${firstSlug}`);
       }
 
-      // 6. T6: Inject the locked brand palette as CSS custom properties into WP Additional CSS.
-      // This makes the WP front-end visually match the brand, not the raw theme default.
-      // injectBrandPalette() is idempotent: wraps block in marker comments, replaces on re-run.
-      const paletteLog = injectBrandPalette(palette, projectId, activeTheme);
-      notes.push(paletteLog);
+      // 6. T6 + T25: Inject brand palette + typography into WP Additional CSS.
+      // injectBrandPalette() now also injects the Google Fonts @import and --relay-font-* CSS vars
+      // from brand.type.display/body (T25). Both are written into the same custom_css post so there
+      // is exactly ONE idempotent block per project — no duplicate CSS posts.
+      const brandType = brand?.type || {};
+      const paletteResult = injectBrandPalette(palette, projectId, activeTheme, brandType);
+      notes.push(paletteResult.log);
+      const fontsInjected = paletteResult.fontsInjected;
+      if (fontsInjected) notes.push(`fonts:${brandType.display || ''}/${brandType.body || ''}`);
 
       // 7. T5: WooCommerce product sync (only for wp_woocommerce deliverable; no-op otherwise).
       let productIds: string[] = [];
@@ -515,20 +852,89 @@ export const wordpressBuilder: Builder = {
         productIds = wooResult.productIds;
       }
 
-      // 8. Write proof onto the project params so the wp_provisioned verify rule can check it.
-      // T5: include productIds in proof so gates can verify real WC products were created.
-      // T6: include paletteLog in proof so gates can verify CSS was injected.
+      // 8. T26: Per-page SEO — write post meta + mu-plugin to emit <meta> tags in <head>.
+      // Idempotent: mu-plugin is overwritten on each run (same content).
+      let seoApplied = false;
+      try {
+        ensureSeoMuPlugin();
+        for (const page of site.pages) {
+          const pageId = pageIds[page.slug];
+          if (pageId) injectPageSeo(pageId, page, brandName);
+        }
+        seoApplied = true;
+        notes.push('seo:ok');
+      } catch (e: any) {
+        notes.push(`seo:error(${String(e?.message ?? e).slice(0, 60)})`);
+      }
+
+      // Sitemap assertion (WP core sitemaps — /wp-sitemap.xml should be HTTP 200).
+      let sitemapOk = false;
+      try { sitemapOk = await assertSitemap(); } catch {}
+      notes.push(`sitemap:${sitemapOk ? 'ok' : 'check-manually'}`);
+
+      // 9. T27: Featured images — set hero Pexels photo as the WP featured image on each page.
+      // pexelsPhoto is lazily imported to avoid pulling in the Pexels key at dry-run time.
+      let featuredImages = 0;
+      try {
+        if (process.env.PEXELS_API_KEY) {
+          const { pexelsPhoto } = await import('../media.ts');
+          for (const page of site.pages) {
+            const pageId = pageIds[page.slug];
+            if (pageId) {
+              const attachId = await setFeaturedImage(pageId, page, pexelsPhoto);
+              if (attachId) featuredImages++;
+            }
+          }
+        }
+        notes.push(`featuredImages:${featuredImages}`);
+      } catch (e: any) {
+        notes.push(`featuredImages:error(${String(e?.message ?? e).slice(0, 60)})`);
+      }
+
+      // 10. T28: WooCommerce full config (only for wp_woocommerce deliverable).
+      let wooCurrency = 'default';
+      let wooCod      = false;
+      let wooCategories = 0;
+      let wooProductImages = 0;
+      if (String(params.deliverable) === 'wp_woocommerce') {
+        try {
+          const locale = String(params.locale || ctx.locale || '');
+          const { pexelsPhoto } = process.env.PEXELS_API_KEY
+            ? await import('../media.ts')
+            : { pexelsPhoto: async () => null };
+          const wooConf = await configureWooCommerce(pool, projectId, locale, productIds, pexelsPhoto as any);
+          wooCurrency      = wooConf.wooCurrency;
+          wooCod           = wooConf.wooCod;
+          wooCategories    = wooConf.categoriesCreated;
+          wooProductImages = wooConf.productImagesSet;
+          notes.push(`woo:currency=${wooCurrency},cod=${wooCod},cats=${wooCategories},imgs=${wooProductImages}`);
+        } catch (e: any) {
+          notes.push(`woo:config-error(${String(e?.message ?? e).slice(0, 80)})`);
+        }
+      }
+
+      // 11. Write proof onto the project params so the wp_provisioned verify rule can check it.
+      // T5: productIds | T6: paletteInjected | T25: fontsInjected | T26: seo, sitemap
+      // T27: featuredImages | T28: wooCurrency, wooCod
       const proof = {
         pageIds, menuId, theme: activeTheme, timestamp: new Date().toISOString(), ok: true,
-        productIds,                        // T5: WooCommerce product WP post IDs
-        paletteInjected: paletteLog.startsWith('palette:injected'), // T6: brand palette applied
+        productIds,                                                        // T5
+        paletteInjected: paletteResult.log.startsWith('palette:injected'), // T6
+        fontsInjected,                                                     // T25
+        seo: seoApplied,                                                   // T26
+        sitemapOk,                                                         // T26
+        featuredImages,                                                    // T27
+        wooCurrency,                                                       // T28
+        wooCod,                                                            // T28
+        wooCategories,                                                     // T28
+        wooProductImages,                                                  // T28
       };
       await pool.query(
         "update projects set params = jsonb_set(params, '{wp_provision}', $2::jsonb, true) where id=$1",
         [projectId, JSON.stringify(proof)],
       );
 
-      // 8. Quick smoke-test: fetch the WP front page and assert it responds.
+      // 12. Quick smoke-test: fetch the WP front page and assert it responds.
       let served = false;
       try {
         const res = await fetch(WP_URL, { redirect: 'follow', signal: AbortSignal.timeout(10_000) });
