@@ -1317,16 +1317,23 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = latest; FULL 26-suite gate green; LLM = M3 reasoning-off primary (fast).
-· 2026-07-06 FULL-LLM BUILD PROVEN END-TO-END (the payoff of the perf fix): a real coffee-roaster brief ->
-  orchestrator picked wp_site/wordpress -> full chain (strategy/research/branding/design/content/compose/
-  wp_provision/5 renders/qa) 13/13 tasks in 193s (~3.2min) with M3-off. Real brand ("Kunjani Craft Coffee")
-  threaded, 5 real WordPress pages provisioned live via wp-cli. This exact build STALLED indefinitely before
-  the LLM routing fix. Scratch swept.
-· MINOR CLEANUP (cosmetic, not a bug): compose logs "brand.name missing -> Studio" but output uses {{brand}}
-  tokens substituted with the real name downstream (verified 0 Studio leaks). Quiet the misleading log.
-· LLM: OpenRouter-primary M3(reasoning off) -> 2.7 -> 2.5; per-call 1.5-30s. docs/system-logic-and-performance.md.
-· Prior live: orchestrator (EN/FR/IT, project-dictates-steps), WordPress substrate, full-stack app API,
-  Android app-only. Owner-gated: Stripe v2, Play Store, apex flip. FIGMA token in, needs a real file URL.
-· NEXT: quiet the brand log; PrestaShop FR-ecom builder; board deliverable/stack/chain view; a full
-  fullstack_app end-to-end run (site + real API).
+· System healthy; prod = 59bb0f0; FULL 28-suite gate green (orchestrator 308, appapi 50, wp 38, presta 28,
+  board 33, llm 38, spec 195, + all others 0-failed).
+· 2026-07-06 LOCK-20 (6 domain workers, 20 gated increments, all merged + deployed):
+  ORCHESTRATOR: +landing_page +brand_identity deliverables (EN/FR/IT), richer detectors, human-readable
+    chainReason (spot-checked live), 'orchestrated' run_event.
+  WORDPRESS: WooCommerce products from data model (wc-cli + wp-post fallback), brand-palette CSS injection,
+    theme-install-or-fallback harden. wp:check 38 dry / 53 prove.
+  APP: /api/app pagination+ordering (?limit/offset/order/dir), owner-auth on PRIVATE_READ tables, a real
+    served app UI (list+create over primary table). appapi 50.
+  BOARD: deliverable/stack/chain view + chainReason why-banner + build wall-clock + deliverable badge+filter.
+    boardJSON exposes deliverable/stack/chainReason/capabilities/build_seconds (null on legacy projects).
+  QUALITY: quieted the misleading brand.name log (truthful only when name truly absent); per-department
+    CHEAP model tier via OPENROUTER_MODELS_CHEAP (policies/design/qa/... ; default unset = unchanged);
+    persisted params.build_seconds at build end.
+  PRESTASHOP: FR-ecom builder skeleton (RELAY_PRESTA flag, graceful-absent, PS webservice API path/stub),
+    wired into the builder registry (lazy). presta:check 28 dry, prove-mode when infra present.
+· LLM: M3 reasoning-off primary; per-dept cheap tier available (env). Default website path byte-identical.
+· Owner-gated: Stripe v2, Play Store, apex flip. FIGMA token in, needs a real file URL.
+· NEXT: enable OPENROUTER_MODELS_CHEAP in prod for a speed pass; a full brand_identity + landing_page live
+  build; WooCommerce prove with WC active; PrestaShop infra if owner wants FR-native ecom.
