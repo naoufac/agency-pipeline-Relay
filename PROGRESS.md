@@ -1267,3 +1267,17 @@ LEGIBLE through the real renderer (body >=4.5:1 on its bg, button labels >=4.5:1
 load. Endpoint: GET returns the preset list, POST {preset} applies; Design tab shows swatch chips.
 Full check (22 suites) green. Shipped de98edc. LIVE: Midnight preset on chopslot → bg #0e1117, text
 #eef1f6 at 16.7:1, Space Grotesk loaded. Reverted.
+
+## 2026-07-06 — Closed the 3 design gaps from "anything missing?"
+
+· DESIGN SURVIVES REBUILD — now GATED (app:check +2, 207): a real replan (fallback plan, no LLM) on a
+  scratch project carries params.brand.design, and the render projection (brandIdentity → applyBrand →
+  renderPage) forces it onto the regenerated static HTML (palette + font + Google-Fonts link). The
+  invariant was true in code; now it's locked by a test.
+· IN-APP PREVIEW — the Design tab shows a live mock styled with the design's own colours + fonts (hover
+  a preset to preview it, apply to keep). No blind apply, no cross-origin iframe. presetSummaries now
+  ships the full Design; loadFonts injects the Google Fonts so the preview renders in the real typeface.
+· HONEST wording — dropped the overclaimed "Canva brand-kit JSON" (Canva has no such export); the paste
+  box now says "any {colors, typography, radius} JSON". source:'canva' label stays for canva-shaped input.
+design:check 61→62, app 207; full check (22 suites) green. Shipped d2132e5. Verified live: board serves
+the preview code, the Canva overclaim is gone, presets carry the full Design.
