@@ -311,8 +311,11 @@ function project(id, tab, seq){
     const cur = await j('/api/site/'+id+'/design').catch(()=>({design:null}));
     const sw = (d)=>{ const p=(d&&d.palette)||{}; const keys=['bg','primary','accent','text','surface']; return keys.filter(k=>p[k]).map(k=>`<span title="${k}: ${esc(p[k])}" style="display:inline-block;width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:${esc(p[k])};vertical-align:middle"></span>`).join(' '); };
     const summary = (d)=> d ? `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><b>Active design</b> ${sw(d)} ${d.fonts?`<span class="muted">· ${esc(d.fonts.display||'')}${d.fonts.body&&d.fonts.body!==d.fonts.display?' / '+esc(d.fonts.body):''}</span>`:''} ${d.radius?`<span class="muted">· radius ${esc(d.radius)}</span>`:''} <span class="muted">· via ${esc(d.source||'tokens')}</span></div>` : '<div class="muted">No design applied — your site uses its built-in theme.</div>';
+    const presets = (cur&&cur.presets)||[];
+    const chips = presets.map(p=>`<button class="btn btn-sm btn-ghost dpreset" data-preset="${esc(p.id)}" style="padding:6px 10px" title="${esc(p.font)}">${(p.swatches||[]).slice(0,4).map(c=>`<span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${esc(c)};vertical-align:middle;margin-right:1px"></span>`).join('')} ${esc(p.label)}</button>`).join(' ');
     body.innerHTML = `<h2 class="rv-h" style="margin-top:0">Design <span class="muted" style="font-size:13px;font-weight:400">— bring a Figma / Canva design to your live site</span></h2>
       <div id="dcur" style="margin-bottom:16px">${summary(cur&&cur.design)}</div>
+      ${presets.length?`<div style="margin-bottom:18px"><div class="muted" style="font-size:13px;margin-bottom:8px">One-click looks (no Figma needed):</div><div class="row" style="gap:8px;flex-wrap:wrap">${chips}</div></div>`:''}
       <p class="muted" style="max-width:640px">Paste a <b>Figma file link</b> (name your colour styles Background / Primary / Text) — or export your <b>Figma Variables</b> / a Tokens Studio / Canva brand-kit JSON below. Relay reads the colours, fonts and corner radius and applies them to your live site — instantly, keeping every page accessible (text stays legible even on a dark palette).</p>
       <div class="row" style="gap:8px;margin-bottom:12px"><input id="dfurl" type="url" placeholder="https://www.figma.com/design/…" style="flex:1"><button class="btn btn-ghost" id="dfetch">Import from Figma</button></div>
       <textarea id="dtok" rows="10" placeholder='{ "colors": { "background": "#0f1115", "primary": "#e8b04b", "text": "#f4f4f5" }, "typography": { "heading": { "fontFamily": "Playfair Display" }, "body": { "fontFamily": "Inter" } }, "radius": "14px" }' style="width:100%;font-family:ui-monospace,monospace;font-size:12.5px"></textarea>
@@ -326,6 +329,13 @@ function project(id, tab, seq){
       if (r.ok){ document.getElementById('dcur').innerHTML=summary(r.design); msg('Applied — reload your live site to see it.',true); }
       else msg(r.error||'Could not apply — check the tokens and try again.',false);
     };
+    body.querySelectorAll('.dpreset').forEach(bt=>bt.onclick=async ()=>{
+      const p=bt.getAttribute('data-preset'); bt.disabled=true;
+      const r=await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({preset:p})}).then(r=>r.json()).catch(()=>({}));
+      bt.disabled=false;
+      if(r.ok){ document.getElementById('dcur').innerHTML=summary(r.design); msg('Applied "'+p+'" — reload your live site to see it.',true); }
+      else msg(r.error||'Could not apply that look.',false);
+    });
     document.getElementById('dfetch').onclick = async ()=>{
       const u=(document.getElementById('dfurl').value||'').trim(); if(!u) return msg('Paste your Figma file link first.',false);
       const btn=document.getElementById('dfetch'); btn.disabled=true; msg('Reading your Figma file…',true);

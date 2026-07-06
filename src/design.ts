@@ -13,7 +13,7 @@ export type Design = {
   palette?: { bg?: string; primary?: string; accent?: string; text?: string; surface?: string };
   fonts?: { display?: string; body?: string };
   radius?: string;
-  source?: 'figma' | 'canva' | 'tokens' | 'manual';
+  source?: 'figma' | 'canva' | 'tokens' | 'manual' | 'preset';
 };
 
 const HEX = /^#[0-9a-f]{3,8}$/i;

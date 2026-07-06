@@ -101,5 +101,23 @@ ok('server: the intake caps the payload size (no giant token file)', /raw\.lengt
 const appjs = (await import('node:fs')).readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 ok('board: a Design tab lets the owner paste tokens (apply + remove, live)', appjs.includes("tabLink(id,'design','Design',tab)") && appjs.includes('async function designTab()') && appjs.includes("'/api/site/'+id+'/design'"));
 
+// ---- 8. PRESETS: curated one-click looks — every one must be COMPLETE + LEGIBLE through the renderer ----
+const { DESIGN_PRESETS, presetSummaries, isPreset } = await import('./design-presets.ts');
+ok('presets: at least 5 curated looks exist', Object.keys(DESIGN_PRESETS).length >= 5);
+ok('presets: isPreset gates the id (unknown → false)', isPreset('midnight') && !isPreset('nope') && !isPreset(42 as any));
+for (const [pid, d] of Object.entries(DESIGN_PRESETS)) {
+  // render a page with the preset and PROVE the guarantees hold on the actual CSS vars
+  const page = renderPage({ brand: { name: 'X', tokens: { bg: '#fff', primary: '#4f46e5' }, design: d }, sections: [{ type: 'hero', headline: 'Hi' }] }, { pages, slug: 'index', title: 'H', theme: 'modern' });
+  const pBg = rootVar(page, '--bg'), pText = rootVar(page, '--text'), pPrim = rootVar(page, '--primary'), pOn = rootVar(page, '--on-primary');
+  const complete = !!(d.palette?.bg && d.palette?.primary && d.palette?.text && d.fonts?.display && d.fonts?.body && d.radius);
+  ok(`preset "${pid}": complete (palette + fonts + radius)`, complete, JSON.stringify(d));
+  ok(`preset "${pid}": body text is legible on its bg (>=4.5:1)`, !!pBg && !!pText && ratio(pText!, pBg!) >= 4.5, `text ${pText} on ${pBg} = ${pBg && pText ? ratio(pText!, pBg!).toFixed(1) : '?'}:1`);
+  ok(`preset "${pid}": button labels legible on its primary (>=4.5:1)`, !!pPrim && !!pOn && ratio(pOn!, pPrim!) >= 4.5, `on-primary ${pOn} on ${pPrim}`);
+  ok(`preset "${pid}": its display font loads (Google Fonts link)`, page.includes('fonts.googleapis.com/css2') && page.includes(encodeURIComponent(d.fonts!.display!).replace(/%20/g, '+')));
+}
+ok('presets: summaries carry id + label + swatches + font (for the picker)', presetSummaries().every((s) => s.id && s.label && s.swatches.length >= 2 && typeof s.font === 'string'));
+ok('server: the /design endpoint applies a curated preset (validated Design)', serverSrc.includes("typeof b.preset === 'string'") && serverSrc.includes('DESIGN_PRESETS[b.preset]') && serverSrc.includes('presetSummaries()'));
+ok('board: the Design tab renders one-click preset chips', appjs.includes('dpreset') && appjs.includes('preset:p'));
+
 console.log(`\ndesign:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

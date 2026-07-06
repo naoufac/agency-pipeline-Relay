@@ -615,7 +615,10 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       if (!UUID_RE.test(did) || !canSee(user, await ownerOf(did))) return send(res, 404, 'application/json', '{"error":"not found"}');
       const proj = (await pool.query('select params, owner_id from projects where id=$1', [did])).rows[0];
       if (!proj) return send(res, 404, 'application/json', '{"error":"not found"}');
-      if (req.method !== 'POST') return send(res, 200, 'application/json', JSON.stringify({ design: (proj.params?.brand?.design) || null }));
+      if (req.method !== 'POST') {
+        const { presetSummaries } = await import('./design-presets.ts');
+        return send(res, 200, 'application/json', JSON.stringify({ design: (proj.params?.brand?.design) || null, presets: presetSummaries() }));
+      }
       // a WRITE to the site's identity — the OWNER only (canSee admits anon on legacy ownerless projects)
       if (!user || proj.owner_id == null || user.id !== proj.owner_id) return send(res, 404, 'application/json', '{"error":"not found"}');
       if (limited(FORM_HITS, 30, clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many requests"}');
@@ -646,7 +649,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
           return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: msg }));
         }
       }
-      const design = designFromTokens(tokenInput, source);
+      // a curated PRESET (one-click, for owners without a Figma export) is already a validated Design
+      let design;
+      if (typeof b.preset === 'string') {
+        const { DESIGN_PRESETS, isPreset } = await import('./design-presets.ts');
+        if (!isPreset(b.preset)) return send(res, 400, 'application/json', '{"ok":false,"error":"unknown preset"}');
+        const { label, ...d } = DESIGN_PRESETS[b.preset]; design = d;
+      } else {
+        design = designFromTokens(tokenInput, source);
+      }
       if (!hasDesign(design)) return send(res, 400, 'application/json', '{"ok":false,"error":"no usable design tokens found — name your Figma colour styles (Background/Primary/Text) or paste a token export"}');
       brand.design = design;
       await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1", [did, JSON.stringify(brand)]);
