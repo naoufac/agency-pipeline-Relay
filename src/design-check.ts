@@ -91,5 +91,15 @@ ok('spec: the design rides on the canonical brand (identical on every page)', /d
 const renderSrc = (await import('node:fs')).readFileSync(new URL('./render.ts', import.meta.url), 'utf8');
 ok('render: the design PALETTE feeds the contrast derivation (not a blind append) + fonts appended + font link', /isHex\(dp\.bg\)/.test(renderSrc) && /isHex\(dp\.text\)[\s\S]{0,60}contrast/.test(renderSrc) && renderSrc.includes('designTypeVars(design)') && renderSrc.includes('fontLink(design)'));
 
+// ---- 7. INTAKE: the owner-only endpoint that attaches a design, merged into the canonical brand ----
+const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+ok('server: /design endpoint exists, OWNER-only for writes, rate-capped', /\/design\$\/\)/.test(serverSrc) && serverSrc.includes('user.id !== proj.owner_id') && /\/design\$[\s\S]{0,1200}limited\(FORM_HITS/.test(serverSrc));
+ok('server: intake runs paste through designFromTokens (same validator) + rejects empty', serverSrc.includes('designFromTokens(b.tokens || b.design || b') && /hasDesign\(design\)\)[\s\S]{0,120}no usable design tokens/.test(serverSrc));
+ok('server: the design MERGES into the canonical brand (name/tokens survive), applies without a rebuild', /brand\.design = design/.test(serverSrc) && serverSrc.includes("jsonb_set(params, '{brand}'"));
+ok('server: a clear removes just the design', /b\.clear === true[\s\S]{0,80}delete brand\.design/.test(serverSrc));
+ok('server: the intake caps the payload size (no giant token file)', /raw\.length > 512_000[\s\S]{0,60}design too large/.test(serverSrc));
+const appjs = (await import('node:fs')).readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+ok('board: a Design tab lets the owner paste tokens (apply + remove, live)', appjs.includes("tabLink(id,'design','Design',tab)") && appjs.includes('async function designTab()') && appjs.includes("'/api/site/'+id+'/design'"));
+
 console.log(`\ndesign:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

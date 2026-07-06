@@ -605,6 +605,38 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       return;
     }
 
+    // ---- FIGMA → REALITY (owner-only): attach an external DESIGN to the site. Paste an exported
+    // token set (Figma variables / Tokens Studio / a Canva brand kit) → it becomes the site's palette,
+    // fonts and radius, LIVE on next page load (no rebuild — the renderer reads params.brand.design).
+    // GET returns the current design; POST {tokens|design} applies; POST {clear:true} removes it.
+    const designM = path.match(/^\/api\/site\/([0-9a-f-]{36})\/design$/);
+    if (designM) {
+      const did = designM[1];
+      if (!UUID_RE.test(did) || !canSee(user, await ownerOf(did))) return send(res, 404, 'application/json', '{"error":"not found"}');
+      const proj = (await pool.query('select params, owner_id from projects where id=$1', [did])).rows[0];
+      if (!proj) return send(res, 404, 'application/json', '{"error":"not found"}');
+      if (req.method !== 'POST') return send(res, 200, 'application/json', JSON.stringify({ design: (proj.params?.brand?.design) || null }));
+      // a WRITE to the site's identity — the OWNER only (canSee admits anon on legacy ownerless projects)
+      if (!user || proj.owner_id == null || user.id !== proj.owner_id) return send(res, 404, 'application/json', '{"error":"not found"}');
+      if (limited(FORM_HITS, 30, clientIp(req))) return send(res, 429, 'application/json', '{"error":"too many requests"}');
+      let raw = ''; for await (const c of req) { raw += c; if (raw.length > 512_000) return send(res, 413, 'application/json', '{"error":"design too large"}'); }
+      let b: any = {}; try { b = JSON.parse(raw || '{}'); } catch { return send(res, 400, 'application/json', '{"error":"invalid JSON"}'); }
+      const { designFromTokens, hasDesign } = await import('./design.ts');
+      const params = proj.params || {};
+      const brand = (params.brand && typeof params.brand === 'object') ? params.brand : (params.site?.brand || {});
+      if (b.clear === true) {
+        delete brand.design;
+        await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1", [did, JSON.stringify(brand)]);
+        return send(res, 200, 'application/json', '{"ok":true,"design":null}');
+      }
+      const design = designFromTokens(b.tokens || b.design || b, (b.source === 'canva' ? 'canva' : b.source === 'figma' ? 'figma' : 'tokens'));
+      if (!hasDesign(design)) return send(res, 400, 'application/json', '{"ok":false,"error":"no usable design tokens found — paste your Figma/Canva colour + font export"}');
+      brand.design = design;
+      await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1", [did, JSON.stringify(brand)]);
+      await pool.query("insert into run_events(project_id, type, detail) values ($1,'design_applied',$2)", [did, `palette:${Object.keys(design.palette || {}).length} fonts:${design.fonts ? 1 : 0} source:${design.source}`]).catch(() => {});
+      return send(res, 200, 'application/json', JSON.stringify({ ok: true, design }));
+    }
+
     // ---- PQ3 · CLIENT CONTENT ADMIN (owner-only): edit the site's real content (products/menu/…) ----
     // Directus can't reach the app_<hex> schema (separate DB), so the OWNER edits content here; the
     // live site reads these tables live, so an edit shows immediately.

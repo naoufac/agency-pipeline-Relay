@@ -179,7 +179,7 @@ const tabLink = (id, key, label, cur) =>
 
 function project(id, tab, seq){
   app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
-  let wasBuilt = false, prow = {}, editInit = false, qaInit = false, dataInit = false, contentInit = false;
+  let wasBuilt = false, prow = {}, editInit = false, qaInit = false, dataInit = false, contentInit = false, designInit = false;
 
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
@@ -193,7 +193,7 @@ function project(id, tab, seq){
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
       </div>
       <div class="nav-links tabs">
-        ${tabLink(id,'site','Site',tab)}${tabLink(id,'chat','Chat',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
+        ${tabLink(id,'site','Site',tab)}${tabLink(id,'chat','Chat',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'design','Design',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
       </div>`;
   }
 
@@ -303,6 +303,34 @@ function project(id, tab, seq){
       <div class="kpis">${(k?.kpis||[]).map(m => `<div class="kpi tone-${m.tone}"><div class="kpi-label">${m.label}</div><div class="kpi-value">${m.value}</div><div class="kpi-sub">${m.sub}</div></div>`).join('')}</div>`;
   }
 
+
+  // ---- Design tab (Figma → reality): paste an exported design token set (Figma Variables / Tokens
+  // Studio / a Canva brand kit) and it becomes the site's palette + fonts + radius, live immediately. ----
+  async function designTab(){
+    const body = document.getElementById('pbody');
+    const cur = await j('/api/site/'+id+'/design').catch(()=>({design:null}));
+    const sw = (d)=>{ const p=(d&&d.palette)||{}; const keys=['bg','primary','accent','text','surface']; return keys.filter(k=>p[k]).map(k=>`<span title="${k}: ${esc(p[k])}" style="display:inline-block;width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:${esc(p[k])};vertical-align:middle"></span>`).join(' '); };
+    const summary = (d)=> d ? `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><b>Active design</b> ${sw(d)} ${d.fonts?`<span class="muted">· ${esc(d.fonts.display||'')}${d.fonts.body&&d.fonts.body!==d.fonts.display?' / '+esc(d.fonts.body):''}</span>`:''} ${d.radius?`<span class="muted">· radius ${esc(d.radius)}</span>`:''} <span class="muted">· via ${esc(d.source||'tokens')}</span></div>` : '<div class="muted">No design applied — your site uses its built-in theme.</div>';
+    body.innerHTML = `<h2 class="rv-h" style="margin-top:0">Design <span class="muted" style="font-size:13px;font-weight:400">— bring a Figma / Canva design to your live site</span></h2>
+      <div id="dcur" style="margin-bottom:16px">${summary(cur&&cur.design)}</div>
+      <p class="muted" style="max-width:640px">Export your <b>Figma Variables</b> (or a Tokens Studio / Canva brand-kit JSON) and paste it below. Relay reads the colours, fonts and corner radius and applies them to your live site — instantly, keeping every page accessible (text stays legible even on a dark palette).</p>
+      <textarea id="dtok" rows="10" placeholder='{ "colors": { "background": "#0f1115", "primary": "#e8b04b", "text": "#f4f4f5" }, "typography": { "heading": { "fontFamily": "Playfair Display" }, "body": { "fontFamily": "Inter" } }, "radius": "14px" }' style="width:100%;font-family:ui-monospace,monospace;font-size:12.5px"></textarea>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" id="dapply">Apply to my site</button><button class="btn btn-ghost" id="dclear">Remove design</button><span class="rform-msg" id="dmsg" hidden></span></div>`;
+    const msg=(t,good)=>{ const m=document.getElementById('dmsg'); m.hidden=false; m.textContent=t; m.style.color=good?'var(--accent)':'#dc2626'; };
+    document.getElementById('dapply').onclick = async ()=>{
+      let tokens; try { tokens = JSON.parse(document.getElementById('dtok').value||'{}'); } catch { return msg('That is not valid JSON — paste the exported token file.',false); }
+      const btn=document.getElementById('dapply'); btn.disabled=true;
+      const r = await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tokens})}).then(r=>r.json()).catch(()=>({}));
+      btn.disabled=false;
+      if (r.ok){ document.getElementById('dcur').innerHTML=summary(r.design); msg('Applied — reload your live site to see it.',true); }
+      else msg(r.error||'Could not apply — check the tokens and try again.',false);
+    };
+    document.getElementById('dclear').onclick = async ()=>{
+      if(!confirm('Remove the design and go back to the built-in theme?'))return;
+      const r = await fetch('/api/site/'+id+'/design',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clear:true})}).then(r=>r.json()).catch(()=>({}));
+      if (r.ok){ document.getElementById('dcur').innerHTML=summary(null); document.getElementById('dtok').value=''; msg('Removed — back to the built-in theme.',true); }
+    };
+  }
 
   // ---- QA tab: Relay screenshots each page (phone + desktop) and a vision model reviews them ----
   async function qaTab(){
@@ -589,6 +617,7 @@ function project(id, tab, seq){
     else if (tab === 'metrics') metricsTab();
     else if (tab === 'qa') { if (!qaInit) { qaInit = true; qaTab(); } }
     else if (tab === 'content') { if (!contentInit) { contentInit = true; contentTab(); } }
+    else if (tab === 'design') { if (!designInit) { designInit = true; designTab(); } }
     else if (tab === 'data') { if (!dataInit) { dataInit = true; dataTab(); } }
     // resolution moment
     if (!wasBuilt && built && tab === 'site') { toast('✓ Done — your site is live'); }
