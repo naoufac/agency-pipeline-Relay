@@ -54,6 +54,7 @@ export interface BuildCtx {
   siteBase?: string;        // https://<slug>.naples.agency when the slug is minted
   localBusiness?: boolean;  // back-compat classification
   bizType?: string;         // most-specific schema.org @type (Restaurant, Dentist, …)
+  bizFacts?: any;           // whole-site telephone/email/address/hours (extractBusinessFacts)
 }
 
 // The contract. See docs/CMS-ARCHITECTURE.md for how it maps onto Directus.

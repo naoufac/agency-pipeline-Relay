@@ -152,6 +152,27 @@ function parseHoursEntry(entry: string): any[] {
 
 // Walk an hours value from the site model — it may be a string, array of strings, or a plain object.
 // Return [] (no guessing) when the data doesn't match any recognised shape.
+// normalizeHoursText: real content writes hours the way HUMANS do — full day names
+// ("lunedì-venerdì", "Monday to Friday"), a comma between days and times ("lun-ven, 9:00-18:00"),
+// "dalle 9:00 alle 18:00". The clause parser only understands "abbr-abbr H[:MM]-H[:MM]", so this
+// pass rewrites prose into that shape deterministically BEFORE parsing. Pure string → string.
+function normalizeHoursText(s: string): string {
+  let t = String(s).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');   // lunedì → lunedi (accent-insensitive)
+  // full day names (it + en) → the 3-letter abbreviations DAY_MAP knows
+  t = t.replace(/\b(lunedi|martedi|mercoledi|giovedi|venerdi|sabato|domenica|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/g,
+    (w) => ({ lunedi: 'lun', martedi: 'mar', mercoledi: 'mer', giovedi: 'gio', venerdi: 'ven', sabato: 'sab', domenica: 'dom',
+              monday: 'mon', tuesday: 'tue', wednesday: 'wed', thursday: 'thu', friday: 'fri', saturday: 'sat', sunday: 'sun' } as Record<string, string>)[w] || w);
+  // "mon to fri" / "lun a ven" → "mon-fri"
+  t = t.replace(/\b(lun|mar|mer|gio|ven|sab|dom|mon|tue|wed|thu|fri|sat|sun)\s+(?:to|a|al)\s+(lun|mar|mer|gio|ven|sab|dom|mon|tue|wed|thu|fri|sat|sun)\b/g, '$1-$2');
+  // "dalle 9:00 alle 18:00" → "9:00-18:00" (also "from 9 to 18" after day handling above)
+  t = t.replace(/\bdalle?\s+(\d{1,2}(?:[:.h]\d{2})?)\s+alle?\s+(\d{1,2}(?:[:.h]\d{2})?)/g, '$1-$2')
+       .replace(/\bfrom\s+(\d{1,2}(?:[:.h]\d{2})?)\s+to\s+(\d{1,2}(?:[:.h]\d{2})?)/g, '$1-$2');
+  // drop the comma/colon between a day part and its time ("lun-ven, 9:00-18:00" → "lun-ven 9:00-18:00")
+  t = t.replace(/\b((?:lun|mar|mer|gio|ven|sab|dom|mon|tue|wed|thu|fri|sat|sun)(?:[-–](?:lun|mar|mer|gio|ven|sab|dom|mon|tue|wed|thu|fri|sat|sun))?)\s*[:,]\s*(?=\d)/g, '$1 ');
+  return t;
+}
+
 function parseHoursValue(v: any): any[] {
   if (!v) return [];
   const raw = (typeof v === 'string') ? [v]
@@ -160,8 +181,8 @@ function parseHoursValue(v: any): any[] {
     : [];
   const specs: any[] = [];
   for (const entry of raw as string[]) {
-    // each string may contain comma-separated clauses ("Mon-Fri 9-17, Sat 10-14")
-    const clauses = entry.split(/,\s*/);
+    // normalize prose first, then split comma-separated clauses ("Mon-Fri 9-17, Sat 10-14")
+    const clauses = normalizeHoursText(entry).split(/,\s*/);
     for (const clause of clauses) specs.push(...parseHoursEntry(clause));
   }
   return specs;
@@ -274,6 +295,47 @@ export function extractBusinessFacts(site: any): { telephone?: string; email?: s
   if (rawHours != null) {
     const specs = parseHoursValue(rawHours);
     if (specs.length) result.openingHours = specs;
+  }
+
+  // FREE-TEXT PASS — real composed sites carry contact facts inside prose (a contact section's
+  // body: "Telefono: +39 081 555 2200 … Orari: lunedì-venerdì, 9:00-18:00 … Via Toledo 15, Napoli"),
+  // not as structured keys. Structured fields above keep priority; this pass only fills gaps, with
+  // CONSERVATIVE patterns — a non-match yields nothing, never an invented value. (live-caught
+  // 2026-07-06: the first real law-firm build extracted {} while every fact sat in contact.html)
+  const textOf = (sec: any): string => {
+    if (!sec || typeof sec !== 'object') return '';
+    const bits: string[] = [];
+    for (const k of ['body', 'intro', 'lead', 'title']) if (typeof sec[k] === 'string') bits.push(sec[k]);
+    for (const it of (Array.isArray(sec.items) ? sec.items : []))
+      for (const k of ['body', 'a', 'title']) if (it && typeof it[k] === 'string') bits.push(it[k]);
+    return bits.join(' · ');
+  };
+  const allText = pages.map((p) => (Array.isArray(p.sections) ? p.sections : []).map(textOf).join(' · ')).join(' · ');
+  if (allText.trim()) {
+    if (!result.telephone) {
+      // global scan; require ≥8 digits so time ranges/prices never qualify, prefer international/0-led
+      const cands = (allText.match(new RegExp(PHONE_RE.source, 'g')) || [])
+        .filter((c) => c.replace(/\D/g, '').length >= 8)
+        .sort((a, b) => Number(/^[+0]/.test(b.trim())) - Number(/^[+0]/.test(a.trim())));
+      if (cands.length) result.telephone = cands[0].replace(/\s+/g, ' ').trim().slice(0, 30);
+    }
+    if (!result.email) {
+      const m = EMAIL_RE.exec(allText);
+      if (m) result.email = m[1];
+    }
+    if (!result.openingHours) {
+      const specs = parseHoursValue(allText);
+      if (specs.length) result.openingHours = specs;
+    }
+    if (!result.address) {
+      // Italian street shapes only ("Via Toledo 15", optionally ", (a) Napoli") — conservative on purpose
+      const am = /\b((?:via|viale|piazza|piazzale|corso|vico|largo)\s+[A-ZÀ-Ù][\wÀ-ù'. ]{1,40}?\s+\d{1,4})\b(?:\s*,\s*(?:a\s+)?([A-ZÀ-Ù][\wÀ-ù' ]{2,30}?))?(?=[\s,.—–-]|$)/i.exec(allText);
+      if (am) {
+        const street = am[1].replace(/\s+/g, ' ').trim();
+        const city = am[2] ? am[2].replace(/\s+/g, ' ').trim() : undefined;
+        result.address = clean({ '@type': 'PostalAddress', streetAddress: street.charAt(0).toUpperCase() + street.slice(1), addressLocality: city });
+      }
+    }
   }
 
   return result;

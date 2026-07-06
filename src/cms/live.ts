@@ -4,6 +4,7 @@
 // projects (the caller then serves the static file as before).
 import pg from 'pg';
 import { renderPage, formPageSlug, receiptsEnabled } from '../render.ts';
+import { extractBusinessFacts } from '../jsonld.ts';
 import { processMedia } from '../media.ts';
 import { brandFor } from './util.ts';
 import { SITES } from '../verify.ts';
@@ -36,7 +37,7 @@ export async function renderLiveFromCms(pool: pg.Pool, projectId: string, slug: 
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: row.sections };
   // M2: pass the schema snapshot — without it a typed form silently degrades to the contact fallback
   const sf = params.schema_forms || {};
-  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  let html = renderPage(spec, { pages: navPages, slug, title: row.title, projectId, theme: params.theme || 'modern', layout: params.layout, forms: sf.forms, primaryTable: sf.primaryTable, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   try { html = await processMedia(html, new URL(projectId + '/', SITES)); } catch { /* image-light or no key */ }
   return `<!--relay:cms=directus LIVE doc=${row.id} (rendered from CMS on request)-->\n` + html;
 }
@@ -66,7 +67,7 @@ export async function renderLivePdp(pool: pg.Pool, projectId: string, productId:
   const title = String(row.title || row.name || 'Product #' + productId);
   const variants = await appdb.productVariants(pool, projectId, productId);   // PQ2 · options picker
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'product', row, back, cartSlug: isStore ? cartPage?.slug : undefined, variants, store: isStore }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  const html = renderPage(spec, { pages: navPages, slug: 'product-' + productId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   return `<!--relay:cms=directus LIVE pdp=${productId} (rendered from the live product row on request)-->\n` + html;
 }
 
@@ -94,7 +95,7 @@ export async function renderLivePost(pool: pg.Pool, projectId: string, postId: n
   const back = withBlog ? { slug: withBlog.slug, title: withBlog.title } : navPages[0];
   const title = String(row.title || row.name || row.headline || 'Post #' + postId);
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'article', row, back, label: singular(table) }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'post-' + postId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  const html = renderPage(spec, { pages: navPages, slug: 'post-' + postId, title, projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   return `<!--relay:cms=directus LIVE post=${postId} (rendered from the live article row on request)-->\n` + html;
 }
 
@@ -124,7 +125,7 @@ export async function renderLiveReceipt(pool: pg.Pool, projectId: string, table:
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [
     { type: 'record', row: rows[0], refCode: token, back, findSlug: 'find', findTitle: L(params.locale, 'find_my_booking'), eyebrow: L(params.locale, 'receipt_dyn_eyebrow', { x: singular(table) }), title: L(params.locale, 'receipt_dyn_title', { x: singular(table).toLowerCase() }), payinfo,
       cancel: cancelState !== 'none' ? { state: cancelState, table, ref: token, thing: singular(table).toLowerCase() } : null }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'receipt', title: L(params.locale, 'receipt_dyn_title', { x: singular(table).toLowerCase() }), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  const html = renderPage(spec, { pages: navPages, slug: 'receipt', title: L(params.locale, 'receipt_dyn_title', { x: singular(table).toLowerCase() }), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   return `<!--relay:cms=directus LIVE receipt (rendered from the visitor's own row on request)-->\n` + html;
 }
 
@@ -138,7 +139,7 @@ export async function renderLiveFind(pool: pg.Pool, projectId: string): Promise<
   if (!['app', 'store'].includes(String(params.archetype))) return null;
   const navPages = params.site.pages.map((p: any) => ({ slug: p.slug, title: p.title }));
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections: [{ type: 'find', title: 'Find my booking' }] };
-  const html = renderPage(spec, { pages: navPages, slug: 'find', title: L(params.locale, 'find_my_booking'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  const html = renderPage(spec, { pages: navPages, slug: 'find', title: L(params.locale, 'find_my_booking'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   return `<!--relay:cms=directus LIVE find (system page)-->\n` + html;
 }
 
@@ -230,7 +231,7 @@ export async function renderLiveChain(pool: pg.Pool, projectId: string): Promise
     })(),
   }];
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections };
-  const html = renderPage(spec, { pages: navPages, slug: 'how-it-was-built', title: L(params.locale, 'chain_link'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  const html = renderPage(spec, { pages: navPages, slug: 'how-it-was-built', title: L(params.locale, 'chain_link'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   return `<!--relay:cms=directus LIVE chain (the production record, rendered from the pipeline's own database)-->\n` + html;
 }
 
@@ -252,6 +253,6 @@ export async function renderLiveAccount(pool: pg.Pool, projectId: string, visito
     sections = [{ type: 'records', title: L(params.locale, 'my_bookings'), email: visitor.email, items }];
   }
   const spec = { brand: params.brand || params.site.brand || brandFor(params.site), sections };
-  const html = renderPage(spec, { pages: navPages, slug: 'account', title: visitor ? L(params.locale, 'my_bookings') : L(params.locale, 'sign_in'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType });
+  const html = renderPage(spec, { pages: navPages, slug: 'account', title: visitor ? L(params.locale, 'my_bookings') : L(params.locale, 'sign_in'), projectId, theme: params.theme || 'modern', layout: params.layout, formSlug: formPageSlug(params.site), accountLinks: receiptsEnabled(params.site), locale: params.locale, siteBase: params.slug ? 'https://'+params.slug+'.naples.agency' : undefined, localBusiness: !!params.localBusiness, bizType: params.bizType, bizFacts: extractBusinessFacts(params.site) });
   return `<!--relay:cms=directus LIVE account (system page)-->\n` + html;
 }

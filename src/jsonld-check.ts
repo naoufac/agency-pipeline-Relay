@@ -223,5 +223,27 @@ const restBlock = bizFactsLd.find((x: any) => x['@type'] === 'Restaurant');
 ok('render home: telephone from brand.phone ends up in LocalBusiness block', restBlock && typeof restBlock.telephone === 'string' && restBlock.telephone.length > 0, JSON.stringify(restBlock));
 ok('render home: email from brand.email ends up in LocalBusiness block', restBlock && restBlock.email === 'ciao@vito.it', JSON.stringify(restBlock));
 
+// ---- LIVE-CAUGHT 2026-07-06: facts live in PROSE on the CONTACT page, not structured fields ----
+{
+  const realSite = { brand: { name: 'Studio Legale Marchetti' }, pages: [
+    { slug: 'index', sections: [{ type: 'hero', headline: 'Tutela legale' }] },
+    { slug: 'contact', sections: [{ type: 'split', body: 'Telefono: +39 081 555 2200. Email: segreteria@studiolegalemarchetti.it. Orari: lunedì-venerdì, 9:00-18:00. Lo studio si trova in Via Toledo 15, a Napoli — a due passi dalla fermata.' }] },
+  ]};
+  const rf = extractBusinessFacts(realSite);
+  ok('free-text: telephone found in contact-page prose', rf.telephone === '+39 081 555 2200', JSON.stringify(rf.telephone));
+  ok('free-text: email found in prose', rf.email === 'segreteria@studiolegalemarchetti.it', JSON.stringify(rf.email));
+  ok('free-text: full Italian day names + comma shape parse to Mon-Fri specs', Array.isArray(rf.openingHours) && rf.openingHours.length === 5
+    && rf.openingHours[0].opens === '09:00' && rf.openingHours[0].closes === '18:00', JSON.stringify(rf.openingHours || []).slice(0, 120));
+  ok('free-text: Italian street address extracted conservatively', rf.address && rf.address.streetAddress === 'Via Toledo 15' && rf.address.addressLocality === 'Napoli', JSON.stringify(rf.address));
+  // a time range alone must NEVER become a telephone (>=8 digit floor)
+  const noPhone = extractBusinessFacts({ pages: [{ slug: 'index', sections: [{ type: 'split', body: 'Aperti 9:00-18:00 tutti i giorni.' }] }] });
+  ok('free-text: a bare time range never becomes a telephone', !noPhone.telephone, JSON.stringify(noPhone));
+  // renderPage PREFERS ctx.bizFacts (whole-site extraction) over the single-page proxy
+  const homeHtml = renderPage({ brand: { name: 'Marchetti' }, sections: [{ type: 'hero', headline: 'x' }] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', theme: 'editorial', siteBase: 'https://x.naples.agency', bizType: 'LegalService', bizFacts: rf });
+  ok('renderPage: ctx.bizFacts lands in the home LD (telephone visible)', homeHtml.includes('+39 081 555 2200'));
+  ok('renderPage: ctx.bizFacts hours land in the home LD', homeHtml.includes('OpeningHoursSpecification'));
+}
+
 console.log(`\njsonld:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

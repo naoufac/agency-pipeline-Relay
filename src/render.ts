@@ -29,7 +29,7 @@ export const formPageSlug = (site: any): string | undefined =>
 export const receiptsEnabled = (site: any): boolean =>
   ((site && site.pages) || []).some((p: any) => (p.sections || []).some((s: any) => s && s.type === 'form' && typeof s.table === 'string' && PRIVATE_READ.test(s.table)));
 
-export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string; accountLinks?: boolean; locale?: string; siteBase?: string; localBusiness?: boolean; bizType?: string }): string {
+export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: string; projectId?: string; theme?: string; layout?: Layout; forms?: Record<string, any[]>; primaryTable?: string; formSlug?: string; accountLinks?: boolean; locale?: string; siteBase?: string; localBusiness?: boolean; bizType?: string; bizFacts?: any }): string {
   // LAYOUT (structure) is chosen once per project (params.layout) and passed here; a stray value falls
   // back to the safe default. Independent of THEME (tokens) — together they make sites distinct.
   const lay: Layout = (ctx.layout && isHeroVariant(ctx.layout.hero)) ? ctx.layout : DEFAULT_LAYOUT;
@@ -124,12 +124,17 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     // when provided; fall back to the old boolean flag for back-compat with existing tests/live renders
     // that haven't migrated to bizType yet.
     const bt = ctx.bizType || (ctx.localBusiness ? 'LocalBusiness' : 'Organization');
-    // ARC G: extract telephone/email/address/openingHours from the page spec's brand + sections.
-    // extractBusinessFacts() expects a site-model-shaped object; we build a lightweight proxy from
-    // what renderPage already has — brand fields (spec.brand) + this page's sections — which covers
-    // the data the home page carries (contact info is almost always on the home page or in the brand).
-    const facts = extractBusinessFacts({ brand: spec && spec.brand, pages: [{ sections: (spec && spec.sections) || [] }] });
-    ld.push(organizationLd({ name: brand, base: ctx.siteBase, logo: 'icon-512.png', bizType: bt, ...facts }));
+    // ARC G: telephone/email/address/openingHours enrich the home-page business block.
+    // PREFER ctx.bizFacts — extracted by the CALLER from the WHOLE site model — because renderPage
+    // only sees THIS page's sections and contact facts usually live on the contact page (live-caught
+    // 2026-07-06: home LD shipped bare while every fact sat in contact.html). The single-page proxy
+    // remains as the fallback for fixtures/legacy callers.
+    const facts = (ctx.bizFacts && typeof ctx.bizFacts === 'object') ? ctx.bizFacts
+      : extractBusinessFacts({ brand: spec && spec.brand, pages: [{ sections: (spec && spec.sections) || [] }] });
+    // EXPLICIT field mapping — the extractor speaks 'openingHours', organizationLd speaks
+    // 'openingHoursSpecification'; a blind spread silently drops the hours (gate-caught).
+    ld.push(organizationLd({ name: brand, base: ctx.siteBase, logo: 'icon-512.png', bizType: bt,
+      telephone: facts.telephone, email: facts.email, address: facts.address, openingHoursSpecification: facts.openingHours }));
     ld.push(websiteLd({ name: brand, base: ctx.siteBase }));
   }
   const prodSec = ((spec && spec.sections) || []).find((s: any) => s && s.type === 'product' && s.row && typeof s.row === 'object');

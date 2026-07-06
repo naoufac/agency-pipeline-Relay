@@ -13,7 +13,7 @@ import { DS_CSS_BODY, dsCssHash } from './components.ts';
 import { isQuotaExhausted } from './agents.ts';
 import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, modelHasCore, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
-import { bizTypeFor } from './jsonld.ts';
+import { bizTypeFor, extractBusinessFacts } from './jsonld.ts';
 import { ensurePwaAssets } from './pwa.ts';
 import { sitemapXml, robotsTxt } from './seo.ts';
 import * as appdb from './appdb.ts';
@@ -160,7 +160,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       applyBrand(spec, canon);                                          // FORCE the one identity onto the projection
       mkdirSync(fileURLToPath(dir), { recursive: true });
       const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType });
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType, bizFacts: extractBusinessFacts((ctx as any).site) });
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));   // rendered page -> served file (CMS-native serving replaces the old edit-overlay; src/cms.ts removed)
       // ARC C: write the per-site external DS CSS file (idempotent — same hash = same content every time).
       // The assets/ subdir is created here; renderPage already emitted the matching href via dsCssHash().
@@ -260,7 +260,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
           applyBrand(spec, canon);
           const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
-          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType });
+          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType, bizFacts: extractBusinessFacts((ctx as any).site) });
           writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));
           // ARC C: write the external DS CSS file alongside the legacy build artifact (same logic as render dept)
           try {
