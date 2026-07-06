@@ -175,9 +175,12 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       // PWA: every produced site ships manifest + offline shell + brand icons (compiled from the
       // locked brand; icons painted once). A failure here must not fail the page render itself.
       try { await ensurePwaAssets(dir, canon, task.project_id); } catch (e: any) { await ev(pool, task.project_id, task.id, 'pwa_assets_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {}); }
-      // SEO: sitemap + robots per site — deterministic, from the composed page list
+      // SEO: sitemap + robots per site — deterministic, from the composed page list.
+      // The build date is stamped ONCE at the build boundary (here) — the pure sitemapXml builder
+      // receives it as an injected parameter so it stays testable without a real clock read.
       try {
-        writeFileSync(fileURLToPath(new URL('sitemap.xml', dir)), sitemapXml(task.project_id, ctx.pages || [], (ctx as any).siteSlug));
+        const buildDate = new Date().toISOString();
+        writeFileSync(fileURLToPath(new URL('sitemap.xml', dir)), sitemapXml(task.project_id, ctx.pages || [], (ctx as any).siteSlug, buildDate));
         writeFileSync(fileURLToPath(new URL('robots.txt', dir)), robotsTxt(task.project_id, (ctx as any).siteSlug));
       } catch {}
       content = JSON.stringify(page);

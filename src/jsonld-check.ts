@@ -2,7 +2,8 @@
 // injects the right types per page (Organization+WebSite on home, Product on a product page, Breadcrumb
 // on inner pages), values are injection-safe, local-business classification is deterministic, and
 // archetype-specific @types (Restaurant, Dentist, HairSalon, …) are emitted correctly.
-import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, isLocalBusiness, bizTypeFor } from './jsonld.ts';
+import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, faqPageLd, extractBusinessFacts, isLocalBusiness, bizTypeFor } from './jsonld.ts';
+import { sitemapXml } from './seo.ts';
 import { renderPage } from './render.ts';
 
 let pass = 0, fail = 0;
@@ -131,6 +132,96 @@ ok('buildImgTag: class attribute carried through', lazyTag.includes('class="hero
 
 ok('live.ts threads params.bizType into every renderPage call (live pages emit the specific @type, not generic LocalBusiness)',
   (liveSrc.match(/bizType: params\.bizType/g) || []).length >= 7);
+
+// ---- ARC G: extractBusinessFacts fixtures ----
+// Happy-path: brand carries phone + email + address + hours
+const siteWithAll = {
+  brand: { phone: '+39 081 123 4567', email: 'info@davito.it', address: { streetAddress: 'Via Roma 1', addressLocality: 'Napoli', addressCountry: 'IT' }, hours: 'Mon-Fri 9:00-17:00, Sat 10:00-14:00' },
+  pages: [],
+};
+const factsAll = extractBusinessFacts(siteWithAll);
+ok('extractBusinessFacts: telephone found in brand.phone', typeof factsAll.telephone === 'string' && factsAll.telephone.length > 0, JSON.stringify(factsAll));
+ok('extractBusinessFacts: email found in brand.email', factsAll.email === 'info@davito.it', JSON.stringify(factsAll));
+ok('extractBusinessFacts: address PostalAddress built from brand.address object', factsAll.address && factsAll.address['@type'] === 'PostalAddress' && factsAll.address.streetAddress === 'Via Roma 1' && factsAll.address.addressLocality === 'Napoli', JSON.stringify(factsAll));
+ok('extractBusinessFacts: openingHours parsed Mon-Fri 9-17 + Sat 10-14', Array.isArray(factsAll.openingHours) && factsAll.openingHours.length >= 6, JSON.stringify(factsAll));
+ok('extractBusinessFacts: Mon spec has opens=09:00 closes=17:00', (factsAll.openingHours || []).some((s: any) => s.dayOfWeek === 'https://schema.org/Monday' && s.opens === '09:00' && s.closes === '17:00'), JSON.stringify(factsAll));
+ok('extractBusinessFacts: Sat spec has opens=10:00 closes=14:00', (factsAll.openingHours || []).some((s: any) => s.dayOfWeek === 'https://schema.org/Saturday' && s.opens === '10:00' && s.closes === '14:00'), JSON.stringify(factsAll));
+
+// Italian day names ("Lun–Ven")
+const siteItalian = {
+  brand: { hours: 'Lun–Ven 9–18, Sab 10–22' },
+  pages: [],
+};
+const factsIt = extractBusinessFacts(siteItalian);
+ok('extractBusinessFacts: Italian hours Lun–Ven parses Monday through Friday', (factsIt.openingHours || []).some((s: any) => s.dayOfWeek === 'https://schema.org/Monday' && s.opens === '09:00' && s.closes === '18:00') && (factsIt.openingHours || []).some((s: any) => s.dayOfWeek === 'https://schema.org/Friday'), JSON.stringify(factsIt));
+ok('extractBusinessFacts: Italian Sab parses Saturday', (factsIt.openingHours || []).some((s: any) => s.dayOfWeek === 'https://schema.org/Saturday' && s.opens === '10:00' && s.closes === '22:00'), JSON.stringify(factsIt));
+
+// Absent data → absent fields (gate: no invented values)
+const factsEmpty = extractBusinessFacts({ brand: {}, pages: [] });
+ok('extractBusinessFacts: absent data yields no telephone', factsEmpty.telephone === undefined, JSON.stringify(factsEmpty));
+ok('extractBusinessFacts: absent data yields no email', factsEmpty.email === undefined, JSON.stringify(factsEmpty));
+ok('extractBusinessFacts: absent data yields no address', factsEmpty.address === undefined, JSON.stringify(factsEmpty));
+ok('extractBusinessFacts: absent data yields no openingHours', factsEmpty.openingHours === undefined, JSON.stringify(factsEmpty));
+ok('extractBusinessFacts: null/missing site → empty result (no throw)', JSON.stringify(extractBusinessFacts(null)) === '{}' && JSON.stringify(extractBusinessFacts(undefined)) === '{}');
+
+// Hostile strings: a phone/email that contains </script> must still be escaped safely when emitted
+const siteHostile = {
+  brand: { phone: '+39 081</script><script>alert(1)', email: 'x@y.z' },
+  pages: [],
+};
+const factsHostile = extractBusinessFacts(siteHostile);
+// the raw string is extracted (escaping happens in ldScript), so check it doesn't invent weird values
+ok('extractBusinessFacts: hostile phone string extracted (ldScript does the escaping)', typeof factsHostile.telephone === 'string');
+const hostileOrg = organizationLd({ name: 'X', base, telephone: factsHostile.telephone });
+const hostileScript = ldScript(hostileOrg);
+ok('ldScript escapes hostile phone value in org block', !hostileScript.includes('</script><script>'));
+
+// Flat street string → PostalAddress
+const siteStr = { brand: { address: 'Via Caracciolo 10, Napoli' }, pages: [] };
+const factsStr = extractBusinessFacts(siteStr);
+ok('extractBusinessFacts: flat "street, city" string → PostalAddress with street + city', factsStr.address && factsStr.address.streetAddress === 'Via Caracciolo 10' && factsStr.address.addressLocality === 'Napoli', JSON.stringify(factsStr));
+
+// ---- ARC G: FAQPage ----
+const faqItems = [{ q: 'What are your hours?', a: 'Mon-Fri 9am-5pm.' }, { q: 'Do you take cards?', a: 'Yes, all major cards.' }];
+const faqLd = faqPageLd(faqItems);
+ok('faqPageLd: emits @type=FAQPage with 2 questions', faqLd && faqLd['@type'] === 'FAQPage' && Array.isArray(faqLd.mainEntity) && faqLd.mainEntity.length === 2, JSON.stringify(faqLd));
+ok('faqPageLd: each entity is @type=Question with acceptedAnswer', faqLd && faqLd.mainEntity.every((e: any) => e['@type'] === 'Question' && e.acceptedAnswer && e.acceptedAnswer['@type'] === 'Answer'));
+ok('faqPageLd: returns null on empty items', faqPageLd([]) === null);
+ok('faqPageLd: returns null when items have no q/a content', faqPageLd([{ q: '', a: '' } as any]) === null);
+
+// Renderer emits FAQPage on a page with faq section
+const faqPage = renderPage(
+  { brand: { name: 'Acme', tokens: { bg: '#fff', primary: '#111' } }, sections: [{ type: 'hero', headline: 'Welcome' }, { type: 'faq', title: 'FAQ', items: [{ q: 'Do you deliver?', a: 'Yes, nationwide.' }, { q: 'Returns policy?', a: '30 days.' }] }] },
+  { pages, slug: 'index', title: 'Home', theme: 'modern', siteBase: base, localBusiness: true });
+const faqPageLdBlocks = parseLd(faqPage);
+ok('render: FAQPage emitted when faq section has 2 items', faqPageLdBlocks.some((x: any) => x['@type'] === 'FAQPage' && x.mainEntity?.length === 2), JSON.stringify(faqPageLdBlocks.map((x: any) => x['@type'])));
+ok('render: FAQPage question text matches section item', faqPageLdBlocks.some((x: any) => x['@type'] === 'FAQPage' && x.mainEntity?.some((e: any) => e.name === 'Do you deliver?')), JSON.stringify(faqPageLdBlocks));
+
+// No FAQPage when faq section has no items
+const noFaqPage = renderPage(
+  { brand: { name: 'Acme', tokens: { bg: '#fff', primary: '#111' } }, sections: [{ type: 'hero', headline: 'Hi' }] },
+  { pages, slug: 'index', title: 'Home', theme: 'modern', siteBase: base });
+const noFaqLdBlocks = parseLd(noFaqPage);
+ok('render: NO FAQPage when no faq section', !noFaqLdBlocks.some((x: any) => x['@type'] === 'FAQPage'));
+
+// ---- ARC G: sitemap lastmod ----
+const sm = sitemapXml('proj-1', [{ slug: 'index' }, { slug: 'about' }], 'mysite', '2026-07-06T12:00:00.000Z');
+ok('sitemapXml: lastmod element present when buildDate supplied', sm.includes('<lastmod>2026-07-06</lastmod>'), sm.slice(0, 500));
+ok('sitemapXml: only date portion in lastmod (no time component)', !sm.includes('T12:00'));
+ok('sitemapXml: all URL entries have lastmod', (sm.match(/<lastmod>/g) || []).length === (sm.match(/<loc>/g) || []).length, sm.slice(0, 500));
+const smNoDate = sitemapXml('proj-2', [{ slug: 'index' }], undefined, undefined);
+ok('sitemapXml: lastmod omitted when buildDate absent', !smNoDate.includes('<lastmod>'));
+const smBadDate = sitemapXml('proj-3', [{ slug: 'index' }], undefined, 'not-a-date');
+ok('sitemapXml: lastmod omitted when buildDate invalid', !smBadDate.includes('<lastmod>'));
+
+// ---- ARC G: render home emits business facts in LocalBusiness block ----
+const bizFactsHome = renderPage(
+  { brand: { name: 'Trattoria Vito', tokens: { bg: '#fff', primary: '#111' }, phone: '+39 06 9999999', email: 'ciao@vito.it' }, sections: [{ type: 'hero', headline: 'La Cucina' }] },
+  { pages, slug: 'index', title: 'Home', theme: 'modern', siteBase: base, localBusiness: true, bizType: 'Restaurant' });
+const bizFactsLd = parseLd(bizFactsHome);
+const restBlock = bizFactsLd.find((x: any) => x['@type'] === 'Restaurant');
+ok('render home: telephone from brand.phone ends up in LocalBusiness block', restBlock && typeof restBlock.telephone === 'string' && restBlock.telephone.length > 0, JSON.stringify(restBlock));
+ok('render home: email from brand.email ends up in LocalBusiness block', restBlock && restBlock.email === 'ciao@vito.it', JSON.stringify(restBlock));
 
 console.log(`\njsonld:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

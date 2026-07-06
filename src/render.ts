@@ -9,7 +9,7 @@ import { DEFAULT_LAYOUT, isHeroVariant, isCardVariant, type Layout } from './lay
 import { PRIVATE_READ } from './schema.ts';
 import { metaDescription } from './seo.ts';
 import { designTypeVars, fontLink, hasDesign } from './design.ts';
-import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, bizTypeFor } from './jsonld.ts';
+import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, faqPageLd, extractBusinessFacts, bizTypeFor } from './jsonld.ts';
 
 const isHex = (v: any) => typeof v === 'string' && /^#[0-9a-f]{3,8}$/i.test(v.trim());
 function rgb(h: string) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -124,7 +124,12 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     // when provided; fall back to the old boolean flag for back-compat with existing tests/live renders
     // that haven't migrated to bizType yet.
     const bt = ctx.bizType || (ctx.localBusiness ? 'LocalBusiness' : 'Organization');
-    ld.push(organizationLd({ name: brand, base: ctx.siteBase, logo: 'icon-512.png', bizType: bt }));
+    // ARC G: extract telephone/email/address/openingHours from the page spec's brand + sections.
+    // extractBusinessFacts() expects a site-model-shaped object; we build a lightweight proxy from
+    // what renderPage already has — brand fields (spec.brand) + this page's sections — which covers
+    // the data the home page carries (contact info is almost always on the home page or in the brand).
+    const facts = extractBusinessFacts({ brand: spec && spec.brand, pages: [{ sections: (spec && spec.sections) || [] }] });
+    ld.push(organizationLd({ name: brand, base: ctx.siteBase, logo: 'icon-512.png', bizType: bt, ...facts }));
     ld.push(websiteLd({ name: brand, base: ctx.siteBase }));
   }
   const prodSec = ((spec && spec.sections) || []).find((s: any) => s && s.type === 'product' && s.row && typeof s.row === 'object');
@@ -141,6 +146,13 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     const bodyKey = ['excerpt', 'summary', 'body', 'content', 'text'].find((k) => typeof r[k] === 'string' && r[k].trim());
     const author = ['author', 'author_name', 'byline', 'writer'].map((k) => r[k]).find((v) => typeof v === 'string' && v.trim());
     ld.push(articleLd({ headline: String(r.title || r.name || r.headline || ctx.title), image: img ? r[img] : undefined, datePublished: r.published_at || r.date || r.created_at, author: author as string, description: bodyKey ? r[bodyKey] : undefined, base: ctx.siteBase, url: ctx.slug + '.html', publisher: brand }));
+  }
+  // ARC G: FAQ schema — when this page has a 'faq' section with items, emit a FAQPage block.
+  // Only emitted on pages that HAVE a faq section; Google indexes the Q&A for "People also ask".
+  const faqSec = ((spec && spec.sections) || []).find((s: any) => s && s.type === 'faq' && Array.isArray(s.items));
+  if (faqSec) {
+    const faqLd = faqPageLd(faqSec.items);
+    if (faqLd) ld.push(faqLd);
   }
   const bc = breadcrumbLd({ pages: ctx.pages || [], slug: ctx.slug, title: ctx.title, base: ctx.siteBase });
   if (bc && !isHome) ld.push(bc);
