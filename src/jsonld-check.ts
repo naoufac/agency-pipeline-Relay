@@ -129,5 +129,8 @@ ok('buildImgTag: hero uses sizes=100vw', eagerTag.includes('sizes="100vw"'));
 ok('buildImgTag: non-hero uses sizes with 33vw breakpoint', lazyTag.includes('33vw'));
 ok('buildImgTag: class attribute carried through', lazyTag.includes('class="hero-bg"'));
 
+ok('live.ts threads params.bizType into every renderPage call (live pages emit the specific @type, not generic LocalBusiness)',
+  (liveSrc.match(/bizType: params\.bizType/g) || []).length >= 7);
+
 console.log(`\njsonld:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
