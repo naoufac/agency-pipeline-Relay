@@ -1240,3 +1240,18 @@ Full check (22 suites) green. Shipped 97a499a.
 TO GO LIVE: operator sets FIGMA_TOKEN in /srv/relay/.env (a Figma personal access token) + the owner
 pastes a file URL. Everything else is built, gated, deployed. The mapping is the only non-trivial part
 and it's proven; the HTTP is a thin wrapper.
+
+## 2026-07-06 — Figma connector audit: 5 findings on untrusted-file parsing, all fixed
+
+Adversarial audit (3 lenses) of the Figma connector before it goes live with a real token. The
+recursion-crash worry was correctly REFUTED (the endpoint try/catch contains a RangeError). 5 real:
+· HIGH: figmaFetchFile buffered the whole file via res.json() (Figma files are tens of MB → OOM). Now
+  a bounded streaming read — 12MB cap, aborts past it, content-length pre-check; figma-too-large → a
+  clear message.
+· HIGH: rgbaToHex dropped alpha → a translucent fill shipped as a wrong opaque colour. Now composited
+  over white (50% black → #808080).
+· MED: heading pick took the first name-match — a tiny 'Heading/Caption' beat a 48px 'Display'. Now the
+  LARGEST heading-named style wins.
+· MED: first-wins colour ignored per-instance overrides. Now the MODE colour across all binding nodes.
+· LOW: 'Text/Background' misclassified as text. Now classified on the leaf segment → background.
+figma:check 13→18 (realistic file fixtures). Full check (22 suites) green. Shipped 3b6ff27.
