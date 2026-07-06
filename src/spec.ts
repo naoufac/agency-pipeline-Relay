@@ -11,7 +11,12 @@
 import { PRIVATE_READ } from './schema.ts';   // FS0: visitor-record tables are never publicly rendered
 import { isTheme, paletteFor } from './themes.ts';   // PQ1: brand palettes come from the theme pool, never LLM whim
 
-export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; actionTable?: string };
+// T14 — compose context: when normalizeSite calls normalizeSpec for each composed page the brand is
+// INTENTIONALLY absent (compose uses {{brand}} tokens, substituted deterministically at render by the
+// locked params.brand.name). Adding noBrandWarn suppresses the "brand.name missing -> Studio" repair
+// in that path — the repair is still emitted (and the Studio default still applies) for the LEGACY
+// single-page build path where a brand IS expected and a missing one is a real gap to flag.
+export type SpecCtx = { slug?: string; tables?: string[]; forms?: Record<string, any[]>; primaryTable?: string; actionTable?: string; noBrandWarn?: boolean };
 
 // FS4 — a data-archetype model must contain the app's CORE: at least one real, fillable entity
 // beyond identity plumbing (users/clients/accounts/sessions). Truncation once ate 'deliveries' and
@@ -607,7 +612,9 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     const composed = bySlug.get(pg.slug.toLowerCase())
       || rawPages.find((p: any) => str(p.title).toLowerCase() === pg.title.toLowerCase());
     if (!composed) { errors.push(`page "${pg.slug}" missing from the composed site model`); continue; }
-    const { spec, repairs: r, errors: e } = normalizeSpec({ sections: composed.sections }, { slug: pg.slug, tables: base.tables, forms: base.forms, primaryTable: base.primaryTable, actionTable: base.actionTable });
+    // T14: brand is intentionally absent from composed sections ({{brand}} tokens, not a real name) —
+    // suppress the "brand.name missing -> Studio" repair so the compose log is not flooded with false alarms.
+    const { spec, repairs: r, errors: e } = normalizeSpec({ sections: composed.sections }, { slug: pg.slug, tables: base.tables, forms: base.forms, primaryTable: base.primaryTable, actionTable: base.actionTable, noBrandWarn: true });
     for (const x of r) repairs.push(`${pg.slug}: ${x}`);
     if (e.length) { errors.push(`page "${pg.slug}": ${e.join('; ')}`); continue; }
     out.push({ slug: pg.slug, title: pg.title, sections: spec.sections });
@@ -667,7 +674,10 @@ export function normalizeSpec(raw: any, ctx: SpecCtx = {}): SpecResult {
 
   // ---- brand ----
   const brand: any = (raw.brand && typeof raw.brand === 'object' && !Array.isArray(raw.brand)) ? raw.brand : {};
-  if (!nonEmpty(brand.name)) { brand.name = 'Studio'; repairs.push('brand.name missing -> "Studio"'); } else brand.name = str(brand.name);
+  // T14: suppress the repair noise in the compose context — brand is INTENTIONALLY absent there;
+  // {{brand}} tokens are substituted by the locked params.brand.name at render. Only log the repair
+  // (and default to "Studio") in the legacy single-page build path where a missing brand IS a real gap.
+  if (!nonEmpty(brand.name)) { brand.name = 'Studio'; if (!ctx.noBrandWarn) repairs.push('brand.name missing -> "Studio"'); } else brand.name = str(brand.name);
   { const h: any = { cta: brand.cta, link: brand.ctaLink }; normCta(h); if (h.cta) { brand.cta = h.cta; if (h.link != null) brand.ctaLink = h.link; } else delete brand.cta; }
   if (!brand.tokens || typeof brand.tokens !== 'object' || Array.isArray(brand.tokens)) brand.tokens = {};  // render derives the WCAG-safe palette from whatever's here
 

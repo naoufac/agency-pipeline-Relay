@@ -596,5 +596,25 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('funnel: kpi.ts exports funnelToKpis()', typeof kpiMod.funnelToKpis === 'function');
 }
 
+// ---- T14 behavioral: noBrandWarn suppresses the "brand.name missing" repair in compose path ----
+// compose sections never carry a brand ({{brand}} token is substituted at render); the repair must
+// fire for the LEGACY build path (brand IS expected there) but stay silent for compose.
+{
+  // compose path: noBrandWarn=true → repair list must NOT contain "brand.name missing"
+  const noWarn = normalizeSpec({ sections: [hero('Welcome to {{brand}}'), { type: 'features', items: [{ title: 'A', body: 'b' }] }] }, { noBrandWarn: true });
+  ok('T14: noBrandWarn=true suppresses brand.name missing repair (compose path)', !noWarn.repairs.some((x) => /brand\.name missing/.test(x)));
+  ok('T14: noBrandWarn=true still defaults brand.name to Studio (rendering still works)', noWarn.spec.brand.name === 'Studio');
+  // legacy build path: noBrandWarn unset → repair still fires (this is a real gap for the build dept)
+  const withWarn = normalizeSpec({ sections: [hero('Welcome'), { type: 'features', items: [{ title: 'A', body: 'b' }] }] });
+  ok('T14: noBrandWarn absent → brand.name missing repair fires (legacy build path still guarded)', withWarn.repairs.some((x) => /brand\.name missing/.test(x)));
+  // normalizeSite: the compose path MUST NOT produce brand.name repairs in the aggregate repair list
+  const composeModel = { pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Welcome to {{brand}}' }, { type: 'features', items: [{ title: 'Speed', body: 'Delivered in under an hour' }] }] },
+    { slug: 'about', title: 'About', sections: [{ type: 'hero', headline: 'About {{brand}}' }, { type: 'split', title: 'Our story', body: 'We started in 2019 with three couriers.' }] },
+  ] };
+  const siteR = normalizeSite(composeModel, [{ slug: 'index', title: 'Home' }, { slug: 'about', title: 'About' }], {});
+  ok('T14: normalizeSite compose path produces ZERO brand.name missing repairs', !siteR.repairs.some((x) => /brand\.name missing/.test(x)), JSON.stringify(siteR.repairs));
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
