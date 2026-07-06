@@ -185,6 +185,12 @@ function categoryXml(projectId: string, name: string, langId: number): string {
 // Each site page that carries a 'products' section is turned into a PS product. If the
 // brief's brand + page titles are not product-shaped, we fall back to a "site as store" mapping:
 // one product per page entry. This keeps the stub honest about intent.
+//
+// WHY EUR: PrestaShop FR-ecom deployments use EUR as the default currency. PS stores currency
+// associations by id_currency (1 = EUR in a stock PS install with the default FR install set).
+// We set id_currency=1 on all products to force the EUR association at creation time. If the
+// shop's EUR currency has a different id (non-standard install), the product still falls back
+// to the shop default — the field is advisory, not a hard constraint.
 
 interface PsProductSpec {
   name: string;
@@ -192,15 +198,19 @@ interface PsProductSpec {
   price: string;      // decimal string, e.g. '0.000000'
   description: string;
   categoryId: number;
+  imageUrl?: string;  // optional: fetched and attached to the PS product image endpoint
 }
 
 function productXml(spec: PsProductSpec, langId: number): string {
+  // id_currency=1 → EUR in stock PS installs (FR locale, EUR = currency id 1).
+  // WHY: forces EUR at creation time; non-standard installs fall back to shop default.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <prestashop xmlns:xlink="http://www.w3.org/1999/xlink">
   <product>
     <id_category_default>${spec.categoryId}</id_category_default>
     <reference><![CDATA[${xmlEsc(spec.reference)}]]></reference>
     <price>${xmlEsc(spec.price)}</price>
+    <id_currency>1</id_currency>
     <active>1</active>
     <available_for_order>1</available_for_order>
     <show_price>1</show_price>
@@ -215,6 +225,75 @@ function productXml(spec: PsProductSpec, langId: number): string {
     <meta_description><language id="${langId}"><![CDATA[]]></language></meta_description>
   </product>
 </prestashop>`;
+}
+
+// ---------------------------------------------------------------------------
+// Product image attachment (EUR-locale FR-ecom)
+// ---------------------------------------------------------------------------
+// WHY: PS webservice image upload uses multipart/form-data POST to /api/images/products/{id}.
+// The image is sent as the 'image' field. This is the ONLY supported method for adding product
+// images via the webservice — there is no XML field for image_url; PS must receive the raw bytes.
+// We fetch the source URL (from Pexels/Directus media pipeline) then POST the bytes to PS.
+// Failures are best-effort (swallowed): a missing image must never block the product creation.
+//
+// WHY fetch then re-POST vs direct URL reference:
+//   PS webservice does NOT accept image URLs — only raw file uploads. We must proxy the bytes.
+//   The source URL may be a Pexels CDN link that requires no auth, so a plain fetch is safe.
+export async function attachProductImage(
+  baseUrl: string,
+  apiKey: string,
+  productId: number,
+  imageUrl: string,
+): Promise<{ ok: boolean; note: string }> {
+  // Validate inputs defensively — never throw on bad inputs.
+  if (!baseUrl || !apiKey || !productId || !imageUrl) {
+    return { ok: false, note: 'attachProductImage: missing required argument' };
+  }
+  try {
+    // Fetch the remote image bytes. Timeout: 20s (image may be large).
+    const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(20_000) });
+    if (!imgRes.ok) {
+      return { ok: false, note: `image fetch ${imgRes.status} for ${imageUrl.slice(0, 80)}` };
+    }
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+    const bytes = await imgRes.arrayBuffer();
+
+    // Derive a safe filename from the URL (PS requires a filename in the form boundary).
+    const rawName = imageUrl.split('/').pop()?.split('?')[0] || 'product.jpg';
+    const filename = rawName.replace(/[^a-z0-9._-]/gi, '_').slice(0, 60) || 'product.jpg';
+
+    // Build multipart/form-data manually — no external deps.
+    // Boundary must not appear in the image bytes; use a random suffix for safety.
+    const boundary = `----RelayPSBoundary${Math.random().toString(36).slice(2)}`;
+    const header = `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`;
+    const footer = `\r\n--${boundary}--\r\n`;
+
+    const headerBytes = new TextEncoder().encode(header);
+    const footerBytes = new TextEncoder().encode(footer);
+    const body = new Uint8Array(headerBytes.length + bytes.byteLength + footerBytes.length);
+    body.set(headerBytes, 0);
+    body.set(new Uint8Array(bytes), headerBytes.length);
+    body.set(footerBytes, headerBytes.length + bytes.byteLength);
+
+    const uploadRes = await fetch(`${baseUrl}/api/images/products/${productId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: prestaAuthHeader(apiKey),
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body: body,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (uploadRes.ok) {
+      return { ok: true, note: `image:attached(productId=${productId},src=${imageUrl.slice(0, 60)})` };
+    }
+    const errText = await uploadRes.text().catch(() => '');
+    return { ok: false, note: `image:upload-fail(${uploadRes.status}:${errText.slice(0, 80)})` };
+  } catch (e: any) {
+    // Best-effort: never throw — log and continue.
+    return { ok: false, note: `image:error(${String(e?.message ?? e).slice(0, 80)})` };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +322,21 @@ export async function resolveFrLangId(baseUrl: string, apiKey: string): Promise<
 // WHY: we scan every page for 'products'/'services'/'features' sections and build a flat list of
 // PsProductSpec. If no typed product section is found we emit one entry per page (site-as-catalog
 // fallback) so every build produces at least one visible product on the storefront.
+//
+// Image extraction: items in the brief can carry image URLs from the media pipeline (Pexels)
+// under various field names (image, imageUrl, photo, media, src, thumbnail). We pick the first
+// non-empty value and carry it in imageUrl for optional attachment after product creation.
+
+function pickImageUrl(obj: any): string | undefined {
+  // WHY: media pipeline may store image URL under different field names depending on the
+  // section type (product section uses 'image', hero uses 'src', gallery uses 'photo').
+  // Scan common names in preference order; return the first non-empty string found.
+  for (const key of ['imageUrl', 'image', 'photo', 'media', 'src', 'thumbnail', 'img']) {
+    const v = obj?.[key];
+    if (typeof v === 'string' && v.startsWith('http')) return v;
+  }
+  return undefined;
+}
 
 function buildProductSpecs(
   projectId: string,
@@ -264,7 +358,8 @@ function buildProductSpecs(
           const desc = String(item?.desc || item?.description || '').trim();
           const price = String(item?.price || '0.000000');
           const ref = `${prefix}-${String(item?.title || page.slug).toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 32)}`;
-          specs.push({ name, reference: ref, price, description: desc, categoryId });
+          const imageUrl = pickImageUrl(item) ?? pickImageUrl(sec);
+          specs.push({ name, reference: ref, price, description: desc, categoryId, imageUrl });
         }
       }
     } else {
@@ -272,7 +367,9 @@ function buildProductSpecs(
       const name = String(page.title || page.slug).trim();
       const desc = sections.find((s: any) => s?.body)?.body ?? '';
       const ref  = `${prefix}-${String(page.slug).toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 32)}`;
-      specs.push({ name, reference: ref, price: '0.000000', description: String(desc), categoryId });
+      // For the fallback, try to pick an image from any section (hero, banner, etc.).
+      const imageUrl = sections.reduce((found: string | undefined, s: any) => found ?? pickImageUrl(s), undefined);
+      specs.push({ name, reference: ref, price: '0.000000', description: String(desc), categoryId, imageUrl });
     }
   }
 
@@ -363,23 +460,35 @@ async function realProvision(
   const specs = buildProductSpecs(projectId, site, categoryId);
   notes.push(`products-to-provision:${specs.length}`);
 
-  // 3. Upsert each product (idempotent by reference).
+  // 3. Upsert each product (idempotent by reference), then attach image if available.
   const productIds: number[] = [];
+  const imageNotes: string[] = [];
   for (const spec of specs) {
     const existing = await psListIds(baseUrl, apiKey, 'products', { field: 'reference', value: spec.reference });
+    let productId: number | null = null;
     if (existing.length > 0) {
-      productIds.push(existing[0]);
+      productId = existing[0];
+      productIds.push(productId);
       notes.push(`product:reused(${spec.reference.slice(0, 24)})`);
     } else {
       try {
-        const id = await psCreate(baseUrl, apiKey, 'products', productXml(spec, langId));
-        productIds.push(id);
-        notes.push(`product:created(id=${id},ref=${spec.reference.slice(0, 24)})`);
+        productId = await psCreate(baseUrl, apiKey, 'products', productXml(spec, langId));
+        productIds.push(productId);
+        notes.push(`product:created(id=${productId},ref=${spec.reference.slice(0, 24)})`);
       } catch (e: any) {
         notes.push(`product:error(${spec.reference.slice(0, 24)}:${String(e?.message ?? e).slice(0, 60)})`);
       }
     }
+
+    // Attach product image if the spec carries an image URL and we have a valid product id.
+    // WHY: best-effort — image attachment must never block catalog provisioning. Missing or
+    // broken images are logged but swallowed; the product itself is always more important.
+    if (productId && spec.imageUrl) {
+      const imgResult = await attachProductImage(baseUrl, apiKey, productId, spec.imageUrl);
+      imageNotes.push(imgResult.note);
+    }
   }
+  if (imageNotes.length > 0) notes.push(`images:[${imageNotes.join(',')}]`);
 
   // 4. Write proof onto the project params so verify rules can assert it.
   const proof = {
@@ -389,6 +498,7 @@ async function realProvision(
     productIds,
     catRef,
     langId,
+    currency: 'EUR',    // WHY: documents that all products were created with EUR locale intent
     timestamp: new Date().toISOString(),
     ok: true,
   };
