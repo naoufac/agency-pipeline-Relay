@@ -131,5 +131,56 @@ ok('reasoning: MiniMax 2.x fall back to effort:minimal (reasoning is mandatory f
 ok('reasoning: THINK_HEADROOM only when reasoning actually runs (none when fully off)',
   /needHeadroom = isReasoner && !\(reasoning && reasoning\.enabled === false\)/.test(agentsSrc));
 
+// ---- T14 source-pin: brand log is truthful — only warns when the FINAL locked brand is absent ----
+const specSrc = readFileSync(new URL('./spec.ts', import.meta.url), 'utf8');
+ok('T14 brand-log: noBrandWarn flag exists in SpecCtx type', /noBrandWarn\?\s*:\s*boolean/.test(specSrc));
+ok('T14 brand-log: normalizeSpec suppresses repair when noBrandWarn=true', /!ctx\.noBrandWarn/.test(specSrc) && specSrc.includes('brand.name missing'));
+ok('T14 brand-log: normalizeSite passes noBrandWarn:true to normalizeSpec (compose path)',
+  /normalizeSpec\(\s*\{[^}]*composed\.sections[^}]*\}[^)]*noBrandWarn\s*:\s*true/.test(specSrc.replace(/\s+/g, ' ')));
+
+// ---- T15 source-pin: per-department cheap tier is env-driven + does not change default behavior ----
+ok('T15 tiering: OPENROUTER_MODELS_CHEAP env var is consumed', agentsSrc.includes('OPENROUTER_MODELS_CHEAP'));
+ok('T15 tiering: CHEAP_DEPTS set contains policies, design, qa (the short-output departments)',
+  /CHEAP_DEPTS\s*=\s*new Set\([^)]*policies[^)]*\)/.test(agentsSrc));
+ok('T15 tiering: callLLM accepts a models override parameter', /callLLM[^)]*opts.*models\?\s*:\s*string\[\]/.test(agentsSrc.replace(/\s+/g, ' ')));
+ok('T15 tiering: default (env unset) = OR_CHEAP_MODELS is empty = unchanged behavior',
+  agentsSrc.includes("OR_CHEAP_MODELS_RAW = process.env.OPENROUTER_MODELS_CHEAP || ''") && agentsSrc.includes("OR_CHEAP_MODELS = OR_CHEAP_MODELS_RAW.split"));
+ok('T15 tiering: runAgentTracked routes cheap depts to cheap models when env is set',
+  /cheapModels.*CHEAP_DEPTS\.has\(department\)/.test(agentsSrc.replace(/\s+/g, ' ')));
+
+// ---- T15 behavioral: cheap-tier routing actually uses the override models list ----
+const realFetch2 = globalThis.fetch;
+try {
+  let calls15: { url: string; body: any }[] = [];
+  process.env.OPENROUTER_MODELS_CHEAP = 'mistralai/mistral-small-24b-instruct-2501';
+  // re-import agents.ts with the new env var — we inline the test here using callLLM's models param
+  (globalThis as any).fetch = async (url: any, init: any) => {
+    calls15.push({ url: String(url), body: JSON.parse(String(init?.body || '{}')) });
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'cheap answer' } }] }), { status: 200 });
+  };
+  // direct callLLM with models override: must call the cheap model, not the primary ladder
+  const { callLLM: callLLMFresh } = await import('./agents.ts');
+  calls15 = [];
+  const rCheap = await callLLMFresh('sys', 'user', 100, { models: ['mistralai/mistral-small-24b-instruct-2501'] });
+  ok('T15 behavioral: callLLM with models override calls the cheap model (not the primary ladder)',
+    rCheap.meta.ok === true && calls15.length === 1 && /mistral-small/.test(String(calls15[0].body.model)), JSON.stringify({ model: calls15[0]?.body?.model }));
+} finally {
+  globalThis.fetch = realFetch2;
+  delete process.env.OPENROUTER_MODELS_CHEAP;
+}
+
+// ---- T16 source-pin: build_seconds persisted on project completion ----
+const runnerSrc = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
+ok('T16 latency: persistBuildMetrics helper exported from runner.ts',
+  /export\s+async\s+function\s+persistBuildMetrics/.test(runnerSrc));
+ok('T16 latency: build_seconds written to params (jsonb_set)',
+  /jsonb_set.*build_seconds.*to_jsonb/.test(runnerSrc.replace(/\s+/g, ' ')));
+ok('T16 latency: buildStart timestamp captured at runLoop entry',
+  /buildStart\s*=\s*Date\.now\(\)/.test(runnerSrc));
+ok('T16 latency: persistBuildMetrics called on clean project completion (done path)',
+  /if \(done\)\s+await persistBuildMetrics\(pool, projectId/.test(runnerSrc.replace(/\s+/g, ' ')));
+ok('T16 latency: persistBuildMetrics is idempotent (conditional on build_seconds not yet set)',
+  /build_seconds.*is null/.test(runnerSrc));
+
 console.log(`\nllm:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

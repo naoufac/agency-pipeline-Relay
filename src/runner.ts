@@ -375,6 +375,19 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
   }
 }
 
+// T16 — BUILD LATENCY: stamp the total wall-clock seconds onto params when a project completes.
+// The per-call llm_call latency events are already logged by the runner (see processTask); this
+// helper adds the AGGREGATE project-level metric so dashboards and KPIs can show end-to-end build time
+// without re-summing all llm_call events. Idempotent: only writes when build_seconds is not yet set.
+export async function persistBuildMetrics(pool: pg.Pool, projectId: string, wallClockMs: number): Promise<void> {
+  const secs = Math.round(wallClockMs / 1000);
+  // jsonb_set with create_missing=true; conditional so a re-run never overwrites the first build time.
+  await pool.query(
+    "update projects set params = jsonb_set(params, '{build_seconds}', to_jsonb($2::int), true) where id=$1 and (params->>'build_seconds') is null",
+    [projectId, secs]
+  ).catch((e: any) => console.error('persistBuildMetrics', projectId, e?.message ?? e));
+}
+
 // The whole scheduler: find ready -> run -> store -> verify -> unblock -> repeat.
 // Stateless: everything it needs is recomputed from the DB, so it is restart-safe.
 // maxSteps lets us simulate a crash mid-run to prove resumability.
@@ -386,6 +399,9 @@ export async function runLoop(
   const cap = opts.cap ?? 4;
   const maxSteps = opts.maxSteps ?? Infinity;
   let steps = 0;
+  // T16: stamp the build wall-clock from the moment runLoop is called. This captures the full
+  // scheduler time (claim + process + verify loops) rather than just the sum of LLM latencies.
+  const buildStart = Date.now();
 
   while (true) {
     await reclaim(pool);
@@ -419,6 +435,9 @@ export async function runLoop(
     alertStuck(pool, projectId, detail).catch(() => {});
   }
   await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
+  // T16: stamp the wall-clock only on a clean completion (not on blocked/stuck — partial metrics
+  // are misleading). Idempotent (see persistBuildMetrics) so re-runs don't overwrite the first.
+  if (done) await persistBuildMetrics(pool, projectId, Date.now() - buildStart);
   // auto-review only in the SERVER context (opts.review). CLI/demo/scratch runs don't launch a browser
   // (it would keep a short-lived process alive and isn't wanted for offline tests).
   if (done && opts.review) {

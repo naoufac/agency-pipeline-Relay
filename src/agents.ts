@@ -27,6 +27,18 @@ const OR_FALLBACK_MODELS = (process.env.OPENROUTER_FALLBACK_MODELS || 'google/ge
   .split(',').map((m) => m.trim()).filter(Boolean);
 // the full non-web ladder: primaries (2.7 -> 2.5) first, then the cheap/free deep fallback.
 const OR_LADDER = [...OR_PRIMARY_MODELS, ...OR_FALLBACK_MODELS];
+// T15 — PER-DEPARTMENT MODEL TIERING: simple, short-output departments (policies, design, strategy,
+// qa) can use a cheap/fast tier rather than burning the expensive 2.7->2.5 primaries. The tier is
+// configured via OPENROUTER_MODELS_CHEAP (comma-separated model IDs, same ladder mechanic as primary).
+// When unset, default behavior is UNCHANGED — all departments use the full primary ladder.
+// WHY: policies/design/qa output tiny, deterministic-ish JSON or a few sentences; compose/content/
+// build/branding output large structured responses that need the best model available.
+const OR_CHEAP_MODELS_RAW = process.env.OPENROUTER_MODELS_CHEAP || '';
+const OR_CHEAP_MODELS = OR_CHEAP_MODELS_RAW.split(',').map((m) => m.trim()).filter(Boolean);
+// Departments that run on the cheap tier when OPENROUTER_MODELS_CHEAP is set.
+// Compose/content/build/branding/database/research are deliberately excluded — they produce large or
+// load-bearing outputs where model quality is the primary build-quality lever.
+const CHEAP_DEPTS = new Set(['policies', 'design', 'qa', 'auth', 'stack', 'integration']);
 const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
@@ -268,27 +280,34 @@ async function callOpenRouter(messages: any[], model: string, maxTokens: number,
 // is 60-75s/call and truncates on the reasoning-only plan, which is what timed out builds. Web-grounded
 // calls (research/strategy) use the same OpenRouter primaries WITH the Exa plugin; if grounding fails they
 // fall through to the ungrounded ladder rather than fail. Transient errors move DOWN the ladder, not over.
-export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number } = {}): Promise<LLMResult> {
+// T15 — optional models override: when a caller provides a non-empty models list it replaces the
+// full OR_LADDER for this call (the cheap-tier routing path). Omitting it = current behavior.
+export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number; models?: string[] } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;
   const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : LLM_TIMEOUT_MS;
+  // T15: use the caller-supplied models list (cheap tier) when provided, else the full OR_LADDER.
+  const ladder = (opts.models && opts.models.length) ? opts.models : OR_LADDER;
+  // Web primaries: use the first OR_PRIMARY_MODELS rung for grounding even in cheap mode
+  // (web search only runs on the primary tier anyway — cheap calls are never web-grounded).
+  const webPrimaries = (opts.models && opts.models.length) ? opts.models : OR_PRIMARY_MODELS;
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
 
   // 1) OPENROUTER PRIMARY (fast). Web: try each primary model WITH grounding, then fall to the ungrounded
-  //    ladder. Non-web: run the full 2.7 -> 2.5 -> cheap ladder.
+  //    ladder. Non-web: run the full 2.7 -> 2.5 -> cheap ladder (or the cheap-tier override).
   if (OR_KEY) {
     try {
       if (web) {
         let lastWeb: any = null;
-        for (const m of OR_PRIMARY_MODELS) {
+        for (const m of webPrimaries) {
           try { return await callOpenRouter(messages, m, maxTokens, timeoutMs, true, t0); }
           catch (e: any) { lastWeb = e; }
         }
         // grounding failed on all primaries → ungrounded ladder (better a real answer than a hard fail)
-        try { return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0); }
+        try { return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0, ladder); }
         catch (e: any) { throw lastWeb ?? e; }
       }
-      return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0);
+      return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0, ladder);
     } catch (eOR: any) {
       // 2) DEEP FAILOVER: OpenRouter fully unavailable → the slow direct MiniMax API (their plan).
       if (KEY) {
@@ -340,7 +359,12 @@ export async function runAgentTracked(department: string, ctx: Ctx): Promise<LLM
     // fair shot to finish rather than timing out and wasting a retry on the secondary. (The old 180s only
     // existed to tolerate the 60-75s-per-SMALL-call direct MiniMax API, now a deep failover.)
     const timeoutMs = department === 'compose' ? Number(process.env.COMPOSE_TIMEOUT_MS || 90000) : undefined;
-    return await callLLM(system, buildUser(ctx, department), maxTokens, { web, timeoutMs });
+    // T15 — CHEAP TIER ROUTING: departments with short, deterministic-ish outputs (policies/design/qa/
+    // auth/stack/integration) use the cheap model ladder when OPENROUTER_MODELS_CHEAP is configured.
+    // Web-grounded calls and all other departments always use the full primary ladder regardless.
+    // Default (env unset) = OR_CHEAP_MODELS is empty = no override = current behavior UNCHANGED.
+    const cheapModels = (!web && OR_CHEAP_MODELS.length && CHEAP_DEPTS.has(department)) ? OR_CHEAP_MODELS : undefined;
+    return await callLLM(system, buildUser(ctx, department), maxTokens, { web, timeoutMs, ...(cheapModels ? { models: cheapModels } : {}) });
   }
   // offline deterministic fallback — synthesize a uniform meta so the runner's instrumentation still records it.
   return { text: stub(department, ctx.brief), meta: { provider: OR_KEY ? 'openrouter' : 'minimax-direct', model: 'stub', latencyMs: 0, web: WEB_DEPTS.has(department), ok: true } };
