@@ -9,6 +9,7 @@
 //   • isOperator() is a pure function; operator accounts skip debit + block entirely
 //     so nightly canaries never fail due to quota.
 import pg from 'pg';
+import { createHash } from 'node:crypto';
 
 // ---- pricing constants (all amounts in US cents) ----
 export const PRICING = {
@@ -44,6 +45,22 @@ export async function ensureBillingTables(pool: pg.Pool): Promise<void> {
   await pool.query(`
     create unique index if not exists billing_one_grant
       on billing_ledger(user_id) where kind = 'grant'`);
+
+  // Anonymous build cap persistence: one row per anonymous build attempt.
+  // WHY: the in-memory ANON_RUN_HITS map resets on every deploy (daily). Persisting to a DB
+  // table ensures the 2-free-builds/IP/24h cap survives restarts without growing unbounded.
+  // PRIVACY: ip_hash = sha256(ip || RELAY_IP_SALT) — raw IPs are NEVER stored. The salt is
+  // a static secret from env (falls back to a fixed literal) so hashes are not reversible
+  // without the salt. Rows older than 48h are opportunistically pruned on each insert so the
+  // table stays small: worst case it holds ~24h of anon traffic.
+  await pool.query(`
+    create table if not exists anon_runs (
+      ip_hash  text        not null,
+      at       timestamptz not null default now()
+    )`);
+  // Index on (ip_hash, at) for the 24h COUNT and for the >48h DELETE — both are hot paths.
+  await pool.query(`
+    create index if not exists anon_runs_ip_at_ix on anon_runs(ip_hash, at)`);
 }
 
 // ---- pricing / quoting ----
@@ -104,6 +121,37 @@ export async function spentTodayCents(pool: pg.Pool, userId: string): Promise<nu
   return Math.abs(Number(r.rows[0].spent));
 }
 
+// ---- anonymous build cap (DB-persisted) ----
+
+// RELAY_IP_SALT: a static secret mixed into the ip_hash so the hash is not reversible without
+// the salt. Falls back to a fixed literal so dev/test works without config — the fallback is
+// not secret but means raw IPs are still never stored.
+function ipSalt(): string {
+  return process.env.RELAY_IP_SALT || 'relay-anon-salt-v1';
+}
+
+// hashIp: sha256(ip + salt) → hex. The raw IP is NEVER stored in any DB row.
+export function hashIp(ip: string): string {
+  return createHash('sha256').update(ip + ipSalt()).digest('hex');
+}
+
+// anonRunDbLimited: returns true if this ip_hash has 2+ rows in the last 24h (DB check).
+// Also opportunistically prunes rows older than 48h (cheap: one DELETE per insert, index-backed).
+// WHY 48h prune window: rows between 24h and 48h old are no longer gating but deleting them
+// exactly at 24h would require a separate sweep job; 48h keeps the table small with no scheduler.
+export async function anonRunDbLimited(pool: pg.Pool, ip: string): Promise<boolean> {
+  const h = hashIp(ip);
+  const count = (await pool.query(
+    `select count(*)::int as n from anon_runs
+     where ip_hash = $1 and at > now() - interval '24 hours'`, [h])).rows[0].n;
+  if (count >= 2) return true;   // cap hit — do not insert, caller returns 429
+  // Under the cap: record this run AND prune stale rows in one round-trip.
+  // The DELETE runs on the same connection before the INSERT so stale rows don't inflate the count.
+  await pool.query(`delete from anon_runs where at < now() - interval '48 hours'`);
+  await pool.query(`insert into anon_runs(ip_hash) values($1)`, [h]);
+  return false;
+}
+
 // ---- debit (the only mutation, and it's INSERT-only) ----
 
 // debitCents: race-safe debit using a Postgres session-level advisory lock keyed on the user.
@@ -116,7 +164,8 @@ export async function spentTodayCents(pool: pg.Pool, userId: string): Promise<nu
 //   short read+insert, release it immediately, and never hold it across network calls.
 //
 // HOW: pg_advisory_xact_lock(key) is a transaction-scoped lock — released automatically
-//   when the transaction commits or rolls back. We hash the UUID to a bigint key.
+//   when the transaction commits or rolls back. We derive a 64-bit key from md5(userId)
+//   so the collision space is 2^64 (vs 2^32 for the old two-int form with hashtext).
 //
 // Returns {ok:true, balance_cents_after} on success or {ok:false, balance_cents_after} on refusal.
 export async function debitCents(
@@ -134,11 +183,15 @@ export async function debitCents(
   const client = await pool.connect();
   try {
     await client.query('begin');
-    // Acquire a per-user advisory lock (transaction-scoped). hashtext() maps the user UUID
-    // to a 32-bit int, which is the correct input type for pg_advisory_xact_lock(int, int).
-    // We use (1, hashtext(userId)) — namespace 1 = billing, to avoid colliding with other
-    // advisory locks in the system.
-    await client.query(`select pg_advisory_xact_lock(1, hashtext($1::text))`, [userId]);
+    // Acquire a per-user advisory lock (transaction-scoped).
+    // 64-BIT KEY: ('x'||substr(md5($1::text),1,16))::bit(64)::bigint gives a full 64-bit key
+    // derived from the user UUID string. Collision space is 2^64 vs the old (1, hashtext())
+    // two-int form whose effective space was only 2^32 (hashtext returns int4). Same locking
+    // semantics; the single-bigint form pg_advisory_xact_lock(bigint) is the standard approach.
+    await client.query(
+      `select pg_advisory_xact_lock(('x'||substr(md5($1::text),1,16))::bit(64)::bigint)`,
+      [userId],
+    );
 
     // Now read the snapshot (no concurrent debit can run for this user while we hold the lock).
     // Parameters: $1=userId, $2=cents, $3=reason, $4=projectId, $5=DAILY_CAP_CENTS

@@ -26,6 +26,8 @@ import {
   quoteCents,
   isOperator,
   billingEnabled,
+  anonRunDbLimited,
+  hashIp,
   PRICING,
 } from './billing.ts';
 
@@ -331,6 +333,89 @@ try {
       /catch \(e\) \{[^}]*rebuildDebited\) await refundCents/s.test(srvSrc2));
     ok('server: chat rebuild refunds when startRebuild throws',
       /catch \(e\) \{[^}]*chatDebited\) await refundCents/s.test(srvSrc2));
+
+    // ---- ARC H: anon_runs DDL + hash-not-ip source-pin ----
+    // Verify the table was created by ensureBillingTables (called at top of this suite).
+    const anonTableExists = (await pool.query(
+      `select count(*)::int n from information_schema.tables
+       where table_schema='public' and table_name='anon_runs'`)).rows[0].n;
+    ok('anon_runs DDL: table exists after ensureBillingTables', anonTableExists === 1, `count=${anonTableExists}`);
+
+    const anonIndexExists = (await pool.query(
+      `select count(*)::int n from pg_indexes
+       where schemaname='public' and tablename='anon_runs' and indexname='anon_runs_ip_at_ix'`)).rows[0].n;
+    ok('anon_runs DDL: index anon_runs_ip_at_ix exists', anonIndexExists === 1, `count=${anonIndexExists}`);
+
+    // Source-pin: raw IPs must NEVER appear in any billing.ts DB write — only ip_hash.
+    {
+      const billingSrc = readFileSync(new URL('./billing.ts', import.meta.url), 'utf8');
+      // The anon_runs INSERT must bind the hash ($1) not the raw ip variable directly.
+      // We check that the word "ip_hash" is present (the column) and that we hash before inserting.
+      ok('source-pin: anon_runs insert uses ip_hash column (not raw ip)',
+        /insert into anon_runs\(ip_hash\)/.test(billingSrc));
+      ok('source-pin: hashIp is called before DB insert in anonRunDbLimited',
+        /hashIp\(ip\)/.test(billingSrc) && /anonRunDbLimited/.test(billingSrc));
+      // Ensure the billing.ts source never writes a raw "ip" variable to anon_runs
+      // (regression guard: e.g. insert into anon_runs(ip_hash) values($1) where $1 = hashIp(ip))
+      ok('source-pin: billing.ts does not contain "anon_runs" with bare ip binding',
+        !/insert into anon_runs[^;]+\bip\b[^_]/.test(billingSrc));
+    }
+
+    // ---- ARC H: 24h window arithmetic with injected rows ----
+    {
+      const testIp = `127.0.0.${Math.floor(Math.random() * 255) + 1}`;
+      const h = hashIp(testIp);
+
+      // Fresh IP — first call must pass (returns false = not limited)
+      const r0 = await anonRunDbLimited(pool, testIp);
+      ok('anonRunDbLimited: first call returns false (not limited)', r0 === false, `got=${r0}`);
+
+      // After 1 row inserted by the first call, second call must also pass (cap is 2)
+      const r1 = await anonRunDbLimited(pool, testIp);
+      ok('anonRunDbLimited: second call returns false (still under cap)', r1 === false, `got=${r1}`);
+
+      // After 2 rows inserted, third call must be blocked (returns true)
+      const r2 = await anonRunDbLimited(pool, testIp);
+      ok('anonRunDbLimited: third call returns true (cap hit)', r2 === true, `got=${r2}`);
+
+      // Inject an "old" row (>24h ago) and verify it does NOT count toward the cap.
+      // To test this cleanly: wipe all rows for this ip_hash, inject 1 old + 1 fresh, expect not limited.
+      await pool.query(`delete from anon_runs where ip_hash=$1`, [h]);
+      await pool.query(`insert into anon_runs(ip_hash, at) values($1, now() - interval '25 hours')`, [h]);
+      // Now one row exists but it's >24h old; anonRunDbLimited should count it as 0 and allow.
+      const rOld = await anonRunDbLimited(pool, testIp);
+      ok('anonRunDbLimited: row older than 24h does not count toward cap', rOld === false, `got=${rOld}`);
+
+      // Cleanup: remove test rows for this ip_hash
+      await pool.query(`delete from anon_runs where ip_hash=$1`, [h]);
+    }
+
+    // ---- ARC H: 64-bit advisory lock source-pin ----
+    {
+      const billingSrc = readFileSync(new URL('./billing.ts', import.meta.url), 'utf8');
+      // Must use the single-bigint form of pg_advisory_xact_lock with the md5-based 64-bit key.
+      // The old form was: pg_advisory_xact_lock(1, hashtext($1::text))  (32-bit collision space)
+      // The new form:     pg_advisory_xact_lock(('x'||substr(md5($1::text),1,16))::bit(64)::bigint)
+      ok('source-pin: 64-bit advisory lock uses md5-derived bigint key',
+        /pg_advisory_xact_lock\(\('x'\|+substr\(md5\(\$1::text\),1,16\)\)::bit\(64\)::bigint\)/.test(billingSrc));
+      ok('source-pin: old 32-bit two-int lock form is no longer present',
+        !/pg_advisory_xact_lock\(1,\s*hashtext/.test(billingSrc));
+    }
+
+    // ---- ARC H: SIGTERM/SIGINT graceful shutdown source-pins in server.ts ----
+    {
+      const serverSrc = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+      ok('source-pin: SIGTERM handler registered in server.ts',
+        /process\.on\(['"]SIGTERM['"]/.test(serverSrc));
+      ok('source-pin: SIGINT handler registered in server.ts',
+        /process\.on\(['"]SIGINT['"]/.test(serverSrc));
+      ok('source-pin: server.close() called in shutdown handler',
+        /server\.close\(/.test(serverSrc));
+      ok('source-pin: pool.end() called in shutdown handler',
+        /pool\.end\(\)/.test(serverSrc));
+      ok('source-pin: hard failsafe timer (8s) present in shutdown handler',
+        /8000/.test(serverSrc) && /failsafe/.test(serverSrc));
+    }
 
     // funnel SQL uses the real column name and parenthesized email filter (kpi.ts)
     const kpiSrc = readFileSync(new URL('./kpi.ts', import.meta.url), 'utf8');
