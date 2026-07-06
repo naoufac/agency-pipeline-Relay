@@ -10,18 +10,23 @@ export function figmaKeyFromUrl(url: string): string | null {
   return m ? m[1] : (/^[A-Za-z0-9]{10,}$/.test(String(url || '').trim()) ? String(url).trim() : null);
 }
 
-// Figma colours are {r,g,b,a} floats 0..1 → #rrggbb
+// Figma colours are {r,g,b,a} floats 0..1 → #rrggbb. A semi-transparent fill is COMPOSITED over white
+// (never dropped-to-opaque, which would ship a wrong colour) so the token approximates how it reads on
+// a light page. (audit 2026-07-06)
 function rgbaToHex(c: any): string | null {
   if (!c || typeof c !== 'object') return null;
-  const to = (v: any) => Math.max(0, Math.min(255, Math.round(Number(v) * 255))).toString(16).padStart(2, '0');
-  if (!Number.isFinite(Number(c.r)) || !Number.isFinite(Number(c.g)) || !Number.isFinite(Number(c.b))) return null;
-  return `#${to(c.r)}${to(c.g)}${to(c.b)}`;
+  const r = Number(c.r), g = Number(c.g), b = Number(c.b), a = (c.a == null ? 1 : Number(c.a));
+  if (![r, g, b, a].every(Number.isFinite)) return null;
+  const comp = (ch: number) => Math.max(0, Math.min(255, Math.round((ch * a + (1 - a)) * 255))).toString(16).padStart(2, '0');
+  return `#${comp(r)}${comp(g)}${comp(b)}`;
 }
 
 // classify a Figma style NAME (often "Brand/Primary", "Text/Body") into a canonical token key that
 // designFromTokens matches exactly — figma owns the messy-name → canonical mapping.
 function colorKeyOf(name: string): string | null {
-  const n = String(name || '').toLowerCase();
+  // classify on the LEAF segment — a Figma style is named "Category/Token" and the token is what
+  // matters ("Text/Background" is a background, not text). (audit 2026-07-06)
+  const n = (String(name || '').split('/').pop() || '').toLowerCase();
   if (/(back|bg|canvas|base|paper)/.test(n)) return 'background';
   if (/(primary|brand|main|action|\bcta\b)/.test(n)) return 'primary';
   if (/(accent|secondary|highlight)/.test(n)) return 'accent';
@@ -43,20 +48,19 @@ export function figmaFileToTokens(file: any): { colors: Record<string, string>; 
   const nameOf = (id: string) => (styles[id] && styles[id].name) || '';
   const typeOf = (id: string) => (styles[id] && styles[id].styleType) || '';
 
-  const colorByKey: Record<string, string> = {};
+  // per-STYLE colour tallies: a published style has one colour, but a single instance can override it —
+  // take the MODE across all nodes binding the style, not the first one hit. (audit 2026-07-06)
+  const fillTally: Record<string, Record<string, number>> = {};
   const texts: Array<{ name: string; family: string; size: number }> = [];
   const radii: number[] = [];
 
   walk(file && file.document, (n) => {
-    // a bound FILL style + a solid fill → a named colour
     const fillStyleId = n.styles && (n.styles.fill || n.styles.fills);
     if (fillStyleId && typeOf(fillStyleId) === 'FILL' && Array.isArray(n.fills)) {
       const solid = n.fills.find((f: any) => f && f.type === 'SOLID' && f.visible !== false && f.color);
       const hex = solid ? rgbaToHex(solid.color) : null;
-      const key = colorKeyOf(nameOf(fillStyleId));
-      if (hex && key && !colorByKey[key]) colorByKey[key] = hex;
+      if (hex) { (fillTally[fillStyleId] ||= {})[hex] = (fillTally[fillStyleId][hex] || 0) + 1; }
     }
-    // a bound TEXT style + a font family → a named typeface (keep size to pick display vs body)
     const textStyleId = n.styles && n.styles.text;
     if (textStyleId && typeOf(textStyleId) === 'TEXT' && n.style && n.style.fontFamily) {
       texts.push({ name: nameOf(textStyleId), family: String(n.style.fontFamily), size: Number(n.style.fontSize) || 0 });
@@ -64,10 +68,20 @@ export function figmaFileToTokens(file: any): { colors: Record<string, string>; 
     if (Number.isFinite(Number(n.cornerRadius)) && Number(n.cornerRadius) > 0) radii.push(Number(n.cornerRadius));
   });
 
-  // typography: a text style named like a heading (or the largest) → display; body-named (or commonest) → body
+  const mode = (t: Record<string, number>) => Object.entries(t).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const colorByKey: Record<string, string> = {};
+  for (const [styleId, tally] of Object.entries(fillTally)) {
+    const key = colorKeyOf(nameOf(styleId)); const hex = mode(tally);
+    if (key && hex && !colorByKey[key]) colorByKey[key] = hex;
+  }
+
+  // typography: among heading-NAMED styles pick the LARGEST (a tiny 'Heading/Caption' must not beat a
+  // 48px 'Display'); fall back to the largest overall. Body = body-named, else the commonest family.
   const typography: Record<string, any> = {};
-  const heading = texts.find((t) => /(head|display|title|\bh1\b|hero)/i.test(t.name)) || texts.slice().sort((a, b) => b.size - a.size)[0];
-  const bodyName = texts.find((t) => /(body|paragraph|text|base|content)/i.test(t.name));
+  const bySize = (a: { size: number }, b: { size: number }) => b.size - a.size;
+  const named = texts.filter((t) => /(head|display|title|\bh1\b|hero)/i.test((t.name.split('/').pop() || '')));
+  const heading = (named.length ? named : texts).slice().sort(bySize)[0];
+  const bodyName = texts.find((t) => /(body|paragraph|text|base|content)/i.test((t.name.split('/').pop() || '')));
   const commonest = (() => {
     const c: Record<string, number> = {}; for (const t of texts) c[t.family] = (c[t.family] || 0) + 1;
     return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -95,7 +109,22 @@ export async function figmaFetchFile(fileKey: string, token: string, timeoutMs =
     if (res.status === 403 || res.status === 401) throw new Error('figma-unauthorized');
     if (res.status === 404) throw new Error('figma-file-not-found');
     if (!res.ok) throw new Error('figma-error-' + res.status);
-    return await res.json();
+    // BOUNDED read: a Figma file can be tens of MB — res.json() would buffer it all (OOM risk). Cap the
+    // body at 12MB (huge for styles metadata) via the stream, aborting past the limit. (audit 2026-07-06)
+    const MAX = 12 * 1024 * 1024;
+    const declared = Number(res.headers.get('content-length') || 0);
+    if (declared && declared > MAX) throw new Error('figma-too-large');
+    const reader = (res.body as any)?.getReader?.();
+    if (!reader) return await res.json();
+    const chunks: Uint8Array[] = []; let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      if (received > MAX) { try { await reader.cancel(); } catch { /* ignore */ } throw new Error('figma-too-large'); }
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } finally { clearTimeout(t); }
 }
 

@@ -46,6 +46,36 @@ ok('figma tokens → a usable Design (palette + fonts + radius)', hasDesign(desi
 ok('an empty file maps to no usable design (no throw)', !hasDesign(designFromTokens(figmaFileToTokens({}), 'figma')));
 ok('a file with unnamed styles yields nothing mappable (no throw)', !hasDesign(designFromTokens(figmaFileToTokens({ document: { children: [{ type: 'RECTANGLE', fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }] }] } }), 'figma')));
 
+// ---- AUDIT 2026-07-06 fixes ----
+// ALPHA: a semi-transparent fill is composited over white, never shipped as a wrong opaque colour.
+const alphaFile = { styles: { 'S:p': { name: 'Primary', styleType: 'FILL' } },
+  document: { children: [{ type: 'RECT', styles: { fill: 'S:p' }, fills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 0.5 } }] }] } };
+ok('alpha: a 50%-black fill composites over white (#808080), not opaque #000000', figmaFileToTokens(alphaFile).colors.primary === '#808080', figmaFileToTokens(alphaFile).colors.primary);
+
+// HEADING pick: a tiny name-matched caption must NOT beat a large display style.
+const capFile = { styles: { 'S:cap': { name: 'Heading/Caption', styleType: 'TEXT' }, 'S:disp': { name: 'Display/Hero', styleType: 'TEXT' } },
+  document: { children: [
+    { type: 'TEXT', styles: { text: 'S:cap' }, style: { fontFamily: 'Tiny', fontSize: 8 } },
+    { type: 'TEXT', styles: { text: 'S:disp' }, style: { fontFamily: 'Big Serif', fontSize: 48 } }] } };
+ok('heading: the LARGEST heading-named style wins (48px Display, not the 8px caption)', figmaFileToTokens(capFile).typography.heading?.fontFamily === 'Big Serif', JSON.stringify(figmaFileToTokens(capFile).typography));
+
+// COLOUR MODE: a style overridden on ONE instance still resolves to its majority colour.
+const overFile = { styles: { 'S:p': { name: 'Primary', styleType: 'FILL' } },
+  document: { children: [
+    { type: 'R', styles: { fill: 'S:p' }, fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }] },
+    { type: 'R', styles: { fill: 'S:p' }, fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }] },
+    { type: 'R', styles: { fill: 'S:p' }, fills: [{ type: 'SOLID', color: { r: 0, g: 1, b: 0 } }] }] } };   // one override
+ok('colour: a single overridden instance loses to the style majority (#ff0000, not #00ff00)', figmaFileToTokens(overFile).colors.primary === '#ff0000', figmaFileToTokens(overFile).colors.primary);
+
+// LEAF classification: "Text/Background" is a background, not text.
+const tbFile = { styles: { 'S:x': { name: 'Text/Background', styleType: 'FILL' } },
+  document: { children: [{ type: 'R', styles: { fill: 'S:x' }, fills: [{ type: 'SOLID', color: { r: 0.1, g: 0.1, b: 0.1 } }] }] } };
+ok('classify: "Text/Background" → background (leaf segment wins), not text', figmaFileToTokens(tbFile).colors.background === '#1a1a1a' && !figmaFileToTokens(tbFile).colors.text, JSON.stringify(figmaFileToTokens(tbFile).colors));
+
+// SIZE CAP: the fetch bounds the response (source pin — no live network here).
+const figSrc = (await import('node:fs')).readFileSync(new URL('./figma.ts', import.meta.url), 'utf8');
+ok('fetch: the Figma response is size-capped (bounded stream read, no unbounded res.json)', figSrc.includes('figma-too-large') && /received > MAX/.test(figSrc) && figSrc.includes('getReader'));
+
 // ---- wiring pins ----
 const serverSrc = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
 ok('server: the /design endpoint imports the live Figma path (figmaUrl branch)', serverSrc.includes('figmaUrlToTokens') && /b\.figmaUrl/.test(serverSrc));

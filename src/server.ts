@@ -641,6 +641,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
             : code === 'figma-unauthorized' ? 'Relay could not read that Figma file (check sharing / the token).'
             : code === 'figma-file-not-found' ? 'That Figma file was not found.'
             : code === 'figma-bad-url' ? 'That does not look like a Figma file URL.'
+            : code === 'figma-too-large' ? 'That Figma file is too large to import — try a file with just your design system / styles.'
             : 'Could not reach Figma — try again, or paste your exported tokens.';
           return send(res, 400, 'application/json', JSON.stringify({ ok: false, error: msg }));
         }
