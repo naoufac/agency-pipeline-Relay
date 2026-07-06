@@ -1317,27 +1317,23 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = ad03d9c; FULL 23-suite gate green ON PROD (spec 191 · layout 154 · jsonld 92 ·
-  billing 93 · analytics 49 · lifecycle 56 · all 0-failed); SIGTERM drain proven; vault shipping; canary armed.
-· 2026-07-06 BOSS SESSION 3 (all live-proven on real sites):
-  - VISUAL ART-DIRECTION REVIEW (boss-eyes on real screenshots, mobile+desktop): caught curly-quote
-    attribute delimiters (class=”…”) that made ALL new testimonial CSS dead while marker greps passed —
-    rewritten straight-quoted; spotlight = one commanding display quote + own author + rest as cards
-    (no orphan names); ledger hero = true editorial split (eyebrow left · lead+CTA right). Second-pass
-    screenshots signed off. Gates: curly-attr ban + column-order pins, layout:check 149->154.
-  - VISITOR ANALYTICS (ARC J): first-party cookieless beacon (sendBeacon -> same-origin /api/hit) on
-    every produced page incl. CMS re-serves; site_hits dedupe = one visitor/page/day via
-    sha256(ip+UA+day+salt) (raw IP never stored, daily rotation); owner-gated visits API + board line
-    (today/7d/30d/top pages); analytics:check 49 gates, suite #23. LIVE-PROVEN on nenna: beacon in
-    served html, 2 identical hits -> 1 row, new path -> own row.
-  - LEGACY LD UPGRADE PATH: finalize PERSISTS derived bizType into params (CMS-first: one stored value,
-    every projection agrees) — nenna now serves Restaurant @type + real telephone/hours extracted from
-    its own Italian prose. Re-finalizing any legacy site upgrades it to the full current head
-    (external css, canonical, enriched LD, beacon).
-· BILLING LIVE: $30 grant/user, 5-page site ≈ $6.50, rebuild $2, design $1, $20/day cap, refunds,
-  anon 2/IP/day persisted, operator exempt. FIGMA: token in, needs one real file URL to certify e2e.
+· System healthy; prod = 6f4932c; FULL 23-suite gate green ON PROD (spec 191 · layout 155 · jsonld 92 ·
+  billing 93 · analytics 49 · all 0-failed); SIGTERM drain proven; vault shipping; canary armed.
+· 2026-07-06 BOSS SESSION 4 — FLEET UPGRADE SWEEP (the big one):
+  - Batch re-finalized ALL 70 legacy permanent sites through the CMS: 65 upgraded to the current head
+    (analytics beacon + per-page canonical + external hashed css + specific schema.org @type + enriched
+    business facts), 5 refused by the served_from_cms gate ("CMS title not present in served services" —
+    legacy round-trip edge; capstone-legal/palazzo/olea-and-co/castellano/the-corner-table-2) and left
+    SAFELY on their previous build (all 5 verified 200; the finalize guard held).
+  - Sample verification live: claybound=Store, nenna=Restaurant, openchair=HairSalon, SaaS=Organization;
+    beacon+canonical+ds-css on 6/6 sampled.
+  - Minimal cards got their numbered 01/02/03 eyebrows (pure CSS counters, client-rendered cards count
+    too), gated (layout 155).
+· ANALYTICS LIVE fleet-wide: every re-finalized site now measures visitors (dedupe one/page/day, hashed,
+  raw IP never stored); owners see today/7d/30d + top pages on the board.
+· KNOWN EDGE (do not re-chase blindly): the 5 gate-refused sites share a services-page round-trip
+  mismatch in the CMS read-back — investigate as ONE class if they matter; their sites serve fine.
+· FIGMA: token in, needs one real file URL from the owner to certify e2e.
 · OWNER-GATED (explicit word only): Stripe v2, Play Store, apex naples.agency flip.
-· NEXT CANDIDATES: re-finalize sweep over ALL legacy permanent sites (batch upgrade to current head —
-  cheap, high-value), BYO custom domains, funnel distribution, minimal-card numbered eyebrows polish.
-  Discipline: build -> gate -> deploy -> prove on real output -> adversarially audit; screenshots catch
-  what greps cannot.
+· NEXT CANDIDATES: the 5-site round-trip class, BYO custom domains, funnel distribution (the machine is
+  ready for real clients — every produced site is now measurable, cached, schema-rich, and billed).
