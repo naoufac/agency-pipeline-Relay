@@ -328,10 +328,11 @@ export async function runAgentTracked(department: string, ctx: Ctx): Promise<LLM
     // reasoning models need headroom; compose emits the WHOLE site (all pages) so it needs the most; build
     // emits one page's spec; web calls synthesize search results.
     const maxTokens = department === 'compose' ? 16000 : department === 'build' ? 8000 : (web ? 4000 : 3000);
-    // compose generates the WHOLE site in one call. On OpenRouter (the primary) even the biggest call
-    // returns in a few seconds, so 45s is ample headroom — the old 180s only existed to tolerate the
-    // 60-75s direct-MiniMax API, which is now a deep failover, not the hot path.
-    const timeoutMs = department === 'compose' ? Number(process.env.COMPOSE_TIMEOUT_MS || 45000) : undefined;
+    // compose generates the WHOLE site in one call. MiniMax reasoning is MANDATORY on OpenRouter, so with
+    // the full prompt this call measures 30-80s (reasoning + a large JSON body). 90s gives ONE model a
+    // fair shot to finish rather than timing out and wasting a retry on the secondary. (The old 180s only
+    // existed to tolerate the 60-75s-per-SMALL-call direct MiniMax API, now a deep failover.)
+    const timeoutMs = department === 'compose' ? Number(process.env.COMPOSE_TIMEOUT_MS || 90000) : undefined;
     return await callLLM(system, buildUser(ctx, department), maxTokens, { web, timeoutMs });
   }
   // offline deterministic fallback — synthesize a uniform meta so the runner's instrumentation still records it.
