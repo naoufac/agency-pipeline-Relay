@@ -30,66 +30,70 @@ ok('bad key: 401 invalid api key is not quota', isBadKey('MiniMax 401: invalid a
 ok('bad key: the failover composite carrying a 401 unauthorized is NOT parked', !isQuotaExhausted('failover after [OpenRouter 401: Unauthorized]: MiniMax 401: Unauthorized'));
 ok('quota still parks the real thing: weekly limit / credits (402/429 billing words)', isQuotaExhausted('OpenRouter 403: Key limit exceeded (weekly limit)') && isQuotaExhausted('MiniMax 402: insufficient balance'));
 
-// ---- provider ORDER (owner 2026-07-05): MiniMax-direct PRIMARY, OpenRouter free-model fallback,
-// ---- web-grounded calls OR-first. Stubbed fetch — no network, no tokens. ----
+// ---- provider ORDER (owner 2026-07-06, benchmarked): OpenRouter PRIMARY on the MiniMax 2.7 -> 2.5
+// ---- ladder (1-2s); minimax-direct is a deep failover (the direct API is 60-75s). Stubbed fetch. ----
 const realFetch = globalThis.fetch;
 try {
   let calls: { url: string; body: any }[] = [];
   const record = (url: any, init: any) => calls.push({ url: String(url), body: JSON.parse(String(init?.body || '{}')) });
-  // 1 · normal call: MiniMax answers → OR never touched
+
+  // 1 · normal call: OpenRouter (m2.7 primary) answers → minimax-direct never touched. think stripped.
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
     return new Response(JSON.stringify({ choices: [{ message: { content: '<think>pondering</think>dal primario' } }] }), { status: 200 });
   };
   const r0 = await callLLM('sys', 'user', 100);
-  ok('PRIMARY is MiniMax-direct (12.5B tokens/month) — one call, think stripped', r0.meta.ok === true && r0.meta.provider === 'minimax-direct' && r0.text === 'dal primario' && calls.length === 1 && calls[0].url.includes('minimax'), JSON.stringify(r0.meta));
+  ok('PRIMARY is OpenRouter minimax-m2.7 (fast) — one call, think stripped, direct untouched',
+    r0.meta.ok === true && r0.meta.provider === 'openrouter' && /minimax-m2\.7/.test(String(r0.meta.model)) && r0.text === 'dal primario' && calls.length === 1 && calls[0].url.includes('openrouter'), JSON.stringify(r0.meta));
 
-  // 1b · think-headroom: the wire budget exceeds the caller's; an all-think reply retries ONCE doubled
+  // 1b · reasoning HEADROOM: a MiniMax model is a reasoner, so the wire budget = caller + THINK_HEADROOM
+  //      (so mandatory reasoning can't truncate the JSON answer). One call, no doubling retry on OR.
   calls = [];
-  let mmCalls = 0;
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
-    mmCalls++;
-    if (mmCalls === 1) return new Response(JSON.stringify({ choices: [{ message: { content: '<think>endless pondering that ate the whole budget…</think>' }, finish_reason: 'length' }] }), { status: 200 });
-    return new Response(JSON.stringify({ choices: [{ message: { content: '<think>ok now</think>risposta vera' } }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'risposta vera' } }] }), { status: 200 });
   };
   const rh = await callLLM('sys', 'user', 1000);
-  ok('think-headroom: wire budget > caller budget, all-think reply retries once DOUBLED', rh.meta.ok === true && rh.text === 'risposta vera' && calls.length === 2 && Number(calls[0].body.max_tokens) > 1000 && Number(calls[1].body.max_tokens) > Number(calls[0].body.max_tokens), JSON.stringify(calls.map(c => c.body.max_tokens)));
+  ok('reasoning-headroom: OpenRouter wire budget > caller budget for a MiniMax reasoner',
+    rh.meta.ok === true && rh.text === 'risposta vera' && calls.length === 1 && Number(calls[0].body.max_tokens) > 1000, JSON.stringify(calls.map(c => c.body.max_tokens)));
 
-  // 2 · MiniMax quota-dead → the SAME request rides the FREE OpenRouter model
+  // 2 · PRIMARY LADDER: m2.7 errors → m2.5 (the secondary) carries the SAME request. Both are primaries,
+  //     both on OpenRouter — the free deep-fallback is NOT burned for a primary hiccup.
   calls = [];
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
-    if (String(url).includes('minimax')) return new Response('{"type":"error","error":{"type":"server_error","message":"your current token plan not enough"}}', { status: 500 });
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'dal fallback gratuito' } }] }), { status: 200 });
+    const body = JSON.parse(String(init?.body || '{}'));
+    if (/minimax-m2\.7/.test(String(body.model))) return new Response('bad gateway', { status: 502 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'dal secondario 2.5' } }] }), { status: 200 });
   };
   const r = await callLLM('sys', 'user', 100);
-  ok('failover: MiniMax quota-dead → the OpenRouter ladder carries the request (free rung first)', r.meta.ok === true && r.meta.provider === 'openrouter' && r.text === 'dal fallback gratuito', JSON.stringify(r.meta));
-  ok('failover order: minimax first, then the ladder, first rung is the FREE model', calls.length === 2 && calls[0].url.includes('minimax') && calls[1].url.includes('openrouter') && /:free$/.test(String(calls[1].body.model)), calls.map(c => `${c.url}:${c.body.model}`).join(' | '));
+  ok('ladder: m2.7 hiccup → m2.5 secondary answers (favorite→secondary, no free rung burned)',
+    r.meta.ok === true && r.meta.provider === 'openrouter' && r.text === 'dal secondario 2.5' && calls.length === 2 && /minimax-m2\.7/.test(String(calls[0].body.model)) && /minimax-m2\.5/.test(String(calls[1].body.model)), calls.map(c => c.body.model).join(' | '));
 
-  // 2b · the LADDER: a congested free rung falls through to the cheap reliable one
+  // 2b · both MiniMax primaries down → the ladder falls through to the cheap/free deep-fallback rung
   calls = [];
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
-    if (String(url).includes('minimax')) return new Response('{"error":{"message":"your current token plan not enough"}}', { status: 500 });
     const body = JSON.parse(String(init?.body || '{}'));
-    if (/:free$/.test(String(body.model))) return new Response('{"error":{"message":"temporarily rate-limited upstream","code":429}}', { status: 429 });
+    if (/minimax-m2/.test(String(body.model))) return new Response('{"error":{"message":"upstream 500"}}', { status: 500 });
     return new Response(JSON.stringify({ choices: [{ message: { content: 'dal gradino economico' } }] }), { status: 200 });
   };
   const rl = await callLLM('sys', 'user', 100);
-  ok('ladder: congested free rung → the really-cheap rung answers', rl.meta.ok === true && rl.text === 'dal gradino economico' && calls.length === 3 && !/:free$/.test(String(calls[2].body.model)), JSON.stringify({ n: calls.length, models: calls.map(c => c.body.model) }));
+  ok('ladder: both MiniMax primaries down → cheap/free deep-fallback rung answers',
+    rl.meta.ok === true && rl.text === 'dal gradino economico' && calls.length >= 3 && /minimax-m2\.7/.test(String(calls[0].body.model)) && /minimax-m2\.5/.test(String(calls[1].body.model)), JSON.stringify({ n: calls.length, models: calls.map(c => c.body.model) }));
 
-  // 3 · transient MiniMax 500 (no billing words) does NOT fail over — upstream retries handle it
+  // 3 · DEEP FAILOVER: the ENTIRE OpenRouter ladder is down → the slow direct MiniMax API carries it.
   calls = [];
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
-    if (String(url).includes('minimax')) return new Response('bad gateway', { status: 502 });
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'never' } }] }), { status: 200 });
+    if (String(url).includes('openrouter')) return new Response('bad gateway', { status: 502 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '<think>x</think>dal diretto' } }] }), { status: 200 });
   };
   const r2 = await callLLM('sys', 'user', 100);
-  ok('no failover on transient: a 502 fails the call (retry upstream), fallback NOT burned', r2.meta.ok === false && calls.length === 1, JSON.stringify({ meta: r2.meta, n: calls.length }));
+  ok('deep failover: whole OpenRouter ladder down → minimax-direct answers (never a hard fail)',
+    r2.meta.ok === true && r2.meta.provider === 'minimax-direct' && r2.text === 'dal diretto' && calls[calls.length - 1].url.includes('minimax'), JSON.stringify({ meta: r2.meta, n: calls.length }));
 
-  // 4 · WEB-grounded calls go OR-FIRST (the Exa plugin is OR-only)
+  // 4 · WEB-grounded calls go OR-FIRST with the Exa plugin (unchanged), on the m2.7 primary.
   calls = [];
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
@@ -98,15 +102,15 @@ try {
   const rw = await callLLM('sys', 'user', 100, { web: true });
   ok('web calls ride OpenRouter first with the Exa plugin', rw.meta.provider === 'openrouter' && calls.length === 1 && calls[0].url.includes('openrouter') && JSON.stringify(calls[0].body.plugins || '').includes('web'), JSON.stringify(calls[0]?.body?.plugins));
 
-  // 5 · both providers dead: honest compound error
+  // 5 · everything dead: honest failure after the FULL OpenRouter ladder AND the direct failover.
   calls = [];
   (globalThis as any).fetch = async (url: any, init: any) => {
     record(url, init);
-    if (String(url).includes('minimax')) return new Response('{"error":{"message":"your current token plan not enough"}}', { status: 500 });
-    return new Response('{"error":{"message":"Key limit exceeded (weekly limit)","code":403}}', { status: 403 });
+    return new Response('{"error":{"message":"upstream down"}}', { status: 502 });
   };
   const r3 = await callLLM('sys', 'user', 100);
-  ok('both providers dead: honest compound error after the FULL ladder (minimax + every rung)', r3.meta.ok === false && String(r3.meta.error).includes('failover after') && calls.length === 3, JSON.stringify({ n: calls.length }));
+  ok('all providers dead: honest error after the full OR ladder + the direct failover',
+    r3.meta.ok === false && /all providers failed/.test(String(r3.meta.error)) && calls.length >= 3, JSON.stringify({ n: calls.length, err: String(r3.meta.error).slice(0, 80) }));
 } finally {
   (globalThis as any).fetch = realFetch;
 }

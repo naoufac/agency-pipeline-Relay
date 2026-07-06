@@ -13,12 +13,20 @@
 
 const OR_KEY = process.env.OPENROUTER_API_KEY;
 const OR_BASE = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-const OR_MODEL = process.env.OPENROUTER_MODEL || 'minimax/minimax-m2.7'; // used for WEB-grounded calls (Exa plugin is OR-only)
-// the FALLBACK LADDER when MiniMax-direct is quota-dead: free first, then a really-cheap paid
-// model — free tiers are congested/flaky by nature (probed live 2026-07-05), so the ladder ends
-// on a reliable $0.08/M rung. Owner's directive: 'as fallback use free models / really cheap one'.
+// PRIMARY MODEL LADDER (owner directive 2026-07-06): 2.7 favorite, 2.5 secondary — both via OpenRouter.
+// WHY OpenRouter for the primary and not the direct MiniMax API: benchmarked live 2026-07-06, the direct
+// api.minimax.io serves M3/M2.5/M2 in 60-75s/call (reasoning-only plan; M2.5/M2 even truncate to empty),
+// which is what timed out prod builds. OpenRouter serves the SAME MiniMax models in 1-2s. So OpenRouter
+// is PRIMARY; minimax-direct is a deep failover only.
+const OR_PRIMARY_MODELS = (process.env.OPENROUTER_MODELS || 'minimax/minimax-m2.7,minimax/minimax-m2.5')
+  .split(',').map((m) => m.trim()).filter(Boolean);
+const OR_MODEL = process.env.OPENROUTER_MODEL || OR_PRIMARY_MODELS[0]; // first primary — used for WEB-grounded calls
+// the DEEP FALLBACK LADDER when the MiniMax models on OR are unavailable: free first, then a really-cheap
+// paid model — free tiers are congested/flaky, so the ladder ends on a reliable $0.08/M rung.
 const OR_FALLBACK_MODELS = (process.env.OPENROUTER_FALLBACK_MODELS || 'google/gemma-4-31b-it:free,mistralai/mistral-small-24b-instruct-2501')
   .split(',').map((m) => m.trim()).filter(Boolean);
+// the full non-web ladder: primaries (2.7 -> 2.5) first, then the cheap/free deep fallback.
+const OR_LADDER = [...OR_PRIMARY_MODELS, ...OR_FALLBACK_MODELS];
 const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
@@ -174,14 +182,14 @@ export function isBadKey(msg: any): boolean {
   return /\b401\b/.test(s2) && /(unauthorized|invalid.*key|no auth|authentication)/i.test(s2);
 }
 
-// try each rung in order — we are already in degraded mode, so ANY failure moves down the ladder
-async function callOpenRouterLadder(messages: any[], maxTokens: number, timeoutMs: number, t0: number): Promise<LLMResult> {
+// try each rung in order — the primaries (2.7 -> 2.5) first, then the cheap deep fallback.
+async function callOpenRouterLadder(messages: any[], maxTokens: number, timeoutMs: number, t0: number, models: string[] = OR_LADDER): Promise<LLMResult> {
   let last: any = null;
-  for (const m of OR_FALLBACK_MODELS) {
+  for (const m of models) {
     try { return await callOpenRouter(messages, m, maxTokens, timeoutMs, false, t0); }
     catch (e: any) { last = e; }
   }
-  throw last ?? new Error('fallback ladder empty');
+  throw last ?? new Error('openrouter ladder empty');
 }
 
 // M-family reasoning spends tokens in <think> BEFORE the answer — the caller's budget is for
@@ -217,11 +225,16 @@ export async function pingFallback(): Promise<boolean | null> {
 }
 
 async function callOpenRouter(messages: any[], model: string, maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {
-  const body: any = { model, messages, temperature: 0.7, max_tokens: maxTokens };
+  // REASONING HEADROOM: MiniMax reasoning is MANDATORY on OpenRouter and cannot be disabled — even at
+  // effort:minimal it can spend a few thousand tokens thinking (measured live 2026-07-06: up to ~3.3k on
+  // m2.7). Those tokens count against max_tokens, so without headroom the JSON answer gets TRUNCATED
+  // (empty-after-strip). Give reasoning models the same headroom the direct path uses so the answer
+  // always completes. 'most of the time we don't need reasoning' → effort:minimal keeps it small.
+  const isReasoner = /minimax|deepseek-r1|o[13]-|thinking|glm-|qwen3/i.test(model);
+  const body: any = { model, messages, temperature: 0.7, max_tokens: maxTokens + (isReasoner ? THINK_HEADROOM : 0) };
   // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
   if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
-  // reasoning effort only for models that HAVE reasoning — a free non-reasoning model may reject it
-  if (/minimax|deepseek-r1|o[13]-|thinking/i.test(model)) body.reasoning = { effort: 'minimal' };
+  if (isReasoner) body.reasoning = { effort: 'minimal' };
   const res = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -243,31 +256,50 @@ async function callOpenRouter(messages: any[], model: string, maxTokens: number,
   return { text, meta: { provider: 'openrouter', model, latencyMs: Date.now() - t0, web, ok: true } };
 }
 
-// PROVIDER ORDER (owner's directive 2026-07-05): MiniMax-direct is the PRIMARY — the coding
-// plan carries ~12.5B tokens/month of M3. OpenRouter is the FALLBACK on a FREE/cheap model.
-// Exception: web-grounded calls (research/strategy) go OR-first — the Exa plugin is OR-only —
-// and fall back to MiniMax UNgrounded rather than fail. Transient errors never fail over.
+// PROVIDER ORDER (owner directive 2026-07-06, benchmarked): OpenRouter is PRIMARY for EVERY call on the
+// MiniMax 2.7 -> 2.5 ladder (1-2s/call). minimax-direct is a DEEP FAILOVER only — the direct api.minimax.io
+// is 60-75s/call and truncates on the reasoning-only plan, which is what timed out builds. Web-grounded
+// calls (research/strategy) use the same OpenRouter primaries WITH the Exa plugin; if grounding fails they
+// fall through to the ungrounded ladder rather than fail. Transient errors move DOWN the ladder, not over.
 export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;
-  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : LLM_TIMEOUT_MS;  // compose (whole site) needs more
+  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : LLM_TIMEOUT_MS;
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
-  const primary: 'openrouter' | 'minimax-direct' = (web && OR_KEY) ? 'openrouter' : (KEY ? 'minimax-direct' : 'openrouter');
-  try {
-    if (primary === 'openrouter') return web ? await callOpenRouter(messages, OR_MODEL, maxTokens, timeoutMs, true, t0) : await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0);
-    return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0);
-  } catch (e: any) {
-    if (isQuotaExhausted(e?.message) && OR_KEY && KEY) {
-      try {
-        return primary === 'minimax-direct'
-          ? await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0)
-          : await callMiniMaxDirect(messages, maxTokens, timeoutMs, false, t0);
-      } catch (e2: any) {
-        return { text: '', meta: { provider: primary === 'minimax-direct' ? 'openrouter' : 'minimax-direct', model: primary === 'minimax-direct' ? OR_FALLBACK_MODELS[OR_FALLBACK_MODELS.length - 1] : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `failover after [${String(e?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
+
+  // 1) OPENROUTER PRIMARY (fast). Web: try each primary model WITH grounding, then fall to the ungrounded
+  //    ladder. Non-web: run the full 2.7 -> 2.5 -> cheap ladder.
+  if (OR_KEY) {
+    try {
+      if (web) {
+        let lastWeb: any = null;
+        for (const m of OR_PRIMARY_MODELS) {
+          try { return await callOpenRouter(messages, m, maxTokens, timeoutMs, true, t0); }
+          catch (e: any) { lastWeb = e; }
+        }
+        // grounding failed on all primaries → ungrounded ladder (better a real answer than a hard fail)
+        try { return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0); }
+        catch (e: any) { throw lastWeb ?? e; }
       }
+      return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0);
+    } catch (eOR: any) {
+      // 2) DEEP FAILOVER: OpenRouter fully unavailable → the slow direct MiniMax API (their plan).
+      if (KEY) {
+        try { return await callMiniMaxDirect(messages, maxTokens, timeoutMs, false, t0); }
+        catch (e2: any) {
+          return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `all providers failed [${String(eOR?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
+        }
+      }
+      return { text: '', meta: { provider: 'openrouter', model: OR_LADDER[0], latencyMs: Date.now() - t0, web, ok: false, error: String(eOR?.message ?? eOR) } };
     }
-    return { text: '', meta: { provider: primary, model: primary === 'openrouter' ? (web ? OR_MODEL : OR_FALLBACK_MODELS[0]) : MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } };
   }
+
+  // 3) No OpenRouter key configured → direct MiniMax only.
+  if (KEY) {
+    try { return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0); }
+    catch (e: any) { return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } }; }
+  }
+  return { text: '', meta: { provider: 'openrouter', model: 'none', latencyMs: Date.now() - t0, web, ok: false, error: 'no provider configured' } };
 }
 
 // string-returning form (drops the meta) for callers that just want the text.
@@ -296,9 +328,10 @@ export async function runAgentTracked(department: string, ctx: Ctx): Promise<LLM
     // reasoning models need headroom; compose emits the WHOLE site (all pages) so it needs the most; build
     // emits one page's spec; web calls synthesize search results.
     const maxTokens = department === 'compose' ? 16000 : department === 'build' ? 8000 : (web ? 4000 : 3000);
-    // compose generates the WHOLE site in one call (it replaces N per-page calls) — give it real headroom so
-    // it doesn't flake on the 90s default the way a single small call never would.
-    const timeoutMs = department === 'compose' ? Number(process.env.COMPOSE_TIMEOUT_MS || 180000) : undefined;
+    // compose generates the WHOLE site in one call. On OpenRouter (the primary) even the biggest call
+    // returns in a few seconds, so 45s is ample headroom — the old 180s only existed to tolerate the
+    // 60-75s direct-MiniMax API, which is now a deep failover, not the hot path.
+    const timeoutMs = department === 'compose' ? Number(process.env.COMPOSE_TIMEOUT_MS || 45000) : undefined;
     return await callLLM(system, buildUser(ctx, department), maxTokens, { web, timeoutMs });
   }
   // offline deterministic fallback — synthesize a uniform meta so the runner's instrumentation still records it.
