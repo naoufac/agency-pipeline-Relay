@@ -1,7 +1,8 @@
 // jsonld:check — schema.org STRUCTURED DATA. Proves the generators emit VALID JSON-LD, the renderer
 // injects the right types per page (Organization+WebSite on home, Product on a product page, Breadcrumb
-// on inner pages), values are injection-safe, and local-business classification is deterministic.
-import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, isLocalBusiness } from './jsonld.ts';
+// on inner pages), values are injection-safe, local-business classification is deterministic, and
+// archetype-specific @types (Restaurant, Dentist, HairSalon, …) are emitted correctly.
+import { ldScript, organizationLd, websiteLd, breadcrumbLd, productLd, articleLd, isLocalBusiness, bizTypeFor } from './jsonld.ts';
 import { renderPage } from './render.ts';
 
 let pass = 0, fail = 0;
@@ -58,6 +59,69 @@ const plannerSrc = (await import('node:fs')).readFileSync(new URL('./planner.ts'
 ok('planner: localBusiness is computed once as a build property', plannerSrc.includes('localBusiness: isLocalBusiness(brief)'));
 const liveSrc = (await import('node:fs')).readFileSync(new URL('./cms/live.ts', import.meta.url), 'utf8');
 ok('live: the crawled surfaces thread siteBase + localBusiness', (liveSrc.match(/siteBase: params\.slug/g) || []).length >= 2 && liveSrc.includes('localBusiness: !!params.localBusiness'));
+
+// ---- ARCHETYPE @type map (bizTypeFor) ----
+// Each specific schema.org type must fire on the right brief; the fallback chain must hold.
+ok('bizTypeFor: restaurant brief → Restaurant', bizTypeFor('a local pizzeria and trattoria') === 'Restaurant');
+ok('bizTypeFor: law firm brief → LegalService', bizTypeFor('a law firm specializing in mergers') === 'LegalService');
+ok('bizTypeFor: dental clinic brief → Dentist', bizTypeFor('a modern dental clinic in the city') === 'Dentist');
+ok('bizTypeFor: physiotherapy → MedicalBusiness', bizTypeFor('a physiotherapy and sports clinic') === 'MedicalBusiness');
+ok('bizTypeFor: hair salon → HairSalon', bizTypeFor('a hair salon and barber shop') === 'HairSalon');
+ok('bizTypeFor: gym → ExerciseGym', bizTypeFor('a gym and fitness studio') === 'ExerciseGym');
+ok('bizTypeFor: hotel → Hotel', bizTypeFor('a boutique hotel on the coast') === 'Hotel');
+ok('bizTypeFor: shop → Store', bizTypeFor('a boutique store selling vintage clothes') === 'Store');
+ok('bizTypeFor: generic local biz stays LocalBusiness (fallback tier 2)', bizTypeFor('a plumbing contractor') === 'LocalBusiness');
+ok('bizTypeFor: SaaS → Organization (fallback tier 3)', bizTypeFor('a B2B analytics SaaS') === 'Organization');
+ok('bizTypeFor: isLocalBusiness-true briefs NEVER return Organization', (() => {
+  const briefs = ['a barbershop booking app', 'a nail salon', 'a dental practice', 'a neighbourhood bakery'];
+  return briefs.every((b) => bizTypeFor(b) !== 'Organization');
+})());
+
+// ---- organizationLd uses bizType when provided (specific @type in the emitted JSON-LD) ----
+const restaurant = organizationLd({ name: 'Da Vito', base, logo: 'icon-512.png', bizType: 'Restaurant' });
+ok('organizationLd: bizType=Restaurant emits @type=Restaurant', restaurant['@type'] === 'Restaurant');
+const legalSvc = organizationLd({ name: 'Smith & Co', base, bizType: 'LegalService' });
+ok('organizationLd: bizType=LegalService emits @type=LegalService', legalSvc['@type'] === 'LegalService');
+ok('organizationLd: back-compat — localBusiness=true still works as LocalBusiness', organizationLd({ name: 'X', base, localBusiness: true })['@type'] === 'LocalBusiness');
+
+// ---- renderer emits Restaurant @type for a restaurant brief with bizType ----
+const restHome = renderPage(
+  { brand: { name: 'Da Vito', tokens: { bg: '#fff', primary: '#111' } }, sections: [{ type: 'hero', headline: 'La Cucina' }] },
+  { pages, slug: 'index', title: 'Home', theme: 'modern', siteBase: base, localBusiness: true, bizType: 'Restaurant' });
+const restLd = parseLd(restHome);
+ok('render home with bizType=Restaurant: emits @type=Restaurant, not LocalBusiness', restLd.some((x) => x['@type'] === 'Restaurant') && !restLd.some((x) => x['@type'] === 'LocalBusiness'), JSON.stringify(restLd.map((x) => x['@type'])));
+
+// ---- CANONICAL link is present with siteBase, absent without ----
+ok('render: canonical link emitted when siteBase is known', home.includes('<link rel="canonical" href="https://acme.naples.agency/">'));
+ok('render inner: canonical link uses the inner page URL', inner.includes('<link rel="canonical" href="https://acme.naples.agency/about.html">'));
+const noBase = renderPage(
+  { brand: { name: 'X', tokens: { bg: '#fff', primary: '#111' } }, sections: [{ type: 'hero', headline: 'Hi' }] },
+  { pages, slug: 'index', title: 'Home' });   // no siteBase
+ok('render: canonical link OMITTED when siteBase is absent (dev/fixture render)', !noBase.includes('<link rel="canonical"'));
+
+// ---- og:image is ABSOLUTE when siteBase is known ----
+ok('render: og:image is absolute when siteBase is known', home.includes('og:image" content="https://acme.naples.agency/icon-512.png"'));
+ok('render: og:image is relative when siteBase is absent', noBase.includes('og:image" content="icon-512.png"'));
+
+// ---- alt=query in q() placeholder images (gate for the q() fix in components.ts) ----
+const componentsSrc = (await import('node:fs')).readFileSync(new URL('./components.ts', import.meta.url), 'utf8');
+ok('components: q() emits alt=query (not empty alt)', /const q = /.test(componentsSrc) && /alt="\$\{esc\(query\)\}"/.test(componentsSrc));
+ok('components: q() emits eager attrs for hero images', componentsSrc.includes('loading="eager"') && componentsSrc.includes('fetchpriority="high"'));
+
+// ---- buildImgTag pure function in media.ts (CLS-proof, srcset, alt, eager) ----
+const { buildImgTag } = await import('./media.ts');
+const fixtureMeta = { query: 'sunset over the ocean', local: 'assets/media-1.jpg', localMedium: 'assets/media-1-m.jpg', width: 1920, height: 1080 };
+const lazyTag = buildImgTag(fixtureMeta, false, 'hero-bg');
+ok('buildImgTag: emits width + height (CLS-proof)', lazyTag.includes('width="1920"') && lazyTag.includes('height="1080"'));
+ok('buildImgTag: emits srcset with large + medium', lazyTag.includes('assets/media-1.jpg') && lazyTag.includes('assets/media-1-m.jpg'));
+ok('buildImgTag: emits sizes attribute', lazyTag.includes('sizes='));
+ok('buildImgTag: emits alt from query', lazyTag.includes('alt="sunset over the ocean"'));
+ok('buildImgTag: non-hero → loading="lazy"', lazyTag.includes('loading="lazy"') && !lazyTag.includes('loading="eager"'));
+const eagerTag = buildImgTag(fixtureMeta, true, 'hero-bg');
+ok('buildImgTag: hero → loading="eager" fetchpriority="high"', eagerTag.includes('loading="eager"') && eagerTag.includes('fetchpriority="high"'));
+ok('buildImgTag: hero uses sizes=100vw', eagerTag.includes('sizes="100vw"'));
+ok('buildImgTag: non-hero uses sizes with 33vw breakpoint', lazyTag.includes('33vw'));
+ok('buildImgTag: class attribute carried through', lazyTag.includes('class="hero-bg"'));
 
 console.log(`\njsonld:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

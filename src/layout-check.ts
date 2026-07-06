@@ -119,5 +119,45 @@ ok('the search box is accessible + safe (aria from the locale dict)', rendered.i
   ok('checkout carries the honeypot too', coHtml.includes('name="company_website"'));
 }
 
+// IMAGE QUALITY GATES:
+// (a) Hero images get eager loading (LCP candidate — reduces CLS/FCP)
+// (b) All q() placeholder images emit alt=<query text> (not empty alt="")
+// (c) Non-hero images stay lazy
+{
+  const heroSpec = () => ({ brand: { name: 'A', tokens: { bg: '#fff', primary: '#123456' } }, sections: [
+    { type: 'hero', image: 'mountain landscape at dawn', headline: 'Welcome' },
+    { type: 'split', image: 'team collaborating', title: 'About', body: 'We work together.' },
+  ] });
+  const imgHtml = renderPage(heroSpec(), { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home' });
+
+  // Hero image: data-q placeholder must have loading="eager" and fetchpriority="high"
+  ok('hero image placeholder has loading="eager"', imgHtml.includes('loading="eager"'));
+  ok('hero image placeholder has fetchpriority="high"', imgHtml.includes('fetchpriority="high"'));
+
+  // All q() placeholders must carry alt=<query text> (not the old alt="")
+  ok('q() placeholders carry alt=query text (not blank)', imgHtml.includes('alt="mountain landscape at dawn"'));
+  ok('split image carries its alt query text', imgHtml.includes('alt="team collaborating"'));
+
+  // Non-hero placeholder images must still be lazy-loaded
+  ok('non-hero images stay loading="lazy"', imgHtml.includes('loading="lazy"'));
+}
+
+// CANONICAL + og:image GATES:
+// canonical link is present when siteBase is known; absent when not.
+// og:image is absolute when siteBase is known.
+{
+  const withBase = renderPage(
+    { brand: { name: 'A', tokens: { bg: '#fff', primary: '#123456' } }, sections: [{ type: 'hero', headline: 'Hi' }] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', siteBase: 'https://demo.naples.agency' });
+  ok('canonical link is emitted when siteBase is known', withBase.includes('<link rel="canonical" href="https://demo.naples.agency/">'));
+  ok('og:image is absolutized when siteBase is known', withBase.includes('og:image" content="https://demo.naples.agency/icon-512.png"'));
+
+  const withoutBase = renderPage(
+    { brand: { name: 'A', tokens: { bg: '#fff', primary: '#123456' } }, sections: [{ type: 'hero', headline: 'Hi' }] },
+    { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home' });
+  ok('canonical link is absent when siteBase is not known', !withoutBase.includes('<link rel="canonical"'));
+  ok('og:image stays relative when siteBase is not known', withoutBase.includes('og:image" content="icon-512.png"'));
+}
+
 console.log(`\nlayout:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

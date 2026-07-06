@@ -5,7 +5,13 @@ import { SLOT_TABLE } from './schema.ts';
 import { L, curSym, columnLabel, fmtMoney } from './i18n.ts';
 
 export const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c]);
-const q = (query: string, cls = '') => `<img data-q="${esc(query)}" alt="" class="${cls}" loading="lazy">`;
+// q(): image placeholder. The Pexels query IS the human description of the image — it becomes the alt text.
+// eager=true → hero image (LCP candidate); gets loading="eager" fetchpriority="high" instead of lazy.
+// processMedia() in media.ts replaces data-q with a real local asset at build time.
+const q = (query: string, cls = '', eager = false) =>
+  eager
+    ? `<img data-q="${esc(query)}" alt="${esc(query)}" class="${cls}" loading="eager" fetchpriority="high">`
+    : `<img data-q="${esc(query)}" alt="${esc(query)}" class="${cls}" loading="lazy">`;
 const humanize = (s: string) => String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 // Design-system CSS. Responsive, CSS-only hamburger (no JS), fixed spacing/type scale. Inlined per page.
@@ -280,20 +286,21 @@ export const SECTIONS: Record<string, (s: any, o?: SecOpts) => string> = {
     const lead = s.lead ? `<p class="lead">${esc(s.lead)}</p>` : '';
     const cta = btn(o, s.cta, s.link);
     const copy = `${eyebrow}<h1>${esc(s.headline)}</h1>${lead}${cta}`;
+    // Hero images are the LCP candidate → eager loading + high fetchpriority to minimize CLS/LCP.
     if (v === 'split') return `<header class="hero hero-split"><div class="container"><div class="hero-split-grid">
       <div class="hero-copy">${copy}</div>
-      <div class="hero-media">${s.image ? q(s.image, 'hero-photo') : ''}</div>
+      <div class="hero-media">${s.image ? q(s.image, 'hero-photo', true) : ''}</div>
     </div></div></header>`;
     if (v === 'center') return `<header class="hero hero-center"><div class="container"><div class="hero-inner">${copy}</div></div></header>`;
     if (v === 'editorial') return `<header class="hero hero-editorial"><div class="container">
       <div class="hero-head">${eyebrow}<h1>${esc(s.headline)}</h1></div>
-      ${s.image ? `<div class="hero-wide">${q(s.image, 'hero-photo')}</div>` : ''}
+      ${s.image ? `<div class="hero-wide">${q(s.image, 'hero-photo', true)}</div>` : ''}
       <div class="hero-foot">${lead}${cta}</div>
     </div></header>`;
     // image (default): full-bleed photo + overlay. The `on-image` (white text) treatment is applied
     // ONLY when a photo is actually present — otherwise the hero is a clean, legible typographic hero
     // on the brand bg (never a grey void when Pexels returns nothing).
-    return `<header class="hero${s.image ? ' on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg')}<div class="hero-overlay"></div>` : ''}
+    return `<header class="hero${s.image ? ' on-image' : ''}">${s.image ? `${q(s.image, 'hero-bg', true)}<div class="hero-overlay"></div>` : ''}
       <div class="container"><div class="hero-inner">${copy}</div></div></header>`;
   },
   // STORE (PQ2) · products — a real shop grid: cards load from the live products table and each

@@ -15,8 +15,11 @@ export function ldScript(objs: any): string {
   return arr.map((o) => `<script type="application/ld+json">${jstr(o)}</script>`).join('');
 }
 
-export function organizationLd(a: { name: string; base?: string; logo?: string; localBusiness?: boolean }): any {
-  return clean({ '@context': 'https://schema.org', '@type': a.localBusiness ? 'LocalBusiness' : 'Organization',
+// organizationLd: use bizType (specific schema.org @type) when provided;
+// fall back to the old localBusiness boolean for back-compat with the existing test suite.
+export function organizationLd(a: { name: string; base?: string; logo?: string; localBusiness?: boolean; bizType?: string }): any {
+  const type = a.bizType || (a.localBusiness ? 'LocalBusiness' : 'Organization');
+  return clean({ '@context': 'https://schema.org', '@type': type,
     name: a.name, url: a.base || undefined, logo: a.logo ? abs(a.base, a.logo) : undefined });
 }
 export function websiteLd(a: { name: string; base?: string }): any {
@@ -58,3 +61,29 @@ export function articleLd(a: { headline: string; image?: string; datePublished?:
 // LOCAL-BUSINESS detection from the brief (a physical-location service → LocalBusiness, else Organization).
 const LOCAL_BIZ = /\b(barbershops?|barbers?|salons?|spas?|restaurants?|cafe|café|baker(?:y|ies)|pubs?|brewer(?:y|ies)|bistros?|diners?|pizzeria|taqueria|clinics?|dental|dentists?|doctors?|physio\w*|chiropract\w*|veterinar\w*|\bvet\b|gyms?|fitness|yoga|pilates|studios?|boutiques?|hotels?|motels?|florists?|repair\w*|garages?|mechanics?|plumb\w*|electrician\w*|hvac|contractors?|landscap\w*|laundr\w*|realtors?|realty|real estate|butchers?|grocer\w*|\bdeli\b|nail\s?salons?|hair\s?salons?|massage|tattoo\w*|opticians?|pharmac\w*|hardware stores?|booksh\w*|bookstores?)\b/i;
 export const isLocalBusiness = (brief: string): boolean => LOCAL_BIZ.test(String(brief || ''));
+
+// ARCHETYPE JSON-LD: map a brief → the most SPECIFIC schema.org @type for the business.
+// This gives Google richer signals (a Restaurant in Maps vs a generic LocalBusiness). The tiers:
+//   1. Specific schema.org subtype (restaurant/dentist/salon/…) — best ranking signal
+//   2. LocalBusiness fallback for any physical-presence brief that matches LOCAL_BIZ
+//   3. Organization for everything else (SaaS, portfolio, platform, agency)
+// Order is exact-first (restaurant before LocalBusiness) to avoid over-broadening.
+// Keep isLocalBusiness() working (back-compat) — it is the building block here.
+const BIZ_TYPES: [RegExp, string][] = [
+  [/\b(restaurants?|trattoria|pizzeria|cafe|café|bistro|osteria|diners?|taqueria|brasserie|cantina)\b/i, 'Restaurant'],
+  [/\b(law\s*firm|attorney|lawyer|legal\s*service|solicitor|barrister)\b/i, 'LegalService'],
+  [/\b(dentis[st]|dental)\b/i, 'Dentist'],
+  [/\b(clinic|physio\w*|therapy|therapist|medical|chiropract\w*|psychiatr\w*|psycholog\w*|osteopath\w*)\b/i, 'MedicalBusiness'],
+  [/\b(barber\w*|hair\s?salon|hair\s?dresser|salon)\b/i, 'HairSalon'],
+  [/\b(gym|fitness|exercise\s?studio|crossfit|pilates|yoga)\b/i, 'ExerciseGym'],
+  [/\b(hotels?|motels?|b&b|bed\s*and\s*breakfast|guesthouse|inn|hostel)\b/i, 'Hotel'],
+  [/\b(shop|boutique|store)\b/i, 'Store'],
+];
+// Returns the most specific schema.org @type for the brief.
+// Invariant: if isLocalBusiness() is true, this returns something ≠ 'Organization'.
+export function bizTypeFor(brief: string): string {
+  const s = String(brief || '');
+  for (const [re, type] of BIZ_TYPES) if (re.test(s)) return type;
+  if (LOCAL_BIZ.test(s)) return 'LocalBusiness';
+  return 'Organization';
+}

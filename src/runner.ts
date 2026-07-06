@@ -12,6 +12,7 @@ import { renderPage, formPageSlug, receiptsEnabled } from './render.ts';
 import { isQuotaExhausted } from './agents.ts';
 import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, modelHasCore, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
+import { bizTypeFor } from './jsonld.ts';
 import { ensurePwaAssets } from './pwa.ts';
 import { sitemapXml, robotsTxt } from './seo.ts';
 import * as appdb from './appdb.ts';
@@ -136,7 +137,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug, locale: params.locale, localBusiness: params.localBusiness } as any;
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug, locale: params.locale, localBusiness: params.localBusiness, bizType: params.bizType } as any;
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -158,7 +159,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       applyBrand(spec, canon);                                          // FORCE the one identity onto the projection
       mkdirSync(fileURLToPath(dir), { recursive: true });
       const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
-      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness });
+      const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType });
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));   // rendered page -> served file (CMS-native serving replaces the old edit-overlay; src/cms.ts removed)
       // PWA: every produced site ships manifest + offline shell + brand icons (compiled from the
       // locked brand; icons painted once). A failure here must not fail the page render itself.
@@ -245,7 +246,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(canon)]);
           applyBrand(spec, canon);
           const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
-          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness });
+          const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType });
           writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));
         } else {
           let body = stripFences(content);
@@ -266,6 +267,11 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           const ar = await pool.query("select params->>'archetype' as a, params->>'theme' as t, brief from projects where id=$1", [task.project_id]);
           const b = resolveBrand(content, (ctx as any)?.brand?.name, ar.rows[0]?.a, ar.rows[0]?.t, ar.rows[0]?.brief);
           await pool.query("update projects set params = jsonb_set(params, '{brand}', $2::jsonb, true) where id=$1 and (params->'brand') is null", [task.project_id, JSON.stringify(b)]);
+          // COMPUTE bizType ONCE from the brief alongside the brand — this is the specific schema.org
+          // @type for the business (Restaurant/Dentist/HairSalon/…) derived deterministically so every
+          // render and live page emits the same most-specific JSON-LD without re-reading the brief.
+          const bt = bizTypeFor(ar.rows[0]?.brief || '');
+          await pool.query("update projects set params = jsonb_set(params, '{bizType}', to_jsonb($2::text), true) where id=$1 and (params->>'bizType') is null", [task.project_id, bt]);
           // DOMAINS: lock the site's subdomain slug alongside the brand — collision-safe, once
           const { brandSlug } = await import('./spec.ts');
           // identity: if a brand is already locked (rebuild / pre-slug project), the slug comes
