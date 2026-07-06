@@ -1317,31 +1317,27 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = 678f1f7; FULL 22-suite gate green ON PROD (spec 191 · layout 149 · jsonld 92 ·
-  billing 93 · lifecycle 56 · all 0-failed); graceful SIGTERM drain PROVEN in journal; nightly
-  canary/backup/watchdog armed; offsite vault shipping again.
-· 2026-07-06 BOSS SESSION 2 (phase 4, all live-proven then scratch sites swept):
-  - DESIGN VARIETY (owner: "very few patterns"): heroes 4->6 (poster, ledger), cards 3->4 (minimal),
-    section modes: features grid|rail, testimonials grid|spotlight, stats row|inline — independent FNV
-    seed per section; back-compat with stored layouts; layout:check 100->149. Live proof picked
-    features-rail + stats-inline on a real build.
-  - SEO ENRICHMENT: extractBusinessFacts walks the WHOLE site incl. a free-text pass over prose
-    (phone >=8 digits, email, Italian street, hours with full Italian day names / "dalle-alle" /
-    "days, time" comma) -> LocalBusiness LD with telephone/address/openingHours; FAQPage LD on faq
-    pages; sitemap lastmod. Live-proven: LegalService + telephone + PostalAddress + 5-day hours +
-    FAQPage on a real law-firm build. THREE composition bugs live-caught then gated: single-page
-    facts proxy, openingHours vs openingHoursSpecification key drop, prose parsing.
-  - OPS: SIGTERM graceful drain (proven: "pool drained — exiting clean" <1s, no more SIGKILL);
-    anon 2-builds/IP/day persisted in anon_runs (sha256(ip+salt), raw IP never stored); billing
-    advisory lock 64-bit.
-  - OPERATOR FUNNEL: /api/kpi strips funnel for non-operators (proven live), /api/me exposes
-    isOperator, board renders operator-only funnel strip (real users/leads/paying + credits).
-· BILLING LIVE (session 1): $30 grant/user, 5-page site = $6.50 (50c/planned-step, $3-$20), rebuild $2,
-  design $1, $20/day cap, append-only ledger, refunds on both failure shapes, operator exempt.
-· FIGMA: token installed + API-proven via importer. Needs ONE real file URL from the owner to certify e2e.
-· OWNER-GATED (do NOT start without explicit word): Stripe v2 (top-up/invoicing), Play Store, apex
-  naples.agency flip (RELAY_HOME_SLUG + DNS; never stomp the existing apex page).
-· NEXT CANDIDATES: visual design-review pass over the new hero/card variants on real screenshots
-  (deterministic gates green; art direction judgment pending), client-facing visitor analytics on
-  produced sites, BYO custom domains, funnel distribution. Discipline: build -> gate -> deploy ->
-  prove on real output -> adversarially audit; the live proof keeps catching what dev gates miss.
+· System healthy; prod = ad03d9c; FULL 23-suite gate green ON PROD (spec 191 · layout 154 · jsonld 92 ·
+  billing 93 · analytics 49 · lifecycle 56 · all 0-failed); SIGTERM drain proven; vault shipping; canary armed.
+· 2026-07-06 BOSS SESSION 3 (all live-proven on real sites):
+  - VISUAL ART-DIRECTION REVIEW (boss-eyes on real screenshots, mobile+desktop): caught curly-quote
+    attribute delimiters (class=”…”) that made ALL new testimonial CSS dead while marker greps passed —
+    rewritten straight-quoted; spotlight = one commanding display quote + own author + rest as cards
+    (no orphan names); ledger hero = true editorial split (eyebrow left · lead+CTA right). Second-pass
+    screenshots signed off. Gates: curly-attr ban + column-order pins, layout:check 149->154.
+  - VISITOR ANALYTICS (ARC J): first-party cookieless beacon (sendBeacon -> same-origin /api/hit) on
+    every produced page incl. CMS re-serves; site_hits dedupe = one visitor/page/day via
+    sha256(ip+UA+day+salt) (raw IP never stored, daily rotation); owner-gated visits API + board line
+    (today/7d/30d/top pages); analytics:check 49 gates, suite #23. LIVE-PROVEN on nenna: beacon in
+    served html, 2 identical hits -> 1 row, new path -> own row.
+  - LEGACY LD UPGRADE PATH: finalize PERSISTS derived bizType into params (CMS-first: one stored value,
+    every projection agrees) — nenna now serves Restaurant @type + real telephone/hours extracted from
+    its own Italian prose. Re-finalizing any legacy site upgrades it to the full current head
+    (external css, canonical, enriched LD, beacon).
+· BILLING LIVE: $30 grant/user, 5-page site ≈ $6.50, rebuild $2, design $1, $20/day cap, refunds,
+  anon 2/IP/day persisted, operator exempt. FIGMA: token in, needs one real file URL to certify e2e.
+· OWNER-GATED (explicit word only): Stripe v2, Play Store, apex naples.agency flip.
+· NEXT CANDIDATES: re-finalize sweep over ALL legacy permanent sites (batch upgrade to current head —
+  cheap, high-value), BYO custom domains, funnel distribution, minimal-card numbered eyebrows polish.
+  Discipline: build -> gate -> deploy -> prove on real output -> adversarially audit; screenshots catch
+  what greps cannot.
