@@ -1281,3 +1281,13 @@ Full check (22 suites) green. Shipped de98edc. LIVE: Midnight preset on chopslot
   box now says "any {colors, typography, radius} JSON". source:'canva' label stays for canva-shaped input.
 design:check 61→62, app 207; full check (22 suites) green. Shipped d2132e5. Verified live: board serves
 the preview code, the Canva overclaim is gone, presets carry the full Design.
+
+## 2026-07-06 — Fresh certification flight (store) proves the render-path changes compose
+
+Flew a full store build (candle maker) on the current code — the accumulated render.ts changes (design
+ingestion, presets, figma, rebuild-survival) had only unit gates since casa-mirella. Result: built 17/17,
+review passed, iteration survived 19→23 rows + re-passed, live at hearthline.naples.agency.
+DESIGN-ON-REAL-STORE PROOF: applied the Editorial preset to the finished store → live home rendered
+bg #faf6ef / text #2a2420 at 14.2:1 (legible) / primary #a2432a, Fraunces loaded — AND the product grid
++ checkout page stayed intact (checkout 200). The design→reality path composes end-to-end on a store,
+not just a barbershop or a hand-edited canary. Reverted after. No code change — a certification pass.
