@@ -1209,3 +1209,17 @@ Adversarial audit (4 lenses) of the figma-to-reality seam. 5 confirmed, two root
 design:check 21→26 (real contrast-ratio assertions on the rendered vars). Full check (21 suites)
 green. Shipped 93fc2ea. LIVE PROOF: a dark-bg Figma design with no text colour → served page
 re-derived --text:#fff at 18.9:1 on the dark bg (legible), where pre-fix it would have been unreadable.
+
+## 2026-07-06 — Figma → reality: design INTAKE (the seam is now reachable)
+
+The design seam was dormant (no way to get a design into a project). Shipped the intake:
+· POST /api/site/:id/design — owner-only write, rate-capped, 512KB cap. Paste an exported token set
+  (Figma Variables / Tokens Studio / Canva brand kit) → same designFromTokens validator → merged into
+  the CANONICAL brand (name/tokens survive) → LIVE next page load (no rebuild). {clear:true} reverts.
+  GET returns the current design.
+· Board 'Design' tab: paste tokens, see applied palette swatches + fonts, Apply / Remove. Phone-first.
+design:check 26→32. Full check (21 suites) green. Shipped 78f73e3.
+LIVE PROOF: anon write → 404 (owner-only, nothing written); the endpoint's exact data path (validate →
+merge → render) on chopslot kept brand name "ChopSlot" + tokens, added the design, and the served page
+rendered primary #c8963e with Cormorant Garamond loaded. Reverted.
+The live Figma/Canva URL connector fills this same endpoint once the owner provides a source.
