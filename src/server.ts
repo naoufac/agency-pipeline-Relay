@@ -189,10 +189,11 @@ const server = http.createServer(async (req, res) => {
       res.end('{"ok":true}'); return;
     }
     if (path === '/api/me') {
-      if (!user) return send(res, 200, 'application/json', JSON.stringify({ email: null, balance_cents: null, spent_today_cents: null }));
+      if (!user) return send(res, 200, 'application/json', JSON.stringify({ email: null, balance_cents: null, spent_today_cents: null, isOperator: false }));
       // Lazily grant signup credit (idempotent) and return the live balance alongside the identity.
+      // isOperator is server-computed (never client-asserted) — the board renders the funnel strip only when true.
       const [bal, spent] = await Promise.all([balanceCents(pool, user.id), spentTodayCents(pool, user.id)]);
-      return send(res, 200, 'application/json', JSON.stringify({ email: user.email, balance_cents: bal, spent_today_cents: spent }));
+      return send(res, 200, 'application/json', JSON.stringify({ email: user.email, balance_cents: bal, spent_today_cents: spent, isOperator: isOperator(user) }));
     }
 
     // mail.naples.agency / email.naples.agency — the PUBLISHED status of Relay's email layer:
@@ -460,7 +461,13 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
     if (path === '/api/kpi') {
       const kid = url.searchParams.get('id') || undefined;
       if (kid && !canSee(user, await ownerOf(kid))) return send(res, 404, 'application/json', 'null');
-      return send(res, 200, 'application/json', JSON.stringify(await computeKpi(pool, kid)));
+      const kpiData = await computeKpi(pool, kid);
+      // OPERATOR GATE: the funnel key contains business-sensitive demand data (real user counts,
+      // paying users, credit totals). Strip it from the public response so non-operators cannot
+      // harvest business internals via /api/kpi. Back-compat: the public shape never had funnel
+      // (the key was added internally) — stripping it keeps all existing callers working.
+      if (kpiData && !isOperator(user)) delete (kpiData as any).funnel;
+      return send(res, 200, 'application/json', JSON.stringify(kpiData));
     }
     if (path === '/api/output') {
       if (!canSee(user, await ownerOf(url.searchParams.get('id') || ''))) return send(res, 404, 'application/json', '{}');
