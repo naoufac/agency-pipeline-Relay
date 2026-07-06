@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { makePool } from './db.ts';
 import { plan, buildPlan, persistPlan } from './planner.ts';
 import { ensureBillingTables, balanceCents, spentTodayCents, debitCents, refundCents, quoteCents, isOperator, billingEnabled, formatInsufficientFunds, anonRunDbLimited } from './billing.ts';
+import { ensureAnalyticsTables, recordHit, visitsForProject } from './analytics.ts';
 import { runLoop } from './runner.ts';
 import { startRebuild } from './rebuild.ts';
 import { computeKpi } from './kpi.ts';
@@ -33,7 +34,7 @@ process.on('uncaughtException', (e: any) => { console.error('uncaughtException',
 
 // /api/run spends real LLM tokens — guard it. Per-IP sliding window + a global concurrent-project cap
 // (the cap also protects the pg pool from the runner's pool-exhaustion failure mode).
-const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>(), APK_HITS = new Map<string, number[]>(), CHAT_HITS = new Map<string, number[]>();
+const RUN_HITS = new Map<string, number[]>(), PUB_HITS = new Map<string, number[]>(), APK_HITS = new Map<string, number[]>(), CHAT_HITS = new Map<string, number[]>(), HIT_HITS = new Map<string, number[]>();
 const RATE_WINDOW_MS = 15 * 60 * 1000, RUN_MAX_PER_IP = 5, PUB_MAX_PER_IP = Number(process.env.PUB_MAX || 40), MAX_ACTIVE_PROJECTS = 6;
 function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   const now = Date.now();
@@ -42,6 +43,11 @@ function limited(map: Map<string, number[]>, max: number, ip: string): boolean {
   arr.push(now); map.set(ip, arr); return false;
 }
 const QA_HITS = new Map<string, number[]>(), FORM_HITS = new Map<string, number[]>(), READ_HITS = new Map<string, number[]>(), AUTH_HITS = new Map<string, number[]>();
+// HIT_HITS: per-IP rate limiter for /api/hit (the analytics beacon). Generous cap — a single
+// visitor exploring a site with many pages should never be blocked. 60 per 15 min = 4/min,
+// enough for any human browsing session. This stops a bot hammering the hit endpoint with
+// random paths to inflate counts.
+const HIT_MAX_PER_IP = 60;
 // ARC A: anonymous build cap — 2 per IP per 24h sliding window (the lead-gen shop window stays
 // open but can't be used as a free LLM proxy; the nightly localhost canary fits under 2/day).
 // Separate from RUN_HITS (15-min window) — this is a 24-hour window.
@@ -50,7 +56,7 @@ const ANON_WINDOW_MS = 24 * 60 * 60 * 1000, ANON_MAX_PER_IP = 2;
 // the hit maps prune stale TIMESTAMPS on access but never drop the IP KEYS themselves — over months a
 // long-lived process accumulates a key per unique visitor IP (unbounded memory). Sweep empty/all-expired
 // entries every window so the maps track only recently-active IPs. (adversarial audit 2026-07-05)
-const RATE_MAPS = [RUN_HITS, PUB_HITS, APK_HITS, CHAT_HITS, QA_HITS, FORM_HITS, READ_HITS, AUTH_HITS, ANON_RUN_HITS];
+const RATE_MAPS = [RUN_HITS, PUB_HITS, APK_HITS, CHAT_HITS, QA_HITS, FORM_HITS, READ_HITS, AUTH_HITS, ANON_RUN_HITS, HIT_HITS];
 function purgeRateMaps(): void {
   const now = Date.now();
   for (const m of RATE_MAPS) for (const [ip, arr] of m) {
@@ -97,7 +103,15 @@ async function boardJSON(user: User | null, projectId?: string) {
      join tasks us on us.id=d.upstream_id join tasks ds on ds.id=d.downstream_id
      where us.project_id=$1`, [proj.id])).rows;
   const hasSite = existsSync(fileURLToPath(new URL(proj.id + '/index.html', SITES)));
-  return { project: proj, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null };
+  // ARC J: visitor analytics — owner-only. canSee already enforced above; the visits key
+  // is ONLY added when the requesting user is the project owner (or the project is ownerless
+  // legacy — in which case user is null and visits are omitted for safety). The ownership
+  // check here mirrors the canSee guard: if user.id === owner_id → include visits.
+  let visits = null;
+  if (user && proj.owner_id != null && user.id === proj.owner_id) {
+    try { visits = await visitsForProject(pool, proj.id); } catch { /* non-critical — never 500 */ }
+  }
+  return { project: proj, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null, visits };
 }
 
 async function projectsJSON(user: User | null) {
@@ -849,6 +863,51 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       return send(res, 202, 'application/json', '{"ok":true}');
     }
 
+    // ARC J: ANALYTICS BEACON endpoint. Produced pages fire navigator.sendBeacon('/api/hit', …)
+    // (same-origin, relative URL) once per page view. No auth required — this is first-party
+    // telemetry from the visitor's browser. Rate-limited per IP (generous: 60/15min) so no bot
+    // can inflate counts. The project is resolved from the Host header (subdomain slug → project id)
+    // or from the Referer path (/sites/<id>/…) for path-served sites.
+    // Body cap 1KB: the JSON payload is tiny ({p:"/path"}) so anything larger is anomalous.
+    if (path === '/api/hit' && req.method === 'POST') {
+      const ip = clientIp(req);
+      if (limited(HIT_HITS, HIT_MAX_PER_IP, ip)) return send(res, 429, 'application/json', '{}');
+      // body cap: 1KB
+      let raw = '';
+      for await (const c of req) { raw += c; if (raw.length > 1024) return send(res, 413, 'application/json', '{}'); }
+      let hitPath = '/'; try { hitPath = JSON.parse(raw || '{}').p || '/'; } catch { /* malformed body → default to / */ }
+      const safe = (() => {
+        // strip query string, enforce leading slash, cap at 200 chars
+        const noQ = String(hitPath).split('?')[0].split('#')[0];
+        const sl = noQ.startsWith('/') ? noQ : '/' + noQ;
+        return sl.length <= 200 ? sl : '';
+      })();
+      if (!safe) return send(res, 200, 'application/json', '{}');   // oversized path silently discarded
+      // Resolve which project this beacon belongs to:
+      //   1. subdomain: <slug>.naples.agency → look up project by slug param
+      //   2. path-served: Referer contains /sites/<uuid>/ → extract the id directly
+      // Without a resolvable project the hit is silently dropped (never a 404 that could
+      // be exploited to enumerate projects — the beacon fires on every page load).
+      const hitHost = String(req.headers.host || '').toLowerCase().split(':')[0];
+      const hitSub = hitHost.match(/^([a-z0-9][a-z0-9-]{0,62})\.naples\.agency$/)?.[1];
+      let hitProjectId: string | null = null;
+      if (hitSub && !/^(board|api|email|cms|sites|www|mail|admin|status|relay)$/.test(hitSub)) {
+        const pr = (await pool.query("select id from projects where params->>'slug' = $1 limit 1", [hitSub])).rows[0];
+        if (pr) hitProjectId = pr.id;
+      }
+      if (!hitProjectId) {
+        // Referer path-served fallback: /sites/<uuid>/…
+        const ref = String(req.headers.referer || req.headers.referrer || '');
+        const refM = ref.match(/\/sites\/([0-9a-f-]{36})\//i);
+        if (refM && UUID_RE.test(refM[1])) hitProjectId = refM[1];
+      }
+      if (!hitProjectId) return send(res, 200, 'application/json', '{}');   // no project — silently drop
+      const ua = String(req.headers['user-agent'] || '');
+      // recordHit handles the dedup (ON CONFLICT DO NOTHING) and 400d prune — fire-and-forget
+      recordHit(pool, hitProjectId, safe, ip, ua).catch(() => {});
+      return send(res, 200, 'application/json', '{}');
+    }
+
     if (path === '/api/run' && req.method === 'POST') {
       const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
       if (rateLimited(ip)) return send(res, 429, 'application/json', JSON.stringify({ error: 'Too many briefs — max 5 per 15 min. Try again shortly.' }));
@@ -1017,6 +1076,9 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // ensure the interaction-review table exists (so /api/projects' review verdict query never 500s)
 ensureAuthTables(pool).catch((e) => console.error('auth tables', e?.message));
 ensureBillingTables(pool).catch((e) => console.error('billing tables', e?.message));
+// ARC J: analytics DDL — site_hits table + unique index (dedup gate) + aggregation index.
+// Same boot pattern as billing: idempotent CREATE TABLE / CREATE INDEX IF NOT EXISTS.
+ensureAnalyticsTables(pool).catch((e) => console.error('analytics tables', e?.message));
 import('./chat.ts').then((m) => m.ensureChatTables(pool)).catch((e) => console.error('chat tables', e?.message));
 // BOOKING REMINDERS: sweep every 30 min (idempotent via reminder_log — a restart never double-sends).
 // First run 3 min after boot so a crash-loop can't hammer the mailer.

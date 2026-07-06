@@ -203,3 +203,22 @@ create table if not exists anon_runs (
 );
 -- Index on (ip_hash, at): both the 24h COUNT query and the >48h DELETE use this key.
 create index if not exists anon_runs_ip_at_ix on anon_runs(ip_hash, at);
+
+-- ===== ARC J: first-party visitor analytics (cookieless, privacy-first) =====
+-- site_hits: one row per unique (project, day, path, visitor_hash).
+-- visitor_hash = sha256(ip + ua + day + RELAY_IP_SALT) — raw IPs NEVER stored.
+-- Daily salt rotation makes cross-day correlation structurally impossible.
+-- INSERT … ON CONFLICT DO NOTHING (unique index below) = one count per visitor per page per day.
+-- Rows older than 400 days are pruned opportunistically in analytics.ts (no separate cron).
+create table if not exists site_hits (
+  project_id   uuid  not null,
+  day          date  not null,
+  path         text  not null,
+  visitor_hash text  not null
+);
+-- THE dedup gate: duplicate (project, day, path, visitor_hash) is silently dropped on INSERT.
+create unique index if not exists site_hits_dedup_ux
+  on site_hits(project_id, day, path, visitor_hash);
+-- Fast aggregation index: all analytics queries are project-scoped and day-ranged.
+create index if not exists site_hits_proj_day_ix
+  on site_hits(project_id, day desc);

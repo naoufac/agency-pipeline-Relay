@@ -230,6 +230,27 @@ function project(id, tab, seq){
   app.innerHTML = `<div class="container"><div id="phead"></div><div id="pbody"></div></div>`;
   let wasBuilt = false, prow = {}, editInit = false, qaInit = false, dataInit = false, contentInit = false, designInit = false;
 
+  /* ARC J: render a compact visits line for the signed-in OWNER.
+     b.visits is only present when the server confirmed the user is the owner (owner-gated
+     in boardJSON). Non-owners never see this key in the API response. Phone-first: one line,
+     matching the board's muted / pill styling. topPaths shows the 5 busiest pages (last 30d). */
+  function visitsHtml(v){
+    if (!v || typeof v !== 'object') return '';
+    const fmt = n => String(n || 0);
+    const topHtml = (v.topPaths && v.topPaths.length)
+      ? '<div class="muted" style="font-size:12px;margin-top:6px">'
+          + 'Top pages (30d): '
+          + v.topPaths.map(p => `<span style="margin-right:10px">${esc(p.path)} <b>${fmt(p.n)}</b></span>`).join('')
+          + '</div>'
+      : '';
+    return `<div class="visits-line" style="font-size:13px;color:var(--muted,#8a93a6);margin-top:6px">
+      Visits: <b style="color:inherit">${fmt(v.today)}</b> today
+      · <b style="color:inherit">${fmt(v.last7)}</b> this week
+      · <b style="color:inherit">${fmt(v.last30)}</b> this month
+      ${topHtml}
+    </div>`;
+  }
+
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
     const st = built ? 'done' : (failed ? 'failed' : 'running');
@@ -240,6 +261,7 @@ function project(id, tab, seq){
         <h1 class="ptitle">${esc(b.project.brief)}</h1>
         <span class="pill big"><i class="dot s-${st}"></i>${lab}</span>
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
+        ${me ? visitsHtml(b.visits) : ''}
       </div>
       <div class="nav-links tabs">
         ${tabLink(id,'site','Site',tab)}${tabLink(id,'chat','Chat',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'design','Design',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
