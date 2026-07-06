@@ -1317,27 +1317,19 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = a389124; FULL 26-suite gate green; RELAY_APP_API=1 + RELAY_WP=1 armed.
-· 2026-07-06 ORCHESTRATOR — END-TO-END WIRING (continues the deliverable-driven pivot; north star
-  docs/NORTH-STAR.md):
-  - wp_provision is now a REAL deterministic DAG department: it provisions the LIVE WordPress site
-    during the build (reads params.site/brand, writes params.wp_provision) so the build isn't "done"
-    until WP is up + wp_provisioned verifies it. PROVEN live: a 3-page food-blog composed model ->
-    real WP site (theme twentytwentyfive, Home/Recipes/About + menu + homepage, served:ok), verified
-    in the container, torn down.
-  - Fixed a real 180s deadlock in the WP builder: menu reset used a nested $(wp) HOST subshell +
-    empty-arg 'menu item delete' that blocked on stdin (no TTY). Now separate in-container list->delete.
-    Gated (no $(wp subshell). This was caught by attempting a real full build.
-  - app_api = runtime-served marker department + app_api_ok verify (routes live at
-    /api/app/:projectId/:table; inert-but-wired when RELAY_APP_API unset).
-  - ANDROID is now APP-ONLY: auto-APK gated on deliverable==='fullstack_app' (runner), /api/apk
-    refuses non-apps ('not-an-app' — verified live on a website), board hides the button on sites.
-    The TWA-button-on-every-site is gone. apk:check 52->55.
-  - Orchestrator decisions multilingual EN/FR/IT + project-dictates-steps (no blog-with-calendar /
-    campaign-with-schema). orchestrator:check 155.
-· KNOWN: a single fully-LLM-driven wp_site build stalled on a TRANSIENT MiniMax compose timeout
-  (180s x4) — pre-existing/unrelated to the wiring; the WP-provision-from-model path is proven
-  deterministically. Retry a full LLM build when the model is responsive.
-· NEXT: PrestaShop as a real FR-ecom builder (FR ecom -> WooCommerce today, works); board UI showing
-  deliverable/stack/chain; a clean full-LLM end-to-end wp_site + fullstack_app run.
-· OWNER-GATED: Stripe v2, Play Store, apex flip. FIGMA token in, needs one real file URL.
+· System healthy; prod = latest; FULL gate green; LLM routing = OpenRouter-primary (m2.7->m2.5).
+· 2026-07-06 LLM PERFORMANCE FIX (owner: MiniMax-3.0 times out, use 2.7 fav / 2.5 secondary, no reasoning):
+  - ROOT CAUSE (benchmarked live): the direct api.minimax.io was primary on M3 = 60-75s/call (M2.5/M2
+    truncate to empty) -> compose timeouts stalled builds. Same MiniMax models on OpenRouter = 1-2s.
+  - FIX (src/agents.ts): OpenRouter is now PRIMARY for every call on the ladder minimax-m2.7 -> m2.5 ->
+    cheap/free; minimax-direct is deep failover only. Reasoning headroom (mandatory reasoning can't
+    truncate the JSON), effort:minimal, compose timeout 180s->90s. llm:check rewritten (21).
+  - MEASURED after fix (real prompts): branding ~16s, content ~32s, research ~36s (web), compose ~78s;
+    builds COMPLETE reliably (were failing). 2.7/2.5 FORCE reasoning on OR (can't disable) -> 16-80s.
+  - OPEN DECISION for owner: only M3 allows reasoning-OFF; on OpenRouter M3-no-reasoning was fastest
+    (sub-second, clean JSON) and the timeout they hated was the DIRECT api, not M3. One env flip
+    (OPENROUTER_MODELS=minimax/minimax-m3 + reasoning off) trades to true speed. Awaiting owner word.
+  - Full system logic + perf report: docs/system-logic-and-performance.md.
+· Prior arcs still live: orchestrator (deliverable+stack+chain, EN/FR/IT), WordPress substrate (wp-cli),
+  full-stack app API (/api/app), Android app-only (not on websites). Owner-gated: Stripe, Play Store,
+  apex flip. FIGMA token in, needs a real file URL.
