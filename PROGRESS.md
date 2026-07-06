@@ -1317,27 +1317,27 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = 922ccca; FULL 26-suite gate green (orchestrator 155 · appapi 23 · wp 30 live/
-  22 dry · +23 originals all 0-failed); RELAY_APP_API=1 + RELAY_WP=1 armed in prod .env.
-· 2026-07-06 PIVOT — THE ORCHESTRATOR (north star in docs/NORTH-STAR.md). Relay = a media-agency
-  replacement; the client's ask defines the deliverable; build on substrates the LLM masters.
-  - src/orchestrator.ts: DELIVERABLES registry {directus_site, wp_site, wp_woocommerce, fullstack_app,
-    campaign} + CAPABILITIES (forced spine understand->research->branding->design->build->qa + dynamic
-    branches). orchestrate(brief) -> {deliverable, stack, project-dictated steps}. Deterministic floor +
-    LLM upgrade-only (mirrors archetypeFor). Multilingual EN/FR/IT. PROVEN on real briefs: courier
-    settlement->fullstack_app, FR boutique->wp_woocommerce, IT trattoria prenotazioni->site+booking,
-    IT rivista->wp_site, email->campaign, bakery->directus_site. "Project dictates its steps" fixed:
-    no more blog-with-calendar / campaign-with-schema nonsense.
-  - WordPress substrate (src/cms/wordpress.ts, builder registry in cms/types+registry+finalize): drives
-    the LIVE relay-wp container via wp-cli (WP-CLI 2.12.0), slug-scoped isolation, feature-flag RELAY_WP.
-    PROVEN LIVE: created+read-back+tore-down a real page in the container (30/30).
-  - Full-stack app API (src/app/api.ts, RELAY_APP_API): real list/get/create over the app_<hex> schema,
-    all SQL safety via appdb.ts. PROVEN LIVE IN PROD: GET /api/app/<id>/categories returned real Postgres
-    rows. This is the "app = real, not a TWA button" proof.
-  - Default site pipeline BYTE-IDENTICAL (directus_site is a no-op passthrough); all 23 original gates green.
-  - Owner cleared the factory: kept only the 20 newest sites (was 82); 213 orphan dirs swept; 839M->202M.
-· NEXT (honest — pieces proven, stitching remains): run a NEW wp_site/fullstack_app brief FULLY through
-  the runner end-to-end (per-task exec of wp_provision/app_api branches + finalize ordering); PrestaShop as
-  a real FR-ecom builder (FR ecom currently -> WooCommerce, works); REMOVE the Android-APK-on-every-site
-  (make it an app-deliverable thing, per owner); board UI showing deliverable/stack/chain reasoning.
-· OWNER-GATED: Stripe v2, Play Store, apex flip. FIGMA token in, needs one real file URL to certify.
+· System healthy; prod = a389124; FULL 26-suite gate green; RELAY_APP_API=1 + RELAY_WP=1 armed.
+· 2026-07-06 ORCHESTRATOR — END-TO-END WIRING (continues the deliverable-driven pivot; north star
+  docs/NORTH-STAR.md):
+  - wp_provision is now a REAL deterministic DAG department: it provisions the LIVE WordPress site
+    during the build (reads params.site/brand, writes params.wp_provision) so the build isn't "done"
+    until WP is up + wp_provisioned verifies it. PROVEN live: a 3-page food-blog composed model ->
+    real WP site (theme twentytwentyfive, Home/Recipes/About + menu + homepage, served:ok), verified
+    in the container, torn down.
+  - Fixed a real 180s deadlock in the WP builder: menu reset used a nested $(wp) HOST subshell +
+    empty-arg 'menu item delete' that blocked on stdin (no TTY). Now separate in-container list->delete.
+    Gated (no $(wp subshell). This was caught by attempting a real full build.
+  - app_api = runtime-served marker department + app_api_ok verify (routes live at
+    /api/app/:projectId/:table; inert-but-wired when RELAY_APP_API unset).
+  - ANDROID is now APP-ONLY: auto-APK gated on deliverable==='fullstack_app' (runner), /api/apk
+    refuses non-apps ('not-an-app' — verified live on a website), board hides the button on sites.
+    The TWA-button-on-every-site is gone. apk:check 52->55.
+  - Orchestrator decisions multilingual EN/FR/IT + project-dictates-steps (no blog-with-calendar /
+    campaign-with-schema). orchestrator:check 155.
+· KNOWN: a single fully-LLM-driven wp_site build stalled on a TRANSIENT MiniMax compose timeout
+  (180s x4) — pre-existing/unrelated to the wiring; the WP-provision-from-model path is proven
+  deterministically. Retry a full LLM build when the model is responsive.
+· NEXT: PrestaShop as a real FR-ecom builder (FR ecom -> WooCommerce today, works); board UI showing
+  deliverable/stack/chain; a clean full-LLM end-to-end wp_site + fullstack_app run.
+· OWNER-GATED: Stripe v2, Play Store, apex flip. FIGMA token in, needs one real file URL.
