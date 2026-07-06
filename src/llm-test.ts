@@ -123,5 +123,13 @@ ok('runner: stalled tasks refund the attempt (a days-long condition never burns 
 ok('runner: the operator is alerted ONCE per project, not per retry', /stalls === 0[\s\S]{0,200}telegramAlert/.test(runner));
 ok('runner: a repark CEILING makes an eternal stall eventually FAIL (never loops forever)', runner.includes('RELAY_MAX_QUOTA_REPARKS') && /reparks < Number/.test(runner) && runner.includes('quota stall exceeded'));
 
+// ---- reasoning policy (owner 2026-07-06: M3 reasoning OFF for speed; the 2.x models force minimal) ----
+const agentsSrc = readFileSync(new URL('./agents.ts', import.meta.url), 'utf8');
+ok('reasoning: M3/o-series DISABLE reasoning (enabled:false) when LLM_REASONING=off',
+  /canDisable\s*=\s*\/minimax-m3\|o\[13\]-\/i/.test(agentsSrc) && agentsSrc.includes('{ enabled: false }'));
+ok('reasoning: MiniMax 2.x fall back to effort:minimal (reasoning is mandatory for them)', agentsSrc.includes("{ effort: 'minimal' }"));
+ok('reasoning: THINK_HEADROOM only when reasoning actually runs (none when fully off)',
+  /needHeadroom = isReasoner && !\(reasoning && reasoning\.enabled === false\)/.test(agentsSrc));
+
 console.log(`\nllm:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

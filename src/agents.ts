@@ -225,16 +225,23 @@ export async function pingFallback(): Promise<boolean | null> {
 }
 
 async function callOpenRouter(messages: any[], model: string, maxTokens: number, timeoutMs: number, web: boolean, t0: number): Promise<LLMResult> {
-  // REASONING HEADROOM: MiniMax reasoning is MANDATORY on OpenRouter and cannot be disabled — even at
-  // effort:minimal it can spend a few thousand tokens thinking (measured live 2026-07-06: up to ~3.3k on
-  // m2.7). Those tokens count against max_tokens, so without headroom the JSON answer gets TRUNCATED
-  // (empty-after-strip). Give reasoning models the same headroom the direct path uses so the answer
-  // always completes. 'most of the time we don't need reasoning' → effort:minimal keeps it small.
   const isReasoner = /minimax|deepseek-r1|o[13]-|thinking|glm-|qwen3/i.test(model);
-  const body: any = { model, messages, temperature: 0.7, max_tokens: maxTokens + (isReasoner ? THINK_HEADROOM : 0) };
+  // REASONING POLICY (owner: 'most of the time we don't need reasoning', benchmarked 2026-07-06):
+  //  - M3 (and the o-series) ACCEPT reasoning:{enabled:false} → fully off = fastest, sub-second, 0 think
+  //    tokens, clean JSON. LLM_REASONING=off (default) uses this where the model supports it.
+  //  - The MiniMax 2.x models REJECT disabling ('reasoning is mandatory') → we fall back to effort:minimal.
+  const reasoningOff = (process.env.LLM_REASONING || 'off') === 'off';
+  const canDisable = /minimax-m3|o[13]-/i.test(model);
+  let reasoning: any = undefined;
+  if (isReasoner) reasoning = (reasoningOff && canDisable) ? { enabled: false } : { effort: 'minimal' };
+  // HEADROOM only when reasoning actually runs: mandatory MiniMax-2.x reasoning can spend a few thousand
+  // tokens (measured up to ~3.3k on m2.7) that count against max_tokens and would TRUNCATE the JSON answer.
+  // With reasoning fully off (M3) no headroom is needed.
+  const needHeadroom = isReasoner && !(reasoning && reasoning.enabled === false);
+  const body: any = { model, messages, temperature: 0.7, max_tokens: maxTokens + (needHeadroom ? THINK_HEADROOM : 0) };
   // OpenRouter's server-side web search (Exa) — runs INSIDE this one completion and folds in citations.
   if (web) body.plugins = [{ id: 'web', max_results: Number(process.env.WEB_MAX_RESULTS || 5) }];
-  if (isReasoner) body.reasoning = { effort: 'minimal' };
+  if (reasoning) body.reasoning = reasoning;
   const res = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
