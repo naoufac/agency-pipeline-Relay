@@ -133,6 +133,29 @@ async function boardJSON(user: User | null, projectId?: string) {
     } catch { /* non-critical — UI degrades gracefully */ }
   }
 
+  // T33 · liveUrl: the authoritative URL for the deliverable — one-click open from the board.
+  // WHY server-derived: the UI must never guess the URL from deliverable names alone; params
+  // holds the canonical slug/wp_url written by the builder. We derive once here and expose as
+  // a top-level field so app.js never needs to inspect the opaque params blob.
+  //
+  // Derivation rules (deliverable-specific):
+  //   wp_site / wp_woocommerce → pm.wp_url  (the actual WordPress front end URL)
+  //   fullstack_app            → /sites/<id>/  (the Relay-served app UI)
+  //   directus_site            → slug-based https://<slug>.naples.agency if slug present,
+  //                              else /sites/<id>/  (path-served fallback)
+  //   campaign / landing_page  → slug or path-served, same as directus_site
+  //   null (legacy)            → same as directus_site fallback
+  const dlv = pm.deliverable as string | null ?? null;
+  let liveUrl: string | null = null;
+  if (dlv === 'wp_site' || dlv === 'wp_woocommerce') {
+    liveUrl = pm.wp_url ?? null;
+  } else if (hasSite || dlv === 'fullstack_app') {
+    // slug-based domain takes priority — it's the branded URL the client sees
+    liveUrl = pm.slug ? `https://${pm.slug}.naples.agency` : (hasSite ? '/sites/' + proj.id + '/' : null);
+  } else if (dlv === 'directus_site' || dlv === 'campaign' || dlv === 'landing_page') {
+    liveUrl = pm.slug ? `https://${pm.slug}.naples.agency` : null;
+  }
+
   // Attach orchestration fields to the project payload as top-level keys so app.js can read
   // them without digging into the opaque params blob (avoids coupling the UI to the internal
   // params schema and lets us rename internals without touching the UI).
@@ -143,6 +166,7 @@ async function boardJSON(user: User | null, projectId?: string) {
     chainReason:   pm.chainReason   ?? null,   // one-sentence orchestrator "why"
     capabilities:  pm.capabilities  ?? [],     // CapId[] that fired (e.g. ['database','app_api'])
     build_seconds,                             // wall-clock in seconds, or null
+    liveUrl,                                   // T33: the actual live deliverable URL — one-click open
   };
 
   return { project: projectOut, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null, visits };
@@ -518,11 +542,11 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const kid = url.searchParams.get('id') || undefined;
       if (kid && !canSee(user, await ownerOf(kid))) return send(res, 404, 'application/json', 'null');
       const kpiData = await computeKpi(pool, kid);
-      // OPERATOR GATE: the funnel key contains business-sensitive demand data (real user counts,
-      // paying users, credit totals). Strip it from the public response so non-operators cannot
-      // harvest business internals via /api/kpi. Back-compat: the public shape never had funnel
-      // (the key was added internally) — stripping it keeps all existing callers working.
-      if (kpiData && !isOperator(user)) delete (kpiData as any).funnel;
+      // OPERATOR GATE: the funnel and perf keys contain business-sensitive data (real user counts,
+      // paying users, credit totals, build-time distribution). Strip both from the public response
+      // so non-operators cannot harvest business internals via /api/kpi. Back-compat: the public
+      // shape never had funnel/perf (added internally) — stripping keeps all existing callers working.
+      if (kpiData && !isOperator(user)) { delete (kpiData as any).funnel; delete (kpiData as any).perf; }
       return send(res, 200, 'application/json', JSON.stringify(kpiData));
     }
     if (path === '/api/output') {

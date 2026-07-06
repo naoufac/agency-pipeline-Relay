@@ -60,6 +60,34 @@ async function renderFunnelStrip(container){
     ).join('');
     // Insert just below the hero section (before the project groups)
     container.insertBefore(strip, container.querySelector('#bgroup') || container.firstChild);
+
+    // T34 · PERFORMANCE PANEL (operator-only): deliverable mix + build-time distribution.
+    // WHY: the /api/kpi response already carries k.perf (stripped for non-operators by the server).
+    // We render it as a compact panel BELOW the funnel strip so operators see the mix at a glance.
+    // Phone-first: two sub-sections in a single .perf-panel card — mix as coloured pills, build
+    // time as a single stat chip. Only rendered when perf data is present (fresh DB → stay silent).
+    const perf = k && k.perf;
+    if (perf && (perf.mix && perf.mix.length || perf.avg_build_seconds != null)) {
+      const panel = document.createElement('div');
+      panel.className = 'perf-panel';
+      panel.setAttribute('data-operator-panel', '1');   // T36 gate hook — renderable only for operators
+      const fmtSecs = s => s == null ? '—' : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+      const mixHtml = (perf.mix || []).map(m => {
+        const col = DLV_COLOR[m.deliverable] || '#5C6678';
+        const label = DLV_LABEL[m.deliverable] || m.deliverable;
+        return `<span class="dlv-badge" style="background:${col}22;color:${col};border:1px solid ${col}44">${esc(label)} <b>${m.count}</b></span>`;
+      }).join(' ');
+      panel.innerHTML = `
+        <div class="perf-panel-head">
+          <span class="kpi-label" style="margin:0">Deliverable mix</span>
+          <span class="kpi-label" style="margin:0;margin-left:auto">Avg build time: <b>${esc(fmtSecs(perf.avg_build_seconds))}</b>${perf.p50_build_seconds != null ? ` · median ${esc(fmtSecs(perf.p50_build_seconds))}` : ''}</span>
+        </div>
+        <div class="perf-mix">${mixHtml || '<span class="muted">No deliverable data yet</span>'}</div>`;
+      // Insert AFTER the funnel strip (which was just prepended) — strip is now firstChild
+      const after = container.querySelector('.funnel-strip');
+      if (after && after.nextSibling) container.insertBefore(panel, after.nextSibling);
+      else container.appendChild(panel);
+    }
   } catch { /* network error — stay silent, don't break home */ }
 }
 
@@ -149,9 +177,21 @@ function deliverableBadge(dlv){
   return `<span class="dlv-badge" data-dlv="${esc(dlv)}" style="background:${col}22;color:${col};border:1px solid ${col}44">${esc(label)}</span>`;
 }
 
+/* ---- T33 · liveUrl: the actual live deliverable URL from server ----
+   WHY: the server derives liveUrl from params (slug/wp_url/deliverable) in boardJSON,
+   so the UI never has to guess the URL from heuristics. The card always opens the REAL
+   live deliverable (branded subdomain, WP front end, app UI) — not a /sites/ fallback.
+   cardInner uses p.liveUrl when present, falling back to p.site (path-served URL). */
+function resolveLiveUrl(p){
+  // liveUrl is set by server.ts boardJSON when a slug or wp_url is available.
+  // p.site is the /sites/<id>/ path-served URL (always present once the build finishes).
+  return p.liveUrl || p.site || null;
+}
+
 // one card's inner HTML — STABLE preview URL (no cache-bust → browser caches it, never re-fetches)
 function cardInner(p){
   const st = projStatus(p), label = st === 'done' ? 'ready' : st;
+  const openUrl = resolveLiveUrl(p);
   return `
     <div class="thumb${p.site ? '' : ' noimg'}">${p.site ? `<img src="/sites/${p.id}/preview.png" alt="" loading="lazy" onerror="this.parentNode.classList.add('noimg');this.remove()"/>` : ''}</div>
     <div class="pcard-body">
@@ -160,8 +200,8 @@ function cardInner(p){
       <div class="row" style="justify-content:space-between;margin-top:14px">
         <span class="pill"><i class="dot s-${st}"></i>${label}${st === 'running' ? ` · ${p.done}/${p.total}` : ''}</span>
         ${deliverableBadge(p.deliverable || null)}
-        ${p.site
-          ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${p.site}">Open ↗</a>`
+        ${openUrl
+          ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(openUrl)}">Open ↗</a>`
           : `<a class="btn btn-sm btn-ghost" href="#/p/${p.id}">Open project</a>`}
       </div>
     </div>`;
@@ -351,12 +391,14 @@ function project(id, tab, seq){
       : '';
     // T11: capability chain tags
     const capChain = chainHtml(p.capabilities);
+    // T33: prefer liveUrl (branded subdomain / WP front end) over the /sites/ path for the header link.
+    const headerLiveUrl = b.project.liveUrl || b.site || null;
     document.getElementById('phead').innerHTML = `
       <div class="phead">
         <a class="back" href="#/">‹ Your sites</a>
         <h1 class="ptitle">${esc(b.project.brief)}</h1>
         <span class="pill big"><i class="dot s-${st}"></i>${lab}</span>
-        ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
+        ${headerLiveUrl ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(headerLiveUrl)}">Open ↗</a>` : ''}
         ${dlvLine}
         ${me ? visitsHtml(b.visits) : ''}
       </div>

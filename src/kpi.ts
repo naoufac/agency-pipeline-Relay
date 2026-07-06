@@ -106,6 +106,98 @@ export function funnelToKpis(f: Funnel): Kpi[] {
   ];
 }
 
+// ─── T34 · PERFORMANCE PANEL (operator-only) ──────────────────────────────────
+// Deliverable mix (count per deliverable type) + build-time distribution
+// (mean build_seconds) across all done projects.
+//
+// WHY here (not server.ts): kpi.ts owns aggregate reporting; server.ts strips
+// the key for non-operators using the same pattern as the funnel key.
+//
+// Returns null on an empty DB — the UI stays silent rather than showing zeroes.
+export type PerfPanel = {
+  mix: { deliverable: string; count: number }[];   // sorted descending
+  avg_build_seconds: number | null;                 // mean build_seconds where present
+  p50_build_seconds: number | null;                 // median
+};
+
+export async function perfPanel(pool: pg.Pool): Promise<PerfPanel | null> {
+  // deliverable mix: count per deliverable id from params (done or not — shows the full library)
+  let mix: { deliverable: string; count: number }[] = [];
+  try {
+    const mr = await pool.query(`
+      select coalesce(params->>'deliverable','unknown') as deliverable,
+             count(*)::int as count
+      from projects
+      where params->>'deliverable' is not null
+      group by 1 order by 2 desc`);
+    mix = mr.rows.map((r: any) => ({ deliverable: String(r.deliverable), count: Number(r.count) }));
+  } catch {}
+
+  // build-time distribution from params.build_seconds (explicit, persisted by planner)
+  // or derived from task timestamps (same derivation as boardJSON) — prefer explicit.
+  let avg_build_seconds: number | null = null;
+  let p50_build_seconds: number | null = null;
+  try {
+    const tr = await pool.query(`
+      select
+        round(avg(b))::int as avg_s,
+        percentile_cont(0.5) within group (order by b)::int as p50_s
+      from (
+        select coalesce(
+          (params->>'build_seconds')::float,
+          extract(epoch from (max(t.updated_at) - p.created_at))::float
+        ) as b
+        from projects p
+        join tasks t on t.project_id = p.id and t.status = 'done'
+        where p.status = 'done'
+        group by p.id, p.created_at, p.params
+        having count(t.id) > 0
+      ) secs
+      where b > 0`);
+    const row = tr.rows[0];
+    if (row && row.avg_s != null) avg_build_seconds = Number(row.avg_s);
+    if (row && row.p50_s != null) p50_build_seconds = Number(row.p50_s);
+  } catch {}
+
+  if (!mix.length && avg_build_seconds == null) return null;
+  return { mix, avg_build_seconds, p50_build_seconds };
+}
+
+// deliverableMixCounts: a focused helper used by digest.ts to get deliverable counts
+// without the full PerfPanel overhead (QA-noise-safe: counts from params, not LLM output).
+// Returns a map of deliverable→count for all projects, or empty object on DB error.
+export async function deliverableMixCounts(pool: pg.Pool): Promise<Record<string, number>> {
+  try {
+    const r = await pool.query(`
+      select coalesce(params->>'deliverable','unknown') as deliverable,
+             count(*)::int as count
+      from projects
+      where params->>'deliverable' is not null
+      group by 1 order by 2 desc`);
+    return Object.fromEntries(r.rows.map((row: any) => [String(row.deliverable), Number(row.count)]));
+  } catch { return {}; }
+}
+
+// avgBuildSeconds: mean build_seconds across all done projects — for digest.
+export async function avgBuildSeconds(pool: pg.Pool): Promise<number | null> {
+  try {
+    const r = await pool.query(`
+      select round(avg(b))::int as avg_s from (
+        select coalesce(
+          (params->>'build_seconds')::float,
+          extract(epoch from (max(t.updated_at) - p.created_at))::float
+        ) as b
+        from projects p
+        join tasks t on t.project_id = p.id and t.status = 'done'
+        where p.status = 'done'
+        group by p.id, p.created_at, p.params
+        having count(t.id) > 0
+      ) secs where b > 0`);
+    const v = r.rows[0]?.avg_s;
+    return v != null ? Number(v) : null;
+  } catch { return null; }
+}
+
 // One source of truth for KPIs — used by the API (/api/kpi) and the CLI.
 export async function computeKpi(pool: pg.Pool, projectId?: string) {
   const p = (await pool.query(
@@ -198,6 +290,10 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
   // This is a pool-wide aggregate (no project filter) — same data regardless of which project is queried.
   const funnelData = await funnel(pool);
 
+  // T34: perf panel — deliverable mix + build-time distribution. Operator-only (stripped
+  // in server.ts alongside the funnel key). Pool-wide aggregate like funnel.
+  const perfData = await perfPanel(pool);
+
   return {
     project: { id: p.id, brief: p.brief, created_at: p.created_at },
     status: deadlocked ? 'blocked' : (!finished ? 'running' : (failed ? 'complete_with_failures' : 'complete')),
@@ -205,6 +301,7 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
     chars,
     kpis,
     funnel: funnelData,    // demand funnel with QA noise filtered — for the operator / CLI
+    perf: perfData,         // T34: deliverable mix + build-time distribution — operator-only
     providers,   // ops-only telemetry (CLI); the board does not render this
   };
 }

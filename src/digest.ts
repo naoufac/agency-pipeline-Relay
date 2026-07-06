@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { makePool } from './db.ts';
 import { PRIVATE_READ } from './schema.ts';
 import { telegramAlert } from './alert.ts';
+import { deliverableMixCounts, avgBuildSeconds } from './kpi.ts';
 
 const pool = makePool();
 
@@ -49,6 +50,18 @@ async function main() {
     order by created_at desc limit 1`)).rows[0];
   const act = await activity24h();
 
+  // T35 · deliverable mix + avg build time — read from DB params, QA-noise-safe
+  // (counts from params.deliverable, never from task department names or LLM output).
+  // avgBuildSeconds uses the same derivation as boardJSON (explicit params.build_seconds
+  // or task-span fallback) — so the number is real wall-clock, never an estimate.
+  const mix = await deliverableMixCounts(pool);
+  const avgSecs = await avgBuildSeconds(pool);
+  const mixStr = Object.keys(mix).length
+    ? Object.entries(mix).map(([d, n]) => `${d.replace(/_/g, '-')}:${n}`).join(' · ')
+    : 'none';
+  const fmtSecs = (s: number | null) => s == null ? '—' : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  const deliverableLine = `Deliverable mix: ${mixStr} · avg build ${fmtSecs(avgSecs)}`;
+
   let backup = '🔴 no vault manifest — BACKUPS MAY BE DEAD';
   try {
     const m = JSON.parse(readFileSync('/root/relay-vault/manifest-latest.json', 'utf8'));
@@ -81,6 +94,7 @@ async function main() {
     `Builds 24h: ${b.started} started · ${b.done} done · ${b.blocked} blocked`,
     `Reviews: ${rv.passed} passed · ${rv.failed} failed · APKs: ${apk}`,
     `Client activity: ${act.rows} new record${act.rows === 1 ? '' : 's'} across ${act.apps} app${act.apps === 1 ? '' : 's'}`,
+    deliverableLine,
     ``,
     `Canary: ${canaryLine}`,
     `Vault: ${backup}`,
