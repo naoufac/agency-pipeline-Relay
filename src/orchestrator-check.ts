@@ -469,6 +469,267 @@ for (const [brief, delivId] of [
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// T24-A: LOCALE ECOM ROUTING — FR+RELAY_PRESTA=1 → prestashop builder; unset → wp_woocommerce
+// WHY: T21 requires deterministic FR locale detection + feature flag gate.
+// ────────────────────────────────────────────────────────────────────────────
+import { detectDeliverableWithMeta } from './orchestrator.ts';
+{
+  const frEcomBriefs = [
+    'Une boutique en ligne pour vendre des produits de mode — panier, paiement, catalogue',
+    'Boutique vendre produits en ligne — livraison, commande, catalogue produits français',
+    'Locale:fr boutique en ligne shop vendre panier checkout',
+    'Une épicerie fine française en ligne — produits, vendre, panier, paiement, livraison',
+  ];
+
+  // Without RELAY_PRESTA (default) — must always be wp_woocommerce builder
+  const savedPresta = process.env.RELAY_PRESTA;
+  delete process.env.RELAY_PRESTA;
+  for (const brief of frEcomBriefs) {
+    const result = await orchestrate(brief);
+    ok(`T21 no-flag: FR ecom → wp_woocommerce builder (not prestashop): "${brief.slice(0, 45)}"`,
+      result.builder === 'wordpress' && result.deliverable === 'wp_woocommerce',
+      `builder=${result.builder} deliverable=${result.deliverable}`);
+  }
+
+  // With RELAY_PRESTA=1 — FR ecom should switch to prestashop builder
+  process.env.RELAY_PRESTA = '1';
+  for (const brief of frEcomBriefs) {
+    const result = await orchestrate(brief);
+    ok(`T21 RELAY_PRESTA=1: FR ecom → prestashop builder: "${brief.slice(0, 45)}"`,
+      result.builder === 'prestashop' && result.stack === 'prestashop',
+      `builder=${result.builder} stack=${result.stack}`);
+    // deliverable id STAYS wp_woocommerce (the e-com contract)
+    ok(`T21 RELAY_PRESTA=1: FR ecom deliverable id stays wp_woocommerce: "${brief.slice(0, 45)}"`,
+      result.deliverable === 'wp_woocommerce',
+      `deliverable=${result.deliverable}`);
+  }
+
+  // Non-FR ecom with RELAY_PRESTA=1 — must NOT switch to prestashop
+  const enEcomBriefs = [
+    'an online shop for handmade candles — products, cart, checkout, catalog',
+    'a webshop for electronics — store, inventory, checkout, shipping',
+    'Un negozio online per vendere prodotti — carrello, pagamento, catalogo (Italian)',
+  ];
+  for (const brief of enEcomBriefs) {
+    const result = await orchestrate(brief);
+    ok(`T21 RELAY_PRESTA=1: non-FR ecom stays wp_woocommerce builder: "${brief.slice(0, 45)}"`,
+      result.builder === 'wordpress' && result.deliverable === 'wp_woocommerce',
+      `builder=${result.builder} deliverable=${result.deliverable}`);
+  }
+
+  // Restore env
+  if (savedPresta !== undefined) process.env.RELAY_PRESTA = savedPresta;
+  else delete process.env.RELAY_PRESTA;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T24-B: CONFIDENCE + SECOND-CHOICE — in [0,1] and present on every orchestrate() call
+// WHY: T22 requires confidence and secondChoice in OrchestrationResult.
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const confidenceBriefs: [string, string][] = [
+    ['une boutique en ligne pour vendre des produits — panier, paiement, livraison', 'wp_woocommerce'],
+    ['a SaaS dashboard and booking platform with user accounts', 'fullstack_app'],
+    ['email campaign newsletter blast social media posts ad creative', 'campaign'],
+    ['a landing page for our product — one-page conversion CTA hero', 'landing_page'],
+    ['a simple 5-page bakery website — home, about, menu, contact', 'directus_site'],
+    ['a photography portfolio showcase — my work, case studies, gallery', 'portfolio'],
+    ['wedding conference festival event site — programme, RSVP, speakers', 'event'],
+  ];
+
+  for (const [brief, expectedDel] of confidenceBriefs) {
+    const result = await orchestrate(brief);
+    ok(`T22 confidence present for ${expectedDel}`,
+      typeof result.confidence === 'number',
+      `got ${typeof result.confidence}`);
+    ok(`T22 confidence in [0,1] for ${expectedDel}`,
+      result.confidence >= 0 && result.confidence <= 1,
+      `confidence=${result.confidence}`);
+    ok(`T22 secondChoice present for ${expectedDel}`,
+      typeof result.secondChoice === 'string' && result.secondChoice.length > 0,
+      `got ${typeof result.secondChoice}`);
+    ok(`T22 secondChoice is a valid deliverable for ${expectedDel}`,
+      result.secondChoice in DELIVERABLES,
+      `secondChoice=${result.secondChoice}`);
+    // chainReason must include confidence + alt markers
+    ok(`T22 chainReason contains confidence: for ${expectedDel}`,
+      result.chainReason.includes('confidence:'),
+      `chainReason="${result.chainReason}"`);
+    ok(`T22 chainReason contains alt: for ${expectedDel}`,
+      result.chainReason.includes('alt:'),
+      `chainReason="${result.chainReason}"`);
+  }
+
+  // Determinism: confidence and secondChoice must be stable (no flicker)
+  const stableBrief = 'une boutique en ligne de lingerie — vendre, panier, paiement, checkout';
+  const r1 = await orchestrate(stableBrief);
+  const r2 = await orchestrate(stableBrief);
+  ok('T22 determinism: confidence stable', r1.confidence === r2.confidence,
+    `${r1.confidence} vs ${r2.confidence}`);
+  ok('T22 determinism: secondChoice stable', r1.secondChoice === r2.secondChoice,
+    `${r1.secondChoice} vs ${r2.secondChoice}`);
+
+  // detectDeliverableWithMeta produces the same floor
+  const meta = detectDeliverableWithMeta(stableBrief);
+  ok('T22 detectDeliverableWithMeta.deliverable matches orchestrate',
+    meta.deliverable === r1.deliverable,
+    `meta=${meta.deliverable} orch=${r1.deliverable}`);
+  ok('T22 detectDeliverableWithMeta.confidence same as orchestrate',
+    meta.confidence === r1.confidence,
+    `meta=${meta.confidence} orch=${r1.confidence}`);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T24-C: PORTFOLIO + EVENT classify correctly + spine + compose/render present
+// WHY: T23 requires portfolio and event deliverables with working builder + chain.
+// ────────────────────────────────────────────────────────────────────────────
+{
+  // Portfolio EN/FR/IT detection
+  const portfolioBriefs = [
+    'a photography portfolio site — my work, case studies, gallery, about',
+    'a designer portfolio showcase — lookbook, projects, creative work',
+    'une vitrine créative — book photo, galerie, mes projets',
+    'un portfolio fotografico — lavori, galleria fotografica, about',
+    'a creative portfolio for a UX designer — case studies, my work, folio',
+  ];
+  for (const brief of portfolioBriefs) {
+    const d = detectDeliverable(brief);
+    ok(`T23 portfolio brief → portfolio: "${brief.slice(0, 50)}"`, d === 'portfolio', `got ${d}`);
+    const needs = detectNeeds(brief, DELIVERABLES[d].archetypeCompat, d);
+    const tasks = composeChain(d, needs, TEST_PAGES);
+    const depts = tasks.map(t => t.department);
+
+    // Spine must be present
+    for (const spine of SPINE_DEPTS) {
+      ok(`T23 portfolio spine '${spine}' present`, depts.includes(spine));
+    }
+    // compose + render must be present (directus render path)
+    ok('T23 portfolio: compose present', depts.includes('compose'), `depts: ${depts.join(',')}`);
+    ok('T23 portfolio: render present', depts.includes('render'), `depts: ${depts.join(',')}`);
+    // NO data steps
+    ok('T23 portfolio: no database', !depts.includes('database'), `depts: ${depts.join(',')}`);
+    // builder must be directus
+    ok('T23 portfolio: builder=directus', DELIVERABLES['portfolio'].builder === 'directus');
+  }
+
+  // Event EN/FR/IT detection
+  const eventBriefs = [
+    'a conference site — speakers, programme, RSVP, venue, attendees',
+    'a wedding website — ceremony, venue, RSVP, gallery',
+    'a music festival site — programme, lineup, RSVP',
+    'un site pour notre conférence — programme, intervenants, inscription en ligne',
+    'un site de mariage — cérémonie, programme, RSVP',
+    'un sito per il convegno — programma, relatori, iscrizione, cerimonia',
+  ];
+  for (const brief of eventBriefs) {
+    const d = detectDeliverable(brief);
+    ok(`T23 event brief → event: "${brief.slice(0, 50)}"`, d === 'event', `got ${d}`);
+    const needs = detectNeeds(brief, DELIVERABLES[d].archetypeCompat, d);
+    const tasks = composeChain(d, needs, TEST_PAGES);
+    const depts = tasks.map(t => t.department);
+
+    // Spine must be present
+    for (const spine of SPINE_DEPTS) {
+      ok(`T23 event spine '${spine}' present`, depts.includes(spine));
+    }
+    // compose + render must be present
+    ok('T23 event: compose present', depts.includes('compose'), `depts: ${depts.join(',')}`);
+    ok('T23 event: render present', depts.includes('render'), `depts: ${depts.join(',')}`);
+    // integrations (calendar feed) must be present
+    ok('T23 event: integrations present', depts.includes('integrations'), `depts: ${depts.join(',')}`);
+    // NO database step (events don't need relational data)
+    ok('T23 event: no database step', !depts.includes('database'), `depts: ${depts.join(',')}`);
+    // builder must be directus
+    ok('T23 event: builder=directus', DELIVERABLES['event'].builder === 'directus');
+  }
+
+  // Portfolio and event must NOT fire for plain briefs
+  ok('T23 plain site is NOT portfolio', detectDeliverable('a simple website for our bakery') !== 'portfolio');
+  ok('T23 plain site is NOT event', detectDeliverable('a simple website for our bakery') !== 'event');
+
+  // portfolio does NOT have database/policies
+  {
+    const needs = detectNeeds('a photographer portfolio with gallery and case studies', 'site', 'portfolio');
+    ok('T23 portfolio needs: no database', !needs.includes('database'), needs.join(','));
+    ok('T23 portfolio needs: no policies', !needs.includes('policies'), needs.join(','));
+    ok('T23 portfolio needs: content_copy present', needs.includes('content_copy'), needs.join(','));
+  }
+
+  // event has integrations but NO database
+  {
+    const needs = detectNeeds('a conference event site with RSVP and speakers programme', 'site', 'event');
+    ok('T23 event needs: integrations present', needs.includes('integrations'), needs.join(','));
+    ok('T23 event needs: no database', !needs.includes('database'), needs.join(','));
+    ok('T23 event needs: content_copy present', needs.includes('content_copy'), needs.join(','));
+  }
+
+  // orchestrate() produces portfolio and event deliverables correctly (via buildPlan integration)
+  {
+    const portfolioResult = await orchestrate('a photography portfolio — gallery, my work, case studies, book photo');
+    ok('T23 orchestrate: portfolio deliverable', portfolioResult.deliverable === 'portfolio',
+      `got ${portfolioResult.deliverable}`);
+    ok('T23 orchestrate: portfolio builder=directus', portfolioResult.builder === 'directus',
+      `got ${portfolioResult.builder}`);
+    ok('T23 orchestrate: portfolio chainReason includes deliverable', portfolioResult.chainReason.includes('portfolio'),
+      `chainReason: "${portfolioResult.chainReason}"`);
+  }
+  {
+    const eventResult = await orchestrate('a conference event site with programme, speakers, RSVP and venue');
+    ok('T23 orchestrate: event deliverable', eventResult.deliverable === 'event',
+      `got ${eventResult.deliverable}`);
+    ok('T23 orchestrate: event builder=directus', eventResult.builder === 'directus',
+      `got ${eventResult.builder}`);
+    ok('T23 orchestrate: event chainReason includes deliverable', eventResult.chainReason.includes('event'),
+      `chainReason: "${eventResult.chainReason}"`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T24-D: DETERMINISM — portfolio, event, confidence all deterministic
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const detBriefs = [
+    'a photography portfolio site — gallery, my work, case studies, showcase',
+    'a conference event site — programme, speakers, RSVP, venue',
+  ];
+  for (const brief of detBriefs) {
+    const r1 = await orchestrate(brief);
+    const r2 = await orchestrate(brief);
+    ok(`T24 determinism: deliverable for "${brief.slice(0, 40)}"`,
+      r1.deliverable === r2.deliverable, `${r1.deliverable} vs ${r2.deliverable}`);
+    ok(`T24 determinism: confidence for "${brief.slice(0, 40)}"`,
+      r1.confidence === r2.confidence, `${r1.confidence} vs ${r2.confidence}`);
+    ok(`T24 determinism: secondChoice for "${brief.slice(0, 40)}"`,
+      r1.secondChoice === r2.secondChoice, `${r1.secondChoice} vs ${r2.secondChoice}`);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T24-E: DEFAULT 5-PAGE SITE UNCHANGED — confidence/secondChoice additive only
+// WHY: the existing 5-page bakery directus_site path must be byte-identical to before.
+// ────────────────────────────────────────────────────────────────────────────
+{
+  const brief = '5-page bakery website — home, about, menu, gallery, contact';
+  const result = await orchestrate(brief);
+  ok('T24 default 5-page: deliverable still directus_site', result.deliverable === 'directus_site',
+    `got ${result.deliverable}`);
+  ok('T24 default 5-page: builder still directus', result.builder === 'directus',
+    `got ${result.builder}`);
+  ok('T24 default 5-page: confidence present', typeof result.confidence === 'number',
+    `got ${typeof result.confidence}`);
+  ok('T24 default 5-page: secondChoice present', typeof result.secondChoice === 'string',
+    `got ${typeof result.secondChoice}`);
+  // Back-compat: tasks must still have compose/render/qa (unchanged chain)
+  const { plan } = await buildPlan(brief);
+  const taskDepts = plan.tasks.map((t: any) => t.department);
+  ok('T24 default back-compat: compose present', taskDepts.includes('compose'));
+  ok('T24 default back-compat: render present', taskDepts.includes('render'));
+  ok('T24 default back-compat: qa present', taskDepts.includes('qa'));
+  ok('T24 default back-compat: branding present', taskDepts.includes('branding'));
+  ok('T24 default back-compat: no database on plain site', !taskDepts.includes('database'));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // RESULT
 // ────────────────────────────────────────────────────────────────────────────
 console.log(`\norchestrator:check — ${pass} passed, ${fail} failed`);

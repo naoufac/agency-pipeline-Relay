@@ -294,14 +294,18 @@ export async function persistPlan(
   // For the classic directus_site path these are informational; for new deliverables they drive
   // builder selection in runner.ts (Worker B/C read params.builder to pick their finalize path).
   const orchestrationParams = orchestration ? {
-    deliverable:  orchestration.deliverable,   // 'directus_site'|'wp_site'|'wp_woocommerce'|'fullstack_app'|'campaign'|'landing_page'|'brand_identity'
-    builder:      orchestration.builder,        // registry key: 'directus'|'wordpress'|'app'|'campaign'
-    stack:        orchestration.stack,          // 'directus'|'wordpress'|'woocommerce'|'node-postgres'|'campaign'
+    deliverable:  orchestration.deliverable,   // 'directus_site'|'wp_site'|'wp_woocommerce'|'fullstack_app'|'campaign'|'landing_page'|'brand_identity'|'portfolio'|'event'
+    builder:      orchestration.builder,        // registry key: 'directus'|'wordpress'|'app'|'campaign'|'prestashop'
+    stack:        orchestration.stack,          // 'directus'|'wordpress'|'woocommerce'|'node-postgres'|'campaign'|'prestashop'
     // T3/T19: chainReason is the human-readable "why" string built by buildChainReason() in
     // orchestrator.ts — includes deliverable + matched signals + chain step sequence.
+    // T22: also includes confidence + secondChoice.
     // Stored in params so the board can show it; also emitted as a run_event below.
-    chainReason:  orchestration.chainReason,    // e.g. "wp_woocommerce (FR signals: boutique) · chain: strategy->research->..."
+    chainReason:  orchestration.chainReason,    // e.g. "wp_woocommerce (FR signals: boutique) · chain: strategy->research->... · confidence:0.8 · alt:wp_site"
     capabilities: orchestration.detectedNeeds,  // CapId[] that fired
+    // T22: confidence in [0,1] and secondChoice deliverable — persisted for board display and audit.
+    confidence:   orchestration.confidence,     // 0-1 score margin between winner and runner-up
+    secondChoice: orchestration.secondChoice,   // runner-up deliverable id
   } : {};
   const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief), complexity: { score: complexity.score, pagesMax: complexity.pagesMax }, ...orchestrationParams };
 

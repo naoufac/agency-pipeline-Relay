@@ -24,7 +24,10 @@ export type DeliverableId =
   | 'wp_site'
   | 'wp_woocommerce'
   | 'fullstack_app'
-  | 'campaign';
+  | 'campaign'
+  // T23: portfolio (creative showcase) and event (conference/wedding/festival)
+  | 'portfolio'
+  | 'event';
 
 export type CapId =
   // FORCED SPINE — every deliverable gets these
@@ -82,6 +85,11 @@ export interface OrchestrationResult {
    * Non-empty guaranteed: at minimum reports the deliverable and its chain head. */
   chainReason: string;
   archetype: Archetype;
+  /** T22: confidence in [0,1] derived from the score margin between winner and runner-up.
+   * 1.0 = unambiguous (only winner scored); 0.5 = close race; lower = near-tie. */
+  confidence: number;
+  /** T22: second-best deliverable (runner-up by score, falls back to 'directus_site'). */
+  secondChoice: DeliverableId;
 }
 
 // Shape that composeChain emits — frozen Task shape from planner.ts:77
@@ -182,8 +190,10 @@ export const CAPABILITIES: Record<CapId, Capability> = {
 // landing_page and brand_identity are placed BEFORE directus_site because they are more specific
 // than the baseline; brand_identity is checked before landing_page since "branding only" is very
 // explicit. Both score from zero so they only win when their signals are unambiguous.
+// T23: portfolio and event are added before directus_site — they score 0 by default so they only
+// win when their signals are unambiguous. event before portfolio since event signals are more explicit.
 const PRIORITY: DeliverableId[] = [
-  'wp_woocommerce', 'fullstack_app', 'wp_site', 'campaign', 'brand_identity', 'landing_page', 'directus_site',
+  'wp_woocommerce', 'fullstack_app', 'wp_site', 'campaign', 'brand_identity', 'landing_page', 'event', 'portfolio', 'directus_site',
 ];
 
 export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
@@ -196,8 +206,9 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
       let score = 1; // constant baseline — this is THE floor
       // T1 NOTE: "landing" / "one-page" signals have been removed from this booster because
       // landing_page is now a first-class deliverable that handles those briefs.
-      // directus_site still wins for plain/brochure/portfolio briefs that don't trigger landing_page.
-      if (/\b(simple site|coming soon|brochure|portfolio|business card)\b/.test(b)) score += 3;
+      // T23 NOTE: "portfolio" removed — portfolio is now a first-class deliverable.
+      // directus_site still wins for plain/brochure/simple site/business card briefs.
+      if (/\b(simple site|coming soon|brochure|business card)\b/.test(b)) score += 3;
       return score;
     },
     stack: 'directus',
@@ -361,6 +372,65 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     branchCaps: ['campaign_assets'],
     upgradesTo: [],
   },
+
+  // ── T23: Portfolio (creative/photographer/designer showcase) ─────────────
+  // WHY: "portfolio" / "book" / "vitrine" / "portafolio" signals a creative showcase site.
+  // Builder: directus (same renderer as directus_site) — a portfolio is a multi-page brochure
+  // with image-heavy sections; directus handles it cleanly without the WP overhead that a blog
+  // needs. The deliverable id is 'portfolio' (distinct from directus_site so the board labels it
+  // correctly), but it renders via the same directus builder chain.
+  // Chain: spine + content_copy + compose + render pages + qa — identical to directus_site.
+  portfolio: {
+    id: 'portfolio',
+    label: 'Portfolio / creative showcase',
+    detect(brief: string): number {
+      const b = ' ' + brief.toLowerCase() + ' ';
+      let score = 0;
+      // EN signals: portfolio, showcase, photographer, designer, creative portfolio, case study, gallery
+      // FR signals: book (creative/photo), vitrine, book photo, portfolio créatif
+      // IT signals: portafolio, book fotografico, portfolio creativo, vetrina
+      // ES (bonus, may appear): portafolio
+      const matches = (b.match(/\b(portfolio|showcas(e|ing)|photographer|photography[- ]?site|designer[- ]?portfolio|creative[- ]?portfolio|case[- ]?stud(y|ies)|photo[- ]?gallery|works?[- ]?gallery|my[- ]?work|artwork[- ]?showcase|vitrine|book[- ]?photo|book[- ]?cr[ée]atif|portafolio|book[- ]?fotografico|portfolio[- ]?creat\w+|lookbook|folio)\b/g) || []).length;
+      score += Math.min(9, matches * 3);
+      return score;
+    },
+    stack: 'directus',
+    builder: 'directus',
+    archetypeCompat: 'site',
+    branchCaps: ['content_copy'],
+    upgradesTo: ['wp_site', 'directus_site'],
+  },
+
+  // ── T23: Event (conference/wedding/festival/concert with schedule/RSVP) ──
+  // WHY: "event" / "évènement" / "evento" / "mariage" / "conférence" signals a time-bound
+  // promotional site with schedule, RSVP, and location sections. Builder: directus (landing-
+  // ish multi-page: Home/Programme/Speakers/RSVP/Venue). This reuses the exact same compose+
+  // render path as directus_site — no new substrate, no new builder. It differs from landing_page
+  // (which is shape-forced to 1 page) by having 3-5 pages. It differs from directus_site by its
+  // explicit event spine (schedule + RSVP + venue). The booking branch (integrations/calendar) is
+  // enabled so the owner gets a real .ics feed for attendees.
+  event: {
+    id: 'event',
+    label: 'Event / conference site',
+    detect(brief: string): number {
+      const b = ' ' + brief.toLowerCase() + ' ';
+      let score = 0;
+      // EN signals: conference, wedding, festival, concert, event site, summit, symposium,
+      //   hackathon, gala, expo, convention, RSVP, schedule, speakers, attendees
+      // FR signals: évènement, mariage, conférence, festival, sommet, salon, gala, programme,
+      //   intervenants, inscription, participants
+      // IT signals: evento, matrimonio, conferenza, festival, convegno, programma, relatori,
+      //   iscrizione, partecipanti, cerimonia
+      const matches = (b.match(/\b(conference|wedding|festival|concert|event[- ]?site|event[- ]?page|summit|symposium|hackathon|gala|expo|convention|rsvp|speakers?|attendees?|[ée]v[eè]nement|mariage|conf[ée]rence|salon|programme[- ]?des|intervenants?|inscription en ligne|participants?|evento|matrimonio|conferenza|convegno|programma[- ]dell|relatori|iscrizione|cerimonia)\b/g) || []).length;
+      score += Math.min(9, matches * 3);
+      return score;
+    },
+    stack: 'directus',
+    builder: 'directus',
+    archetypeCompat: 'site',
+    branchCaps: ['content_copy', 'integrations'],
+    upgradesTo: ['directus_site', 'wp_site'],
+  },
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -377,6 +447,9 @@ const SIGNAL_PATTERNS: Partial<Record<DeliverableId, RegExp>> = {
   wp_woocommerce: /\b(shop|store|e-?commerce|checkout|\bcart\b|catalog(ue)?|webshop|boutique en ligne|vendre|panier|paiement|negozio|vendere|carrello|pagamento|acquist\w*|inventory|spedizione)\b/gi,
   fullstack_app:  /\b(saas|dashboard|platform|booking|reservation|r[ée]servation|prenotazione|tracker|marketplace|crm|erp|plateforme|tableau de bord|piattaforma|cruscotto|tracciamento|portale|subscription|membership)\b/gi,
   campaign:       /\b(email[- ]?campaign|newsletter|mailing|drip[- ]?campaign|ad[- ]?creative|flyer|campagne[- ]?email|campagne[- ]?publicitaire|campagna[- ]?email|campagna[- ]?pubblicitaria)\b/gi,
+  // T23: portfolio and event signal patterns
+  portfolio:      /\b(portfolio|showcas\w+|photographer|photography[- ]?site|designer[- ]?portfolio|creative[- ]?portfolio|case[- ]?stud\w+|photo[- ]?gallery|works?[- ]?gallery|vitrine|book[- ]?photo|portafolio|book[- ]?fotografico|lookbook|folio)\b/gi,
+  event:          /\b(conference|wedding|festival|concert|event[- ]?site|summit|symposium|hackathon|gala|expo|rsvp|speakers?|attendees?|[ée]v[eè]nement|mariage|conf[ée]rence|salon|programme|intervenants?|evento|matrimonio|conferenza|convegno|relatori|cerimonia)\b/gi,
 };
 
 function extractSignals(brief: string, deliverable: DeliverableId): string[] {
@@ -423,21 +496,88 @@ function buildChainReason(
 // ────────────────────────────────────────────────────────────────────────────
 // FLOOR DETECTOR
 // WHY: argmax over all deliverable scores; ties resolve by PRIORITY order.
+// T22: also returns confidence (score margin / total) and secondChoice (runner-up).
 // ────────────────────────────────────────────────────────────────────────────
 
 export function detectDeliverable(brief: string): DeliverableId {
+  return detectDeliverableWithMeta(brief).deliverable;
+}
+
+/** T22: full detection result including score margin, confidence, and second-choice. */
+export function detectDeliverableWithMeta(brief: string): {
+  deliverable: DeliverableId;
+  score: number;
+  confidence: number;
+  secondChoice: DeliverableId;
+} {
   let best: DeliverableId = 'directus_site';
   let bestScore = 0;
+  let second: DeliverableId = 'directus_site';
+  let secondScore = 0;
 
   for (const id of PRIORITY) {
     const score = DELIVERABLES[id].detect(brief);
     // strict ">" so PRIORITY order resolves ties (most-specific first)
     if (score > bestScore) {
-      bestScore = score;
+      // old best becomes second
+      second = best;
+      secondScore = bestScore;
       best = id;
+      bestScore = score;
+    } else if (score > secondScore && id !== best) {
+      second = id;
+      secondScore = score;
     }
   }
-  return best;
+
+  // Confidence: margin between winner and runner-up, normalized to [0,1].
+  // WHY: a large margin = high confidence; equal scores = 0.5; only winner scored = 1.0.
+  // We clamp directus_site's baseline (score=1) as the lower bound so margin is meaningful.
+  const margin = bestScore - secondScore;
+  const total = bestScore + secondScore;
+  // If total is 0 (shouldn't happen since directus_site always scores 1), default to 1.
+  // confidence = margin / total gives [0,1]: winner=1/second=0 → 1.0; equal → 0.
+  // We use (1 + margin) / (1 + total) to avoid division by zero and give directus_site (1/1) = 0.5.
+  let confidence: number;
+  if (total === 0) {
+    confidence = 1.0;
+  } else if (margin === 0) {
+    confidence = 0.5;
+  } else {
+    // tanh-shaped: smooth mapping from margin to (0,1). margin/bestScore gives relative margin.
+    confidence = Math.round(Math.min(1, Math.max(0, margin / bestScore)) * 1000) / 1000;
+  }
+
+  return { deliverable: best, score: bestScore, confidence, secondChoice: second };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// T21: FR ECOM ROUTING — when RELAY_PRESTA is enabled and the brief is a
+// French e-commerce project, prefer builder 'prestashop'. The deliverable id
+// stays 'wp_woocommerce' (the e-com contract) but builder/stack reflect PrestaShop.
+// WHY: PrestaShop is the dominant e-commerce platform in the FR market; it's
+// the natural substrate for FR ecom when the relay infrastructure is available.
+// Default (RELAY_PRESTA unset): always wp_woocommerce exactly as today.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Returns true when the brief is FR-locale e-commerce AND RELAY_PRESTA is enabled. */
+function isFrEcom(brief: string): boolean {
+  // RELAY_PRESTA must be explicitly '1' — feature-flagged, not default.
+  if (process.env.RELAY_PRESTA !== '1') return false;
+
+  const b = ' ' + brief.toLowerCase() + ' ';
+  // FR locale signals: French words commonly found in FR briefs (mirrors buildChainReason lang detection)
+  const frScore = (b.match(/\b(le|la|les|un|une|des|du|est|pour|avec|votre|notre|de|en|et|ou|je|nous|vous|ils|boutique|vendre|marque|site|annuaire|produits?|paiement|livraison|catalogue|magasin)\b/g) || []).length;
+  // Also count explicit locale markers
+  const explicitFr = /\b(fr|french|français|france|francophone)\b/i.test(brief) || /locale[=:]\s*fr/i.test(brief);
+  const hasFrSignals = frScore >= 4 || explicitFr;
+
+  // E-com signals: must also be clearly an ecom project
+  const ecomScore = DELIVERABLES['wp_woocommerce'].detect(brief);
+  // Must have enough ecom signals to win (score > directus_site baseline)
+  const isEcom = ecomScore > 1;
+
+  return hasFrSignals && isEcom;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -459,6 +599,21 @@ export function detectNeeds(brief: string, archetype: Archetype, deliverable: De
   // T2: brand_identity — brand_guidelines ONLY; no site/data/render steps.
   if (deliverable === 'brand_identity') {
     needs.add('brand_guidelines');
+    return [...needs];
+  }
+
+  // T23: portfolio — content_copy only (no data, no booking); standard compose+render chain.
+  if (deliverable === 'portfolio') {
+    needs.add('content_copy');
+    return [...needs];
+  }
+
+  // T23: event — content_copy + integrations (calendar/RSVP feed). No database step.
+  // WHY: events need a calendar feed (ICS/RSVP) which is the integrations cap, but they don't
+  // need a full relational data model (no user accounts, no persistent booking records).
+  if (deliverable === 'event') {
+    needs.add('content_copy');
+    needs.add('integrations');
     return [...needs];
   }
 
@@ -600,10 +755,49 @@ export function composeChain(
       thinkingSeqs.push(copySeq);
     }
     // force exactly ONE page (the landing page shape invariant)
-    const landingPages = [{ slug: 'index', title: 'Home' }];
     const composeSeq = emit('Compose the landing page (one CMS → single page)', 'compose', 'site_model', [...thinkingSeqs]);
     const rSeq = emit('Render the Home page', 'render', 'site_renders', [composeSeq], 'index.html');
     emit('QA — acceptance (1 nav · 1 logo · 1 palette, every page)', 'qa', 'site_consistent', [rSeq]);
+    return renumber(tasks);
+  }
+
+  // T23: portfolio — spine + content_copy + compose + render pages + qa.
+  // WHY: a portfolio is a multi-page directus-rendered brochure (gallery/work/about/contact).
+  // Reuses the standard directus compose+render path — no new substrate.
+  if (deliverable === 'portfolio') {
+    if (needs.has('content_copy')) {
+      const copySeq = emit('Portfolio content & work descriptions', 'content', 'json', [researchSeq]);
+      thinkingSeqs.push(copySeq);
+    }
+    const composeSeq = emit('Compose the portfolio site (one CMS → all pages)', 'compose', 'site_model', [...thinkingSeqs]);
+    const renderSeqs: number[] = [];
+    for (const pg of pages) {
+      renderSeqs.push(emit(`Render the ${pg.title} page`, 'render', 'site_renders', [composeSeq], `${pg.slug}.html`));
+    }
+    emit('QA — acceptance (1 nav · 1 logo · 1 palette, every page)', 'qa', 'site_consistent', renderSeqs);
+    return renumber(tasks);
+  }
+
+  // T23: event — spine + content_copy + integrations + compose + render pages + qa.
+  // WHY: an event site has a schedule, RSVP, and venue sections. It reuses the directus render
+  // path and adds the integrations cap for the calendar/RSVP feed (.ics). No database step —
+  // events don't need persistent user accounts (just a feed subscribers can import).
+  if (deliverable === 'event') {
+    if (needs.has('content_copy')) {
+      const copySeq = emit('Event content (programme, speakers, RSVP copy)', 'content', 'json', [researchSeq]);
+      thinkingSeqs.push(copySeq);
+    }
+    if (needs.has('integrations')) {
+      // integrations depends on understand (no database for event)
+      const intgSeq = emit('Event calendar feed (RSVP .ics feed)', 'integrations', 'calendar_feed', [understandSeq]);
+      thinkingSeqs.push(intgSeq);
+    }
+    const composeSeq = emit('Compose the event site (one CMS → all pages)', 'compose', 'site_model', [...thinkingSeqs]);
+    const renderSeqs: number[] = [];
+    for (const pg of pages) {
+      renderSeqs.push(emit(`Render the ${pg.title} page`, 'render', 'site_renders', [composeSeq], `${pg.slug}.html`));
+    }
+    emit('QA — acceptance (1 nav · 1 logo · 1 palette, every page)', 'qa', 'site_consistent', renderSeqs);
     return renumber(tasks);
   }
 
@@ -656,9 +850,16 @@ export async function orchestrate(
   brief: string,
   opts: { llm?: (sys: string, user: string, maxTokens: number, flags: any) => Promise<string> } = {},
 ): Promise<OrchestrationResult> {
-  const floor = detectDeliverable(brief);
+  // T22: use detectDeliverableWithMeta to get score margin, confidence, and secondChoice.
+  const meta = detectDeliverableWithMeta(brief);
+  const floor = meta.deliverable;
   let deliverable: DeliverableId = floor;
   let reason = `floor: regex scored ${floor}`;
+  // T22: confidence and secondChoice from the floor detection (before any LLM upgrade).
+  // These are preserved throughout; an LLM upgrade does NOT change confidence (the floor is
+  // still the deterministic signal — the LLM is advisory only).
+  const confidence = meta.confidence;
+  const secondChoice = meta.secondChoice;
 
   // LLM upgrade is ONLY allowed when the floor is directus_site (the default) and a live
   // LLM is available. For any other floor, the classifier is definitive (mirrors archetypeFor).
@@ -702,6 +903,19 @@ Valid ids: ${upgradeSet}|directus_site. Default to directus_site for any plain/s
     }
   }
 
+  // T21: FR ecom routing — when RELAY_PRESTA=1 and the brief is French e-commerce,
+  // prefer builder 'prestashop'. The deliverable id stays 'wp_woocommerce' (same e-com
+  // contract), but builder/stack are swapped to reflect the PrestaShop substrate.
+  // WHY: keeping the deliverable id means all downstream checks (cart+checkout page
+  // injection, ecom_catalog branch, etc.) remain intact. Only the builder/stack differ.
+  let effectiveBuilder = DELIVERABLES[deliverable].builder;
+  let effectiveStack = DELIVERABLES[deliverable].stack;
+  if (deliverable === 'wp_woocommerce' && isFrEcom(brief)) {
+    effectiveBuilder = 'prestashop';
+    effectiveStack = 'prestashop';
+    reason = `${reason} · FR ecom → prestashop (RELAY_PRESTA=1)`;
+  }
+
   const del = DELIVERABLES[deliverable];
 
   // Archetype: take the MAX of what archetypeFor() classifies and what the deliverable says.
@@ -720,9 +934,12 @@ Valid ids: ${upgradeSet}|directus_site. Default to directus_site for any plain/s
   // We compose a preview chain (with default 1-page) purely to extract the department sequence.
   const previewChain = composeChain(deliverable, detectedNeeds, [{ slug: 'index', title: 'Home' }]);
   const llmReasonForChain = reason.startsWith('llm') ? reason : undefined;
-  const chainReason = buildChainReason(deliverable, brief, previewChain, llmReasonForChain);
+  // T22: weave confidence and secondChoice into chainReason so the board can show them.
+  // Format addition: " · confidence:0.83 · alt:wp_site" appended to the reason string.
+  const baseChainReason = buildChainReason(deliverable, brief, previewChain, llmReasonForChain);
+  const chainReason = `${baseChainReason} · confidence:${confidence} · alt:${secondChoice}`;
 
-  return { deliverable, stack: del.stack, builder: del.builder, detectedNeeds, reason, chainReason, archetype };
+  return { deliverable, stack: effectiveStack, builder: effectiveBuilder, detectedNeeds, reason, chainReason, archetype, confidence, secondChoice };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -745,6 +962,7 @@ export function applyDeliverable(
   // T1: landing_page — force exactly ONE page before composing the chain.
   // WHY: the shape invariant is 1 page; we must not pass built.pages (which the LLM may have
   // proposed as multi-page) into composeChain — that would emit multiple render tasks.
+  // T23: portfolio and event use built.pages (multi-page is fine for both).
   const chainPages = orchestration.deliverable === 'landing_page'
     ? [{ slug: 'index', title: 'Home' }]
     : built.pages;
