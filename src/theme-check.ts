@@ -5,12 +5,12 @@
 // at BOTH mobile (390px) and desktop (1280px). Exits non-zero on any failure. No API key required.
 //
 //   npm run theme:check
-import { mkdirSync, writeFileSync, existsSync, statSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, statSync, rmSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { renderPage } from './render.ts';
 import { screenshot, closeBrowser } from './browser.ts';
 import { THEME_NAMES, type ThemeName } from './themes.ts';
-import { DS_CSS } from './components.ts';
+import { DS_CSS, DS_CSS_BODY, dsCssHash } from './components.ts';
 
 const OUT = new URL('../sites/_themecheck/', import.meta.url);
 
@@ -59,11 +59,16 @@ function sampleSpec(theme: ThemeName) {
 const PAGES = [{ slug: 'index', title: 'Home' }, { slug: 'about', title: 'About' }, { slug: 'contact', title: 'Contact' }];
 
 // the structural / asset / placeholder gates, identical in spirit to verify.ts `site_renders`
+// ARC C: the ds-<hash8>.css link is a relative asset reference — ALLOWED and REQUIRED.
 function staticGate(html: string): string | null {
   const lo = html.toLowerCase();
   if (!/<html|<!doctype/.test(lo.slice(0, 400)) || !/<body|<div|<section/.test(lo)) return 'not valid HTML structure';
-  if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(html))
+  // strip the known-good ds link before checking for external assets
+  const htmlNoDs = html.replace(/<link\b[^>]*href="assets\/ds-[0-9a-f]{8}\.css"[^>]*>/gi, '');
+  if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(htmlNoDs))
     return 'external/unbundled asset reference';
+  // ARC C: the link tag must be present (proves renderPage emits it)
+  if (!/href="assets\/ds-[0-9a-f]{8}\.css"/.test(html)) return 'ARC C: ds-<hash8>.css link missing from <head>';
   const ph = html.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
   if (ph) return 'unfilled placeholder: ' + ph[0];
   return null;
@@ -82,6 +87,13 @@ const cssVar = (html: string, name: string) => html.match(new RegExp(name.replac
 async function main() {
   rmSync(fileURLToPath(OUT), { recursive: true, force: true });
   mkdirSync(fileURLToPath(OUT), { recursive: true });
+  // ARC C: write the external DS CSS file once into the _themecheck assets dir — every rendered
+  // HTML references it; the file must exist for the structural gate to accept the link.
+  const dsHash = dsCssHash(DS_CSS_BODY);
+  const assetsDir = new URL('assets/', OUT);
+  mkdirSync(fileURLToPath(assetsDir), { recursive: true });
+  writeFileSync(fileURLToPath(new URL(`ds-${dsHash}.css`, assetsDir)), DS_CSS_BODY);
+
   let failures = 0;
   const grades = new Map<string, string>();   // theme -> --photo-filter (must DIFFER across themes)
   const cropSplit = new Set<string>(); const photoRadius = new Set<string>();
@@ -162,6 +174,41 @@ async function main() {
     adProblems.push('DS_CSS: product photos must stay true colour (.pdp exemption missing)');
   if (adProblems.length) { failures++; console.log(`✗ art-direction ${adProblems.join(' · ')}`); }
   else console.log(`✓ art-direction ${grades.size} distinct grades · ${cropSplit.size} split crops · ${photoRadius.size} frames · tint layers + PDP exemption wired`);
+
+  // ARC C GATES — external cacheable CSS
+  const arcProblems: string[] = [];
+  const cssFilePath = fileURLToPath(new URL(`ds-${dsHash}.css`, assetsDir));
+  // (a) sha-hash determinism: same CSS → same filename (verified by re-computing)
+  const reHash = dsCssHash(DS_CSS_BODY);
+  if (reHash !== dsHash) arcProblems.push(`ARC C: hash non-deterministic (${dsHash} vs ${reHash})`);
+  // (b) the file was actually written
+  if (!existsSync(cssFilePath)) arcProblems.push('ARC C: ds-*.css file not written to assets/');
+  else {
+    const written = readFileSync(cssFilePath, 'utf8');
+    // (c) the written file contains the DS CSS rules (spot-check a marker rule)
+    if (!written.includes('*{box-sizing:border-box}')) arcProblems.push('ARC C: written CSS missing DS rules');
+    // (d) the written file contains the @font-face blocks (base64 fonts moved out of inline)
+    if (!written.includes('@font-face')) arcProblems.push('ARC C: written CSS missing @font-face blocks');
+  }
+  // (e) inline <style> no longer contains DS_CSS body — spot-check a marker rule that used to be inline
+  // use the last rendered HTML (any theme works; all go through the same renderPage)
+  const lastHtml = readFileSync(fileURLToPath(new URL(`${THEME_NAMES[THEME_NAMES.length - 1]}.html`, OUT)), 'utf8');
+  if (lastHtml.includes('*{box-sizing:border-box}')) arcProblems.push('ARC C: DS_CSS body still inlined in <style> (should be in external file)');
+  // (f) :root token vars ARE still inline (design-check contract)
+  if (!/<style>[^<]*:root\{/.test(lastHtml)) arcProblems.push('ARC C: :root token vars not found inline in <style>');
+  // (g) link tag present on every rendered theme page
+  for (const theme of THEME_NAMES) {
+    const themeHtml = readFileSync(fileURLToPath(new URL(`${theme}.html`, OUT)), 'utf8');
+    if (!new RegExp(`href="assets/ds-[0-9a-f]{8}\\.css"`).test(themeHtml))
+      arcProblems.push(`ARC C: ds-*.css link missing from ${theme}.html`);
+  }
+  // (h) server.ts serves ds-*.css with immutable headers (source-pin).
+  // The server identifies hashed assets via isImmutableAsset and returns immutable in Cache-Control.
+  const serverSrc = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+  if (!serverSrc.includes('isImmutableAsset') || !serverSrc.includes('immutable') || !serverSrc.includes('ds-'))
+    arcProblems.push('ARC C: server.ts does not appear to serve ds-*.css with immutable caching');
+  if (arcProblems.length) { failures++; console.log(`✗ ARC C ${arcProblems.join(' · ')}`); }
+  else console.log(`✓ ARC C: ds-${dsHash}.css written · link on all pages · :root inline · DS body external · deterministic hash`);
 
   console.log(failures ? `\nFAILED: ${failures}/${THEME_NAMES.length} themes have problems` : `\nOK: all ${THEME_NAMES.length} themes render, pass the gate, and meet AA — output in sites/_themecheck/`);
   await closeBrowser();

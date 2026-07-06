@@ -59,6 +59,12 @@ const plannerSrc = (await import('node:fs')).readFileSync(new URL('./planner.ts'
 ok('planner: localBusiness is computed once as a build property', plannerSrc.includes('localBusiness: isLocalBusiness(brief)'));
 const liveSrc = (await import('node:fs')).readFileSync(new URL('./cms/live.ts', import.meta.url), 'utf8');
 ok('live: the crawled surfaces thread siteBase + localBusiness', (liveSrc.match(/siteBase: params\.slug/g) || []).length >= 2 && liveSrc.includes('localBusiness: !!params.localBusiness'));
+// ARC C source-pin: renderPage now emits a <link> to the external DS CSS; live renders go through
+// the same renderPage so they automatically pick up the link. The CSS file is written by the build
+// (runner.ts) into the same site dir that live serves from — the file is guaranteed present.
+const renderSrc = (await import('node:fs')).readFileSync(new URL('./render.ts', import.meta.url), 'utf8');
+ok('ARC C: renderPage uses dsCssHash to derive the external CSS href (not inlining DS_CSS_BODY)', renderSrc.includes('dsCssHash') && renderSrc.includes('DS_CSS_BODY') && renderSrc.includes('dsHref') && !renderSrc.includes('DS_CSS}'));
+ok('ARC C: live.ts does not inline DS CSS body (uses renderPage which emits the link)', !liveSrc.includes('DS_CSS'));
 
 // ---- ARCHETYPE @type map (bizTypeFor) ----
 // Each specific schema.org type must fire on the right brief; the fallback chain must hold.

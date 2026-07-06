@@ -6,6 +6,8 @@ import { copySlop, } from './verify.ts';
 import { extractFirstJson, applyBrand, resolveBrand, navCtaFor, normalizeContent, normalizeDataModel, siteCopySlop, normalizeSite, catalogTitle } from './spec.ts';
 import { renderPage } from './render.ts';
 import { scorePage } from './eval.ts';
+// ARC C: DS_CSS_BODY is now the external file; assertions on its CSS content move here
+import { DS_CSS_BODY } from './components.ts';
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, extra = '') => { if (cond) { pass++; } else { fail++; console.error(`  ✗ ${name} ${extra}`); } };
@@ -456,7 +458,9 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
 // ---- hero grey-void fix: on-image only when a photo is present ----
 {
   const withImg = renderPage({ brand: { name: 'X', tokens: { bg: '#fff', primary: '#123' } }, sections: [{ type: 'hero', image: 'city', headline: 'Hi' }, { type: 'features', items: [{ title: 'a', body: 'b' }] }] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false } });
-  ok('hero WITH image uses on-image (white text) + a fallback bg exists', /<header class="hero on-image"/.test(withImg) && withImg.includes('.hero.on-image{background:'));
+  // ARC C: the fallback bg CSS (.hero.on-image{background:...}) is now in the external DS_CSS_BODY
+  // file, not inline in the page — check the CSS content instead of the rendered HTML.
+  ok('hero WITH image uses on-image (white text) + a fallback bg exists', /<header class="hero on-image"/.test(withImg) && DS_CSS_BODY.includes('.hero.on-image{background:'));
   const noImg = renderPage({ brand: { name: 'X', tokens: { bg: '#fff', primary: '#123' } }, sections: [{ type: 'hero', headline: 'Hi' }, { type: 'features', items: [{ title: 'a', body: 'b' }] }] }, { pages: [{ slug: 'index', title: 'Home' }], slug: 'index', title: 'Home', layout: { hero: 'image', nav: 'standard', band: false } });
   ok('hero WITHOUT image is NOT on-image (legible on brand bg, no grey void)', /<header class="hero"/.test(noImg) && !/<header class="hero on-image"/.test(noImg));
 }

@@ -1,7 +1,9 @@
 // Deterministic page renderer: a structured spec -> perfect HTML, assembled from vetted components.
 import { isLocale, clientDict } from './i18n.ts';
 // No LLM touches structure/CSS/nav/contrast here. spec = { brand:{name,cta,tokens}, sections:[{type,...}] }.
-import { DS_CSS, navBar, footer, SECTIONS, esc, ctaParts } from './components.ts';
+// ARC C: DS_CSS_BODY is the static design-system CSS written to assets/ds-<hash8>.css;
+// dsCssHash computes the filename deterministically — renderPage emits the href, runner.ts writes the file.
+import { DS_CSS_BODY, dsCssHash, navBar, footer, SECTIONS, esc, ctaParts } from './components.ts';
 import { themeFor, themeFonts, themeVars } from './themes.ts';
 import { DEFAULT_LAYOUT, isHeroVariant, isCardVariant, type Layout } from './layout.ts';
 import { PRIVATE_READ } from './schema.ts';
@@ -148,7 +150,11 @@ export function renderPage(spec: any, ctx: { pages: any[]; slug: string; title: 
     : null;
   // og:image should be an ABSOLUTE URL so social cards resolve it. If we have a public base, use it.
   const ogImage = ctx.siteBase ? `${ctx.siteBase.replace(/\/+$/, '')}/icon-512.png` : 'icon-512.png';
-
+  // ARC C: The static DS CSS (font-faces + layout rules) lives in an external file named by content-hash.
+  // renderPage derives the href deterministically (same hash fn, same text) so every caller agrees on
+  // the filename without any I/O — runner.ts writes the file separately.
+  const dsHash = dsCssHash(DS_CSS_BODY);
+  const dsHref = `assets/ds-${dsHash}.css`;
   const html = `<!doctype html><html lang="${loc}"><head><!--relay:rendered--><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}</title>
@@ -160,8 +166,8 @@ ${desc ? `\n<meta name="description" content="${esc(desc)}">` : ''}
 <meta property="og:title" content="${esc(ctx.title)}${brand ? ' — ' + esc(brand) : ''}">
 ${desc ? `<meta property="og:description" content="${esc(desc)}">` : ''}
 <meta property="og:image" content="${esc(ogImage)}">${ldBlock ? '\n' + ldBlock : ''}
-<style>${vars}
-${DS_CSS}</style></head>
+<style>${vars}</style>
+<link rel="stylesheet" href="${dsHref}"></head>
 <body class="t-${theme} l-hero-${lay.hero} l-cards-${isCardVariant(lay.cards) ? lay.cards : 'photo'}${lay.band ? ' l-band' : ''}">
 ${(() => { const nc = ctaParts(spec && spec.brand && spec.brand.cta, spec && spec.brand && spec.brand.ctaLink); return navBar(brand, ctx.pages, ctx.slug, nc?.text, nc ? resolveCta(nc.link, nc.text) : '#', lay.nav, loc); })()}
 <main>

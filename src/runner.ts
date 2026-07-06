@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ev, counts } from './db.ts';
 import { alertStuck } from './alert.ts';
@@ -9,6 +9,7 @@ import { reviewSite } from './qa.ts';
 import { dogfoodSite } from './dogfood.ts';
 import { cmsFinalize } from './cms/finalize.ts';
 import { renderPage, formPageSlug, receiptsEnabled } from './render.ts';
+import { DS_CSS_BODY, dsCssHash } from './components.ts';
 import { isQuotaExhausted } from './agents.ts';
 import { normalizeSpec, normalizeSite, normalizeContent, normalizeDataModel, modelHasCore, extractFirstJson, brandIdentity, applyBrand, resolveBrand } from './spec.ts';
 import { processMedia } from './media.ts';
@@ -161,6 +162,16 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       const pageTitle = page.title || (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || slug;
       const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType });
       writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));   // rendered page -> served file (CMS-native serving replaces the old edit-overlay; src/cms.ts removed)
+      // ARC C: write the per-site external DS CSS file (idempotent — same hash = same content every time).
+      // The assets/ subdir is created here; renderPage already emitted the matching href via dsCssHash().
+      try {
+        const dsHash = dsCssHash(DS_CSS_BODY);
+        const assetsDir = new URL('assets/', dir);
+        mkdirSync(fileURLToPath(assetsDir), { recursive: true });
+        const cssPath = fileURLToPath(new URL(`ds-${dsHash}.css`, assetsDir));
+        // idempotent: skip the write if the file already exists (same hash = same bytes)
+        if (!existsSync(cssPath)) writeFileSync(cssPath, DS_CSS_BODY);
+      } catch (e: any) { await ev(pool, task.project_id, task.id, 'ds_css_write_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {}); }
       // PWA: every produced site ships manifest + offline shell + brand icons (compiled from the
       // locked brand; icons painted once). A failure here must not fail the page render itself.
       try { await ensurePwaAssets(dir, canon, task.project_id); } catch (e: any) { await ev(pool, task.project_id, task.id, 'pwa_assets_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {}); }
@@ -248,6 +259,14 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
           const pageTitle = (((ctx.pages || []) as any[]).find((p) => p.slug === slug) || {}).title || task.title.replace(/^Build the\s+/i, '').replace(/\s+page$/i, '');
           const rendered = renderPage(spec, { pages: ctx.pages || [], slug, title: pageTitle, projectId: task.project_id, theme: ctx.theme, layout: (ctx as any).layout, forms: (ctx as any).forms, primaryTable: (ctx as any).primaryTable, formSlug: formPageSlug((ctx as any).site), accountLinks: receiptsEnabled((ctx as any).site), locale: (ctx as any).locale, siteBase: (ctx as any).siteSlug ? `https://${(ctx as any).siteSlug}.naples.agency` : undefined, localBusiness: !!(ctx as any).localBusiness, bizType: (ctx as any).bizType });
           writeFileSync(fileURLToPath(new URL(task.artifact, dir)), await processMedia(rendered, dir));
+          // ARC C: write the external DS CSS file alongside the legacy build artifact (same logic as render dept)
+          try {
+            const dsHash = dsCssHash(DS_CSS_BODY);
+            const assetsDir = new URL('assets/', dir);
+            mkdirSync(fileURLToPath(assetsDir), { recursive: true });
+            const cssPath = fileURLToPath(new URL(`ds-${dsHash}.css`, assetsDir));
+            if (!existsSync(cssPath)) writeFileSync(cssPath, DS_CSS_BODY);
+          } catch { /* non-fatal for the legacy path */ }
         } else {
           let body = stripFences(content);
           if (task.artifact.endsWith('.sql')) { try { body = appdb.compileDDL(content).ddl; } catch { body = sqlArtifact(content); } }
