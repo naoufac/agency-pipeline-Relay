@@ -1317,13 +1317,16 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = latest deployed; FULL 26-suite gate green.
-· 2026-07-06 LLM APPLIED: M3 reasoning-OFF is PRIMARY (OpenRouter), 2.7->2.5 fallback (forced minimal).
-  prod .env: OPENROUTER_MODELS=minimax/minimax-m3,minimax/minimax-m2.7,minimax/minimax-m2.5 + LLM_REASONING=off.
-  Measured real prompts: branding 16->1.5s, content 32->18s, research(web) 36->18s, compose 78->22-30s.
-  M3 accepts reasoning:{enabled:false} (2.x reject it). Occasional bad compose JSON caught by site_model
-  verify+retry. Web/Exa path verified on M3. llm:check 24. docs/system-logic-and-performance.md.
-· Prior live: orchestrator (deliverable+stack+chain, EN/FR/IT, project-dictates-steps), WordPress
-  substrate (wp-cli, end-to-end proven), full-stack app API (/api/app), Android app-only.
-· Owner-gated: Stripe v2, Play Store, apex flip. FIGMA token in, needs a real file URL.
-· NEXT: clean full-LLM build now that latency is fixed; PrestaShop FR-ecom builder; board deliverable view.
+· System healthy; prod = latest; FULL 26-suite gate green; LLM = M3 reasoning-off primary (fast).
+· 2026-07-06 FULL-LLM BUILD PROVEN END-TO-END (the payoff of the perf fix): a real coffee-roaster brief ->
+  orchestrator picked wp_site/wordpress -> full chain (strategy/research/branding/design/content/compose/
+  wp_provision/5 renders/qa) 13/13 tasks in 193s (~3.2min) with M3-off. Real brand ("Kunjani Craft Coffee")
+  threaded, 5 real WordPress pages provisioned live via wp-cli. This exact build STALLED indefinitely before
+  the LLM routing fix. Scratch swept.
+· MINOR CLEANUP (cosmetic, not a bug): compose logs "brand.name missing -> Studio" but output uses {{brand}}
+  tokens substituted with the real name downstream (verified 0 Studio leaks). Quiet the misleading log.
+· LLM: OpenRouter-primary M3(reasoning off) -> 2.7 -> 2.5; per-call 1.5-30s. docs/system-logic-and-performance.md.
+· Prior live: orchestrator (EN/FR/IT, project-dictates-steps), WordPress substrate, full-stack app API,
+  Android app-only. Owner-gated: Stripe v2, Play Store, apex flip. FIGMA token in, needs a real file URL.
+· NEXT: quiet the brand log; PrestaShop FR-ecom builder; board deliverable/stack/chain view; a full
+  fullstack_app end-to-end run (site + real API).
