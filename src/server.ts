@@ -111,7 +111,41 @@ async function boardJSON(user: User | null, projectId?: string) {
   if (user && proj.owner_id != null && user.id === proj.owner_id) {
     try { visits = await visitsForProject(pool, proj.id); } catch { /* non-critical — never 500 */ }
   }
-  return { project: proj, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null, visits };
+
+  // T11/T12/T13/T20 — board UI domain: expose orchestration params so the UI can render the
+  // deliverable badge, capability chain, chainReason banner, and build wall-clock.
+  // WHY here (not client-computed): params is a server-side JSON blob; the UI must never guess
+  // at deliverable from task department names or brief heuristics — the orchestrator already
+  // captured the authoritative answer and we simply surface it.
+  const pm = (proj.params && typeof proj.params === 'object') ? proj.params as Record<string, any> : {};
+  // build_seconds: prefer params.build_seconds (explicit if ever persisted); otherwise derive
+  // from the project's own task span (max updated_at of done tasks - created_at).  Falls back
+  // to null (UI shows nothing) rather than inventing a number.
+  let build_seconds: number | null = pm.build_seconds ?? null;
+  if (build_seconds == null) {
+    try {
+      const bsr = await pool.query(
+        `select round(extract(epoch from (max(updated_at) - $2::timestamptz)))::int as secs
+         from tasks where project_id=$1 and status='done'`,
+        [proj.id, proj.created_at]);
+      const secs = bsr.rows[0]?.secs;
+      if (secs != null && secs > 0) build_seconds = secs;
+    } catch { /* non-critical — UI degrades gracefully */ }
+  }
+
+  // Attach orchestration fields to the project payload as top-level keys so app.js can read
+  // them without digging into the opaque params blob (avoids coupling the UI to the internal
+  // params schema and lets us rename internals without touching the UI).
+  const projectOut = {
+    ...proj,
+    deliverable:   pm.deliverable   ?? null,   // 'directus_site'|'wp_site'|'wp_woocommerce'|'fullstack_app'|'campaign'
+    stack:         pm.stack         ?? null,   // 'directus'|'wordpress'|'woocommerce'|'node-postgres'|'campaign'
+    chainReason:   pm.chainReason   ?? null,   // one-sentence orchestrator "why"
+    capabilities:  pm.capabilities  ?? [],     // CapId[] that fired (e.g. ['database','app_api'])
+    build_seconds,                             // wall-clock in seconds, or null
+  };
+
+  return { project: projectOut, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null, visits };
 }
 
 async function projectsJSON(user: User | null) {

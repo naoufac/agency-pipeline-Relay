@@ -345,6 +345,60 @@ code{font-family:ui-monospace,Menlo,monospace; background:var(--surface); paddin
 .lay-badge.ok{background:rgba(54,179,126,.14);color:var(--st-done)} .lay-badge.wip{background:rgba(224,179,65,.16);color:var(--st-ready)}
 a.card.rv-card{display:block} a.card.rv-card:hover{border-color:var(--accent)}
 
+/* ============ T11 · capability chain + T13 · deliverable badge + T20 · reason banner ============
+   Phone-first: compact, inline, wraps naturally on narrow screens.
+   WHY colours are inline on .dlv-badge: each badge must reflect ITS deliverable's colour token,
+   not a shared class — avoids a class-per-deliverable explosion in the CSS. */
+
+/* T13 · deliverable badge (home card + project header) */
+.dlv-badge{
+  display:inline-flex; align-items:center; font-size:11px; font-weight:700;
+  padding:2px 8px; border-radius:var(--rpill); letter-spacing:.02em; white-space:nowrap;
+  text-transform:uppercase;
+}
+
+/* T13 · meta row in project header: badge + stack + wall-clock on one line */
+.proj-meta-row{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap; width:100%; margin-top:4px;
+}
+
+/* T13 · filter bar on home Ready section */
+.dlv-filter-bar{ display:flex; gap:6px; flex-wrap:wrap; }
+.dlv-filter-btn{
+  background:var(--surface); border:1px solid var(--line); color:var(--muted);
+  border-radius:var(--rpill); padding:4px 12px; font:inherit; font-size:13px; font-weight:500;
+  cursor:pointer; white-space:nowrap; transition:border-color .12s, color .12s;
+}
+.dlv-filter-btn:hover{ border-color:var(--accent); color:var(--text); }
+/* on = active filter: use the deliverable's own colour (via --dlv-col CSS var set inline) or accent */
+.dlv-filter-btn.on{
+  background:color-mix(in srgb, var(--dlv-col, var(--accent)) 15%, transparent);
+  border-color:var(--dlv-col, var(--accent));
+  color:var(--dlv-col, var(--accent-2));
+}
+
+/* T20 · chainReason reasoning banner — one line, below the phead, above tabs.
+   WHY not inside phead: phead is a flex row; the banner needs to span full width like a subtitle. */
+.chain-reason-banner{
+  display:flex; align-items:flex-start; gap:8px; margin:8px 0 4px;
+  font-size:13px; color:var(--muted); line-height:1.45;
+  border-left:3px solid var(--accent-2); padding:6px 12px;
+  background:rgba(124,122,255,.06); border-radius:0 var(--r1) var(--r1) 0;
+  max-width:860px;
+}
+.chain-reason-icon{ flex:none; font-size:14px; color:var(--accent-2); }
+@media(max-width:720px){ .chain-reason-banner{ font-size:12px; } }
+
+/* T11 · capability chain: a flex row of small tags */
+.chain-row{
+  display:flex; flex-wrap:wrap; gap:5px; margin:4px 0 8px;
+}
+.cap-tag{
+  font-size:11px; font-weight:600; padding:2px 9px; border-radius:var(--rpill);
+  background:rgba(90,141,238,.12); color:var(--st-running); border:1px solid rgba(90,141,238,.22);
+  white-space:nowrap; letter-spacing:.02em;
+}
+
 /* PROJECT CHAT — phone-first: the session list stacks above the thread on small screens */
 @media (max-width: 720px) {
   .chatwrap { grid-template-columns: 1fr !important; }
