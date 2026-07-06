@@ -448,6 +448,158 @@ try {
     }
   }
 
+  // ============================================================================
+  // T32 — UPDATE/DELETE OWNER-ONLY + DASHBOARD OWNER-GATED (behavioral, real-DB round-trips)
+  //
+  // Proves:
+  //   T30:
+  //     • PATCH/PUT with owner audience updates the row (round-trip read confirms new value)
+  //     • PATCH with anon audience → 401 (never mutates)
+  //     • DELETE with owner audience removes the row (subsequent GET returns 404)
+  //     • DELETE with anon audience → 401 (never deletes)
+  //     • update with unknown column → 400 (safety: no raw SQL, only catalog columns)
+  //     • delete of non-existent row → 404
+  //   T31:
+  //     • GET /dashboard with owner audience → 200 HTML
+  //     • GET /dashboard with public audience → 404 (no existence leak)
+  //     • dashboard HTML contains the private table name (correct rendering)
+  //     • dashboard HTML contains /api/app (the fetch call that wires to live data)
+  //     • dashboard HTML does not contain raw angle-bracket projectId (XSS safety)
+  //   Cleanup:
+  //     • scratch schema is dropped in finally (no footprint on failure)
+  // ============================================================================
+  {
+    const t30Id = randomUUID();
+    try {
+      // Provision a scratch schema with a public table (products) and a private table (bookings).
+      await appdb.provision(pool, t30Id, JSON.stringify({ entities: [
+        { name: 'products', public: true, display: 'name', fields: [
+          { name: 'name', type: 'text', required: true },
+          { name: 'price', type: 'int' },
+        ] },
+        { name: 'bookings', public: false, fields: [
+          { name: 'customer_name', type: 'text', required: true },
+          { name: 'notes', type: 'text' },
+        ] },
+      ] }));
+
+      // Seed a product row directly so we have a known id to update/delete.
+      const t30Schema = appdb.schemaName(t30Id);
+      await pool.query(`insert into "${t30Schema}"."products" (name, price) values ('Original Name', 100)`);
+      const prodRow = (await pool.query(`select id from "${t30Schema}"."products" limit 1`)).rows[0];
+      const prodId = prodRow?.id;
+
+      // Also insert a booking (private) via insertRow so we can test update/delete on it.
+      await appdb.insertRow(pool, t30Id, 'bookings', { customer_name: 'Bob', notes: 'initial' });
+      const bookRow = (await pool.query(`select id from "${t30Schema}"."bookings" limit 1`)).rows[0];
+      const bookId = bookRow?.id;
+
+      if (prodId === undefined || bookId === undefined) {
+        fail++; console.error('  ✗ T32 setup: could not seed rows for update/delete tests');
+      } else {
+        // ---- T30: PATCH owner audience → updates the row ----
+        const patchR = await handleAppApi(pool, t30Id, 'products', String(prodId),
+          makeReq('PATCH', `/api/app/${t30Id}/products/${prodId}`, JSON.stringify({ name: 'Updated Name', price: 200 })),
+          'owner');
+        ok('T30 PATCH owner: returns 200', patchR?.status === 200, String(patchR?.status));
+        const patchBody = (() => { try { return JSON.parse(patchR?.body || '{}'); } catch { return {}; } })();
+        ok('T30 PATCH owner: ok:true', patchBody?.ok === true, JSON.stringify(patchBody));
+
+        // verify the update persisted (real DB round-trip)
+        const afterPatch = await handleAppApi(pool, t30Id, 'products', String(prodId),
+          makeReq('GET', `/api/app/${t30Id}/products/${prodId}`), 'owner');
+        const afterPatchRow = (() => { try { return JSON.parse(afterPatch?.body || '{}').row; } catch { return null; } })();
+        ok('T30 PATCH: updated value persisted (real DB round-trip)', afterPatchRow?.name === 'Updated Name', JSON.stringify(afterPatchRow));
+        ok('T30 PATCH: numeric field persisted', afterPatchRow?.price === 200, JSON.stringify(afterPatchRow));
+
+        // ---- T30: PATCH anon audience → 401 (never mutates) ----
+        const patchAnon = await handleAppApi(pool, t30Id, 'products', String(prodId),
+          makeReq('PATCH', `/api/app/${t30Id}/products/${prodId}`, JSON.stringify({ name: 'Anon Hack' })),
+          'public');
+        ok('T30 PATCH anon: 401 (auth required)', patchAnon?.status === 401, String(patchAnon?.status));
+
+        // verify the row was NOT mutated by the anon attempt
+        const afterAnonPatch = await handleAppApi(pool, t30Id, 'products', String(prodId),
+          makeReq('GET', `/api/app/${t30Id}/products/${prodId}`), 'owner');
+        const afterAnonRow = (() => { try { return JSON.parse(afterAnonPatch?.body || '{}').row; } catch { return null; } })();
+        ok('T30 PATCH anon: row not mutated (name still Updated Name)', afterAnonRow?.name === 'Updated Name', JSON.stringify(afterAnonRow));
+
+        // ---- T30: PUT owner audience → also updates ----
+        const putR = await handleAppApi(pool, t30Id, 'products', String(prodId),
+          makeReq('PUT', `/api/app/${t30Id}/products/${prodId}`, JSON.stringify({ name: 'Put Name' })),
+          'owner');
+        ok('T30 PUT owner: returns 200', putR?.status === 200, String(putR?.status));
+
+        // ---- T30: update with unknown column → 400 (safety gate) ----
+        // Unknown columns are silently skipped by appdb.updateRow (typedColumns filter).
+        // With ONLY unknown columns, use.length === 0, so updateRow returns false → 400.
+        const badColR = await handleAppApi(pool, t30Id, 'products', String(prodId),
+          makeReq('PATCH', `/api/app/${t30Id}/products/${prodId}`, JSON.stringify({ nonexistent_col_xyz: 'bad' })),
+          'owner');
+        ok('T30 unknown column: 400 (no valid columns to update)', badColR?.status === 400, String(badColR?.status));
+
+        // ---- T30: DELETE owner audience → removes the booking row ----
+        const delR = await handleAppApi(pool, t30Id, 'bookings', String(bookId),
+          makeReq('DELETE', `/api/app/${t30Id}/bookings/${bookId}`),
+          'owner');
+        ok('T30 DELETE owner: returns 200', delR?.status === 200, String(delR?.status));
+        const delBody = (() => { try { return JSON.parse(delR?.body || '{}'); } catch { return {}; } })();
+        ok('T30 DELETE owner: ok:true', delBody?.ok === true, JSON.stringify(delBody));
+
+        // verify the row is gone (real DB round-trip — owner can still see private rows, so a real delete is unambiguous)
+        const afterDel = (await pool.query(`select count(*)::int n from "${t30Schema}"."bookings" where id=$1`, [bookId])).rows[0].n;
+        ok('T30 DELETE: row physically removed from DB (real DB round-trip)', afterDel === 0, 'count=' + afterDel);
+
+        // ---- T30: DELETE anon audience → 401 (never deletes) ----
+        // Re-insert a row to have something to target.
+        await pool.query(`insert into "${t30Schema}"."bookings" (customer_name) values ('Carol')`);
+        const carol = (await pool.query(`select id from "${t30Schema}"."bookings" order by id desc limit 1`)).rows[0];
+        const carolId = carol?.id;
+        if (carolId !== undefined) {
+          const delAnon = await handleAppApi(pool, t30Id, 'bookings', String(carolId),
+            makeReq('DELETE', `/api/app/${t30Id}/bookings/${carolId}`),
+            'public');
+          ok('T30 DELETE anon: 401 (auth required)', delAnon?.status === 401, String(delAnon?.status));
+          const stillThere = (await pool.query(`select count(*)::int n from "${t30Schema}"."bookings" where id=$1`, [carolId])).rows[0].n;
+          ok('T30 DELETE anon: row still exists (not deleted)', stillThere === 1, 'count=' + stillThere);
+        } else {
+          fail++; console.error('  ✗ T32 anon-delete: could not re-insert carol row');
+        }
+
+        // ---- T30: DELETE non-existent row → 404 ----
+        const delMissR = await handleAppApi(pool, t30Id, 'products', '999999',
+          makeReq('DELETE', `/api/app/${t30Id}/products/999999`),
+          'owner');
+        ok('T30 DELETE missing: 404', delMissR?.status === 404, String(delMissR?.status));
+
+        // ---- T31: GET /dashboard owner audience → 200 HTML ----
+        const dashR = await handleAppApi(pool, t30Id, 'dashboard', null,
+          makeReq('GET', `/api/app/${t30Id}/dashboard`),
+          'owner');
+        ok('T31 dashboard owner: returns 200', dashR?.status === 200, String(dashR?.status));
+        ok('T31 dashboard owner: content-type is HTML', (dashR?.contentType || '').includes('text/html'), String(dashR?.contentType));
+
+        // ---- T31: dashboard HTML contains the private table name ----
+        const dashBody = dashR?.body || '';
+        ok('T31 dashboard: contains "bookings" (private table rendered)', dashBody.includes('bookings'), '(not found in ' + dashBody.length + ' bytes)');
+
+        // ---- T31: dashboard HTML contains /api/app (fetch call to live data) ----
+        ok('T31 dashboard: contains /api/app (source-pin: fetches live data)', dashBody.includes('/api/app'), '(not found)');
+
+        // ---- T31: XSS safety — projectId not in raw angle-bracket context ----
+        ok('T31 dashboard XSS-safe: no raw angle-bracket around projectId', !dashBody.includes('<' + t30Id), '(raw UUID found in angle bracket context)');
+
+        // ---- T31: GET /dashboard public audience → 404 (no existence leak) ----
+        const dashAnonR = await handleAppApi(pool, t30Id, 'dashboard', null,
+          makeReq('GET', `/api/app/${t30Id}/dashboard`),
+          'public');
+        ok('T31 dashboard public: 404 (owner-gated, no existence leak)', dashAnonR?.status === 404, String(dashAnonR?.status));
+      }
+    } finally {
+      await pool.query(`drop schema if exists "${appdb.schemaName(t30Id)}" cascade`).catch(() => {});
+    }
+  }
+
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e, e?.stack ?? '');
 } finally {
