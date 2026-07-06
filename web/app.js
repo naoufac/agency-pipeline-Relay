@@ -135,6 +135,20 @@ async function submitBrief(){
   try { const r = await j('/api/run', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ brief }) });
         location.hash = '#/p/' + r.id; } catch { btn.textContent = 'Build my site →'; btn.disabled = false; }
 }
+/* ---- T13 · deliverable badge helpers ----
+   WHY maps: the five deliverable IDs are an INTERNAL closed set (orchestrator.ts).
+   We map them to short human labels + a colour token at the UI layer — if IDs change,
+   one object changes here; no scattered ternaries to chase. */
+const DLV_LABEL = { directus_site:'site', wp_site:'wp', wp_woocommerce:'store', fullstack_app:'app', campaign:'campaign' };
+const DLV_COLOR = { directus_site:'#5A8DEE', wp_site:'#A06CD5', wp_woocommerce:'#E0B341', fullstack_app:'#36B37E', campaign:'#F0506E' };
+function deliverableBadge(dlv){
+  if (!dlv) return '';
+  const label = DLV_LABEL[dlv] || dlv;
+  const col   = DLV_COLOR[dlv] || '#5C6678';
+  // data-dlv lets the filter code select/hide cards without re-rendering them
+  return `<span class="dlv-badge" data-dlv="${esc(dlv)}" style="background:${col}22;color:${col};border:1px solid ${col}44">${esc(label)}</span>`;
+}
+
 // one card's inner HTML — STABLE preview URL (no cache-bust → browser caches it, never re-fetches)
 function cardInner(p){
   const st = projStatus(p), label = st === 'done' ? 'ready' : st;
@@ -145,46 +159,96 @@ function cardInner(p){
       ${p.review_passed === false ? `<div class="pill" style="background:rgba(240,80,110,.14);color:#F0506E;margin-top:10px"><i class="dot s-failed"></i>review found ${p.review_issues || ''} issue${p.review_issues === 1 ? '' : 's'}</div>` : (p.review_passed === true ? `<div class="muted" style="font-size:12px;margin-top:10px">✓ reviewed — buttons, links &amp; forms work</div>` : '')}
       <div class="row" style="justify-content:space-between;margin-top:14px">
         <span class="pill"><i class="dot s-${st}"></i>${label}${st === 'running' ? ` · ${p.done}/${p.total}` : ''}</span>
+        ${deliverableBadge(p.deliverable || null)}
         ${p.site
           ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${p.site}">Open ↗</a>`
           : `<a class="btn btn-sm btn-ghost" href="#/p/${p.id}">Open project</a>`}
       </div>
     </div>`;
 }
+/* ---- T13 · deliverable filter helpers ----
+   activeDlvFilter is module-level so the filter survives poll ticks without losing state.
+   applyDlvFilter() runs IN PLACE on existing card elements — no re-render, no flicker.
+   WHY not re-render: cardInner already has data-dlv on the badge; we just show/hide cards. */
+let activeDlvFilter = '';   // '' = all; otherwise a deliverable ID string
+function applyDlvFilter(){
+  document.querySelectorAll('.pcard[data-dlv]').forEach(el => {
+    el.style.display = (!activeDlvFilter || el.getAttribute('data-dlv') === activeDlvFilter) ? '' : 'none';
+  });
+  // keep group headers visible only when they have at least one visible card
+  ['bgroup','rgroup'].forEach(gid => {
+    const g = document.getElementById(gid); if (!g) return;
+    const grid = g.querySelector('.grid');
+    if (!grid) return;
+    const any = Array.from(grid.children).some(c => (c as HTMLElement).style.display !== 'none');
+    g.style.display = (grid.children.length && any) ? '' : 'none';
+  });
+}
+
 // Home reconciles IN PLACE: each card created once; only re-rendered when its own data
 // changes (so finished cards + their images are never touched → no flicker/reload);
 // polling stops the instant nothing is building. No cache-busting, no full-grid churn.
 function home(){
   app.innerHTML = `<div class="container">${briefBar()}
     <div id="bgroup" style="display:none"><div class="kpi-label" style="margin:28px 0 12px">Building</div><div id="bgrid" class="grid grid-3"></div></div>
-    <div id="rgroup" style="display:none"><div class="kpi-label" style="margin:28px 0 12px">Ready</div><div id="rgrid" class="grid grid-3"></div></div>
+    <div id="rgroup" style="display:none">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:28px 0 12px">
+        <span class="kpi-label" style="margin:0">Ready</span>
+        <div id="dlv-filter" class="dlv-filter-bar"></div>
+      </div>
+      <div id="rgrid" class="grid grid-3"></div>
+    </div>
     <div id="emptywrap"></div></div>`;
   document.getElementById('go').onclick = submitBrief;
   document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
   // ARC I: operator-only funnel strip — renders only when server-confirmed isOperator
   const container = app.querySelector('.container');
   if (meIsOperator && container) renderFunnelStrip(container);
-  const cards = new Map();                                  // id -> { el, sig, building }
+  const cards = new Map();                                  // id -> { el, sig, building, dlv }
   const bgrid = document.getElementById('bgrid'), rgrid = document.getElementById('rgrid');
+
+  // T13 · build the filter pill row from the distinct deliverables present in the list.
+  // Runs after each load() so the filter reflects the real data set.
+  function renderFilterBar(list){
+    const bar = document.getElementById('dlv-filter'); if (!bar) return;
+    const seen = new Set(list.map(p => p.deliverable).filter(Boolean));
+    if (seen.size < 2){ bar.innerHTML = ''; return; }   // filter only useful when ≥2 types exist
+    const all = [{ id:'', label:'All' }, ...[...seen].map(id => ({ id, label: DLV_LABEL[id] || id }))];
+    bar.innerHTML = all.map(b =>
+      `<button class="dlv-filter-btn${activeDlvFilter === b.id ? ' on' : ''}" data-val="${esc(b.id)}" style="${b.id && DLV_COLOR[b.id] ? `--dlv-col:${DLV_COLOR[b.id]}` : ''}">${esc(b.label)}</button>`
+    ).join('');
+    bar.querySelectorAll('.dlv-filter-btn').forEach(btn => btn.addEventListener('click', () => {
+      activeDlvFilter = btn.getAttribute('data-val') || '';
+      bar.querySelectorAll('.dlv-filter-btn').forEach(b => b.classList.toggle('on', b === btn));
+      applyDlvFilter();
+    }));
+  }
+
   async function load(){
     let list; try { list = await j('/api/projects'); } catch { return true; }
     document.getElementById('emptywrap').innerHTML = list.length ? '' : `<div class="empty">${me ? 'No sites in your account yet — describe one above and it\'s yours.' : 'No sites yet. Describe one above and Relay builds it.'}</div>`;
+    renderFilterBar(list);
     let building = 0;
     for (const p of list){
       const st = projStatus(p), isB = st === 'running'; if (isB) building++;
-      const sig = `${st}|${p.done}|${p.total}|${p.site ? 1 : 0}|${p.review_passed}|${p.review_issues}`;
+      const sig = `${st}|${p.done}|${p.total}|${p.site ? 1 : 0}|${p.review_passed}|${p.review_issues}|${p.deliverable}`;
       let rec = cards.get(p.id);
       if (!rec){
-        const el = document.createElement('div'); el.className = 'card pcard'; el.innerHTML = cardInner(p);
+        const el = document.createElement('div');
+        el.className = 'card pcard';
+        if (p.deliverable) el.setAttribute('data-dlv', p.deliverable);   // T13 filter hook
+        el.innerHTML = cardInner(p);
         el.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = '#/p/' + p.id; });
         rec = { el, sig, building: isB }; cards.set(p.id, rec); (isB ? bgrid : rgrid).appendChild(el);
       } else if (rec.sig !== sig){                          // changed -> re-render THIS card only
         rec.el.innerHTML = cardInner(p); rec.sig = sig;
+        if (p.deliverable) rec.el.setAttribute('data-dlv', p.deliverable);
         if (rec.building !== isB){ (isB ? bgrid : rgrid).appendChild(rec.el); rec.building = isB; }
       }                                                    // unchanged -> untouched (no reload)
     }
     document.getElementById('bgroup').style.display = bgrid.children.length ? '' : 'none';
     document.getElementById('rgroup').style.display = rgrid.children.length ? '' : 'none';
+    applyDlvFilter();   // re-apply the active filter after every data load
     return building > 0;
   }
   load().then(b => { if (b) poll = setInterval(async () => { if (!(await load())) clearPoll(); }, 4000); });
@@ -251,18 +315,53 @@ function project(id, tab, seq){
     </div>`;
   }
 
+  /* T11 · capability chain — human-readable capability IDs from the orchestrator.
+     Rendered as small coloured tags; order matters (spine caps come first). */
+  function chainHtml(caps){
+    if (!caps || !caps.length) return '';
+    const CAP_LABEL = {
+      understand:'understand', research:'research', strategy:'strategy',
+      branding:'branding', design_guidelines:'design', content_copy:'copy',
+      build:'build', qa:'QA', database:'database', app_api:'app API',
+      woo_products:'products', wp_provision:'WP provision', campaign_assets:'assets',
+    };
+    const tags = caps.map(c => `<span class="cap-tag">${esc(CAP_LABEL[c] || c)}</span>`).join('');
+    return `<div class="chain-row" aria-label="capability chain">${tags}</div>`;
+  }
+
+  /* T12 · wall-clock formatter: "built in Xm Ys" or "built in Xs" */
+  function builtIn(secs){
+    if (!secs || secs <= 0) return '';
+    if (secs < 60) return `built in ${secs}s`;
+    return `built in ${Math.floor(secs / 60)}m ${secs % 60}s`;
+  }
+
   function header(b){
     const built = !!b.site, failed = !built && b.tasks.some(t => t.status==='failed');
     const st = built ? 'done' : (failed ? 'failed' : 'running');
     const lab = built ? 'Live' : (failed ? 'Failed' : 'Building');
+    const p = b.project;
+    // T13: deliverable + stack line (compact, phone-first)
+    const dlvLine = (p.deliverable || p.stack)
+      ? `<div class="proj-meta-row">${deliverableBadge(p.deliverable)}${p.stack ? `<span class="muted" style="font-size:12px">${esc(p.stack)}</span>` : ''}${p.build_seconds ? `<span class="muted" style="font-size:12px">${esc(builtIn(p.build_seconds))}</span>` : ''}</div>`
+      : '';
+    // T20: chainReason banner — one-line "why this deliverable" from the orchestrator
+    const reasonBanner = p.chainReason
+      ? `<div class="chain-reason-banner"><span class="chain-reason-icon">⊙</span>${esc(p.chainReason)}</div>`
+      : '';
+    // T11: capability chain tags
+    const capChain = chainHtml(p.capabilities);
     document.getElementById('phead').innerHTML = `
       <div class="phead">
         <a class="back" href="#/">‹ Your sites</a>
         <h1 class="ptitle">${esc(b.project.brief)}</h1>
         <span class="pill big"><i class="dot s-${st}"></i>${lab}</span>
         ${b.site ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${b.site}">Open ↗</a>` : ''}
+        ${dlvLine}
         ${me ? visitsHtml(b.visits) : ''}
       </div>
+      ${reasonBanner}
+      ${capChain}
       <div class="nav-links tabs">
         ${tabLink(id,'site','Site',tab)}${tabLink(id,'chat','Chat',tab)}${tabLink(id,'build','How it was built',tab)}${tabLink(id,'files','Files',tab)}${tabLink(id,'metrics','Metrics',tab)}${b.site ? tabLink(id,'qa','QA',tab) : ''}${b.site ? tabLink(id,'content','Content',tab) : ''}${b.site ? tabLink(id,'design','Design',tab) : ''}${b.site ? tabLink(id,'data','Data',tab) : ''}
       </div>`;
