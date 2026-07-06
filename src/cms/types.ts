@@ -105,5 +105,5 @@ export interface Builder {
 }
 
 // Known builder IDs — additive, never replaces CmsName.
-export type BuilderId = 'directus' | 'wordpress' | 'app' | 'campaign';
-export const BUILDER_IDS: BuilderId[] = ['directus', 'wordpress', 'app', 'campaign'];
+export type BuilderId = 'directus' | 'wordpress' | 'app' | 'campaign' | 'prestashop';
+export const BUILDER_IDS: BuilderId[] = ['directus', 'wordpress', 'app', 'campaign', 'prestashop'];

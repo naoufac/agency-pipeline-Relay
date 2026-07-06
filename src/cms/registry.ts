@@ -77,6 +77,20 @@ export function resolveBuilder(id: BuilderId | string | undefined): Builder {
           }
         },
       };
+    case 'prestashop':
+      // Lazy-load like wordpress. Flag-gated internally (RELAY_PRESTA): a no-op that returns ok:true
+      // when Presta infra is absent, so selecting it never breaks a build.
+      return {
+        id: 'prestashop',
+        async finalize(pool, projectId, ctx) {
+          try {
+            const { prestashopBuilder } = await import('./prestashop.ts');
+            return prestashopBuilder.finalize(pool, projectId, ctx);
+          } catch (e: any) {
+            return { ok: false, log: `prestashop builder load failed: ${String(e?.message ?? e).slice(0, 200)}` };
+          }
+        },
+      };
     case 'app':
       return stubBuilder('app', 'app builder registered by Worker C');
     case 'campaign':
