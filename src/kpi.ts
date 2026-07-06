@@ -3,6 +3,105 @@ import * as appdb from './appdb.ts';
 
 export type Kpi = { key: string; label: string; value: string; sub: string; group: 'quality' | 'efficiency' | 'signal'; tone: 'good' | 'warn' | 'bad' | 'neutral' };
 
+// ─── FUNNEL KPI (ARC E Part 2) ────────────────────────────────────────────────
+// Operator-level demand funnel with QA noise filtered OUT.
+// The database is full of QA probes and test fixtures — measuring those inflates every
+// metric.  Every filter is a deterministic string check, never an LLM judgment.
+//
+// NOISE FILTERS:
+//   users:        skip emails matching /@(example|test)\./ and the RELAY_OPERATOR_EMAIL
+//   site_submissions: skip payloads containing 'QA Test', 'Automated QA',
+//                 emails under example/test/naples.agency domains
+//
+// These filters are applied inside Postgres (WHERE clauses) for efficiency.
+//
+export type Funnel = {
+  users_total:        number;   // all user rows
+  users_real:         number;   // non-QA users
+  leads_total:        number;   // all site_submissions
+  leads_real:         number;   // non-QA submissions
+  projects_total:     number;   // all project rows
+  credits_granted_cents: number; // sum of 'grant' ledger rows
+  credits_spent_cents:   number; // sum of 'debit' ledger rows (stored as negative, returned as positive)
+  active_paying_users:   number; // users who have at least one debit row in billing_ledger
+};
+
+// operatorEmail: the operator address that is excluded from "real" user counts.
+// Defaults to the env var or the hard-coded bootstrap value — same logic as billing.ts.
+function operatorEmail(): string {
+  return (process.env.RELAY_OPERATOR_EMAIL || 'nchobah@gmail.com').toLowerCase().trim();
+}
+
+export async function funnel(pool: pg.Pool): Promise<Funnel> {
+  const op = operatorEmail();
+
+  // users ----------------------------------------------------------------
+  // We guard against missing tables (billing may not be deployed yet) with try/catch.
+  let users_total = 0, users_real = 0;
+  try {
+    const ut = await pool.query(`select count(*)::int n from users`);
+    users_total = Number(ut.rows[0].n);
+    // "real" = not an example/test email, not the operator
+    const ur = await pool.query(`
+      select count(*)::int n from users
+      where email not ilike '%@example.%'
+        and email not ilike '%@test.%'
+        and lower(email) <> $1`, [op]);
+    users_real = Number(ur.rows[0].n);
+  } catch {}  // users table may not exist in a fresh test DB
+
+  // leads / site_submissions --------------------------------------------
+  let leads_total = 0, leads_real = 0;
+  try {
+    const lt = await pool.query(`select count(*)::int n from site_submissions`);
+    leads_total = Number(lt.rows[0].n);
+    // Filter out QA noise: payloads that contain known QA markers, or come from test domains.
+    // payload is jsonb; cast to text for the string contains check.
+    const lr = await pool.query(`
+      select count(*)::int n from site_submissions
+      where payload::text not ilike '%QA Test%'
+        and payload::text not ilike '%Automated QA%'
+        and (payload->>'email') is null
+           or (
+                (payload->>'email') not ilike '%@example.%'
+            and (payload->>'email') not ilike '%@test.%'
+            and (payload->>'email') not ilike '%@naples.agency'
+           )`);
+    leads_real = Number(lr.rows[0].n);
+  } catch {}  // table may not exist
+
+  // projects -------------------------------------------------------------
+  let projects_total = 0;
+  try {
+    const pt = await pool.query(`select count(*)::int n from projects`);
+    projects_total = Number(pt.rows[0].n);
+  } catch {}
+
+  // billing ledger -------------------------------------------------------
+  let credits_granted_cents = 0, credits_spent_cents = 0, active_paying_users = 0;
+  try {
+    const bg = await pool.query(`select coalesce(sum(amount_cents),0)::int n from billing_ledger where kind='grant'`);
+    credits_granted_cents = Number(bg.rows[0].n);
+    const bs = await pool.query(`select coalesce(abs(sum(amount_cents)),0)::int n from billing_ledger where kind='debit'`);
+    credits_spent_cents = Number(bs.rows[0].n);
+    const ap = await pool.query(`select count(distinct user_id)::int n from billing_ledger where kind='debit'`);
+    active_paying_users = Number(ap.rows[0].n);
+  } catch {}  // billing_ledger may not be deployed yet
+
+  return { users_total, users_real, leads_total, leads_real, projects_total, credits_granted_cents, credits_spent_cents, active_paying_users };
+}
+
+// funnelToKpis: convert a Funnel into the standard Kpi[] format for embedding in computeKpi responses.
+export function funnelToKpis(f: Funnel): Kpi[] {
+  const pct = (n: number, d: number) => d ? Math.round(100 * n / d) + '%' : '—';
+  return [
+    { group: 'signal', key: 'funnel_users',    label: 'Real users',     value: String(f.users_real),    sub: `${f.users_total} total · ${pct(f.users_real, f.users_total)} non-QA`,                         tone: f.users_real > 0 ? 'good' : 'neutral' },
+    { group: 'signal', key: 'funnel_leads',    label: 'Real leads',     value: String(f.leads_real),    sub: `${f.leads_total} total submissions · ${pct(f.leads_real, f.leads_total)} non-QA`,              tone: f.leads_real > 0 ? 'good' : 'neutral' },
+    { group: 'signal', key: 'funnel_projects', label: 'Projects',       value: String(f.projects_total), sub: 'all builds ever started',                                                                      tone: 'neutral' },
+    { group: 'signal', key: 'funnel_credits',  label: 'Credits ($)',    value: '$' + (f.credits_spent_cents / 100).toFixed(2) + ' spent', sub: `$${(f.credits_granted_cents / 100).toFixed(2)} granted · ${f.active_paying_users} paying user(s)`, tone: f.active_paying_users > 0 ? 'good' : 'neutral' },
+  ];
+}
+
 // One source of truth for KPIs — used by the API (/api/kpi) and the CLI.
 export async function computeKpi(pool: pg.Pool, projectId?: string) {
   const p = (await pool.query(
@@ -91,12 +190,17 @@ export async function computeKpi(pool: pg.Pool, projectId?: string) {
       tone: rigor >= 60 ? 'good' : rigor >= 40 ? 'warn' : 'bad' },
   ];
 
+  // ARC E Part 2: include the operator-level demand funnel in every KPI response.
+  // This is a pool-wide aggregate (no project filter) — same data regardless of which project is queried.
+  const funnelData = await funnel(pool);
+
   return {
     project: { id: p.id, brief: p.brief, created_at: p.created_at },
     status: deadlocked ? 'blocked' : (!finished ? 'running' : (failed ? 'complete_with_failures' : 'complete')),
     totals: { total, done, active, blocked, failed },
     chars,
     kpis,
+    funnel: funnelData,    // demand funnel with QA noise filtered — for the operator / CLI
     providers,   // ops-only telemetry (CLI); the board does not render this
   };
 }

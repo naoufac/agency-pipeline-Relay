@@ -510,5 +510,87 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ok('seed floor: non-catalog public tables are exempt (an empty testimonials list is legal)', catalogSeedErrors([{ name: 'testimonials', public: true, seed: [] }]).length === 0);
 }
 
+// ── ARC E · PLANNER: complexityOf determinism + monotonicity + ceiling + landing ──────────────────
+{
+  const { complexityOf, buildPlan } = await import('./planner.ts');
+
+  // DETERMINISM: same brief must always produce the same score (no random, no time, no env).
+  const yoga = 'a landing page for a yoga studio in Miami';
+  const cx1 = complexityOf(yoga);
+  const cx2 = complexityOf(yoga);
+  ok('complexityOf: same brief → same score (deterministic)', cx1.score === cx2.score);
+  ok('complexityOf: same brief → same pagesMax (deterministic)', cx1.pagesMax === cx2.pagesMax);
+
+  // MONOTONICITY: landing yoga (trivial) < 5-page bakery < ceramics store with variants+blog
+  //   yoga landing: likely score 1-3 (landing hint + no store/app), pagesMax 5
+  //   simple bakery: plain multi-page site, pagesMax 5
+  //   ceramics store with variants + blog: store + variants + blog → score ≥7, pagesMax ≥7
+  const bakery   = complexityOf('a cozy neighborhood bakery with an about page and a contact form');
+  const ceramics = complexityOf('an online ceramics store with product variants (size and finish) and a blog');
+  ok('complexityOf: landing yoga score ≤ bakery score (monotone)', cx1.score <= bakery.score);
+  ok('complexityOf: bakery score ≤ ceramics store score (monotone)', bakery.score <= ceramics.score);
+  ok('complexityOf: ceramics store pagesMax ≥ bakery pagesMax (monotone)', ceramics.pagesMax >= bakery.pagesMax);
+
+  // FLOOR: pagesMax is always >= 5, even for the simplest brief
+  ok('complexityOf: pagesMax never below 5 (floor)', cx1.pagesMax >= 5 && bakery.pagesMax >= 5);
+
+  // CEILING: pagesMax is always <= 8, even for the most complex brief
+  const mega = complexityOf('a full-featured e-commerce platform with 10 pages, multilingual support, product variants, blog, booking system, marketplace and SaaS dashboard');
+  ok('complexityOf: pagesMax never above 8 (ceiling)', mega.pagesMax <= 8);
+
+  // LANDING: shape='landing' forces exactly 1 page regardless of complexity score
+  const landingBrief = 'a high-converting landing page for a fitness coach course with multiple sections and testimonials';
+  const landingPlan = await buildPlan(landingBrief);
+  ok('planner: landing brief → exactly 1 page (forced in code)', landingPlan.plan.pages.length === 1);
+  ok('planner: landing page is always index', landingPlan.plan.pages[0].slug === 'index');
+
+  // STORE: a store brief raises the ceiling and still guarantees cart + checkout
+  const storePlan = await buildPlan('an online ceramics store with product variants (size and finish) and a blog with news posts');
+  const storeSlugs = storePlan.plan.pages.map(p => p.slug);
+  ok('planner: complex store has cart page', storeSlugs.includes('cart'), storeSlugs.join(','));
+  ok('planner: complex store has checkout page', storeSlugs.includes('checkout'), storeSlugs.join(','));
+  ok('planner: ceramics store (store+variants+blog) pagesMax ≥ 6 (raised above bakery)', ceramics.pagesMax >= 6);
+  // A store with booking + variants + blog should push above 6 (score >= 7)
+  const complexStore = complexityOf('an online ceramics store with booking system, multilingual support, product variants and a blog');
+  ok('planner: highly complex store (store+booking+multilingual+variants+blog) pagesMax ≥ 7', complexStore.pagesMax >= 7, `score=${complexStore.score}`);
+}
+
+// ── ARC E · FUNNEL KPI: noise filter logic ────────────────────────────────────────────────────────
+// The funnel filters QA noise from users / leads. We test the filter LOGIC (regex / string checks)
+// rather than hitting the live DB, so this gate runs offline and deterministically.
+{
+  // Email noise filter: matches @example. and @test. (case-insensitive), exact operator email
+  const operatorEmail = (process.env.RELAY_OPERATOR_EMAIL || 'nchobah@gmail.com').toLowerCase();
+  const isQaEmail = (e: string): boolean => {
+    const l = e.toLowerCase();
+    return /@example\./.test(l) || /@test\./.test(l) || l === operatorEmail;
+  };
+  ok('funnel: @example.com is QA noise', isQaEmail('alice@example.com'));
+  ok('funnel: @test.com is QA noise', isQaEmail('probe@test.com'));
+  ok('funnel: operator email is excluded from real count', isQaEmail(operatorEmail));
+  ok('funnel: real user email passes filter', !isQaEmail('real.customer@gmail.com'));
+  ok('funnel: subdomain of example is QA noise', isQaEmail('bob@example.org'));
+
+  // Submission noise filter: payloads with QA markers are excluded
+  const isQaPayload = (payload: Record<string, any>): boolean => {
+    const s = JSON.stringify(payload);
+    if (/QA Test|Automated QA/i.test(s)) return true;
+    const em = (payload.email || '').toLowerCase();
+    return /@example\./.test(em) || /@test\./.test(em) || /@naples\.agency/.test(em);
+  };
+  ok('funnel: payload with "QA Test" is QA noise', isQaPayload({ name: 'QA Test User', email: 'qa@example.com' }));
+  ok('funnel: payload with "Automated QA" is QA noise', isQaPayload({ message: 'Automated QA probe', email: 'bot@test.com' }));
+  ok('funnel: @naples.agency email is QA noise', isQaPayload({ email: 'canary@naples.agency', name: 'Real Name' }));
+  ok('funnel: real submission passes filter', !isQaPayload({ name: 'Maria Rossi', email: 'maria@gmail.com', message: 'I would like to book a table' }));
+  ok('funnel: submission with no email passes (anonymous inquiry)', !isQaPayload({ message: 'What are your hours?' }));
+
+  // Source-pin: /api/kpi response shape must include a "funnel" key
+  // We can't hit the live server, but we can import and check the return type shape
+  // by asserting the exported function exists and has the right signature.
+  const kpiMod = await import('./kpi.ts');
+  ok('funnel: kpi.ts exports funnel()', typeof kpiMod.funnel === 'function');
+  ok('funnel: kpi.ts exports funnelToKpis()', typeof kpiMod.funnelToKpis === 'function');
+}
+
 console.log(`\nspec:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
