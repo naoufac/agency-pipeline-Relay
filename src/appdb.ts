@@ -371,7 +371,10 @@ export async function listTables(pool: pg.Pool, projectId: string): Promise<stri
   return r.rows.map((x: any) => x.table_name);
 }
 
-async function typedColumns(pool: pg.Pool, schema: string, table: string): Promise<{ name: string; type: string; nullable: boolean }[]> {
+// WHY exported: app/api.ts needs to allowlist ?order= column names against the live catalog —
+// only a column that actually exists in the table is a safe ORDER BY target. Keeping the function
+// internal-first keeps the signature stable; callers outside appdb.ts must use the schema-name form.
+export async function typedColumns(pool: pg.Pool, schema: string, table: string): Promise<{ name: string; type: string; nullable: boolean }[]> {
   const r = await pool.query('select column_name, data_type, is_nullable from information_schema.columns where table_schema=$1 and table_name=$2 order by ordinal_position', [schema, table]);
   return r.rows.map((x: any) => ({ name: x.column_name, type: x.data_type, nullable: x.is_nullable === 'YES' }));
 }
@@ -426,14 +429,39 @@ async function decorateRows(pool: pg.Pool, projectId: string, schema: string, ta
 }
 
 // Read rows from a REAL project table (validated against the schema's own catalog; never arbitrary SQL).
-export async function readRows(pool: pg.Pool, projectId: string, table: string, limit = 50, audience: ReadAudience = 'public'): Promise<any[]> {
+// T8: accepts offset (>= 0) and orderOpts for safe pagination and ordering.
+// ORDER BY is built from an allowlisted column name (validated against the live typedColumns catalog
+// so an unknown column name is silently fallen back to the default — never injected raw into SQL).
+// The IDENT guard on orderCol plus the explicit asc/desc enum mean no injection is possible even if the
+// caller bypasses the api.ts layer — defense in depth on the DB side too.
+export async function readRows(
+  pool: pg.Pool,
+  projectId: string,
+  table: string,
+  limit = 50,
+  audience: ReadAudience = 'public',
+  offset = 0,
+  orderCol?: string,
+  orderDir?: 'asc' | 'desc',
+): Promise<any[]> {
   const schema = schemaName(projectId);
   if (!IDENT.test(table)) return [];
   if (audience !== 'owner' && PRIVATE_READ.test(table)) return [];   // FS0: visitor records are never publicly listable
   const tables = await listTables(pool, projectId);
   if (!tables.includes(table)) return [];
   const lim = Math.max(1, Math.min(200, Number(limit) || 50));
-  const rows = (await pool.query(`select * from "${schema}"."${table}" order by id desc limit ${lim}`)).rows;
+  const off = Math.max(0, Math.floor(Number(offset) || 0));
+  // ORDER BY: pick a real column or fall back to a safe default.
+  // 'id' is always present on generated tables (guaranteed by compile()). If the table has
+  // created_at it's a better default for time-series reads (newest first). The caller can
+  // override with any column that's actually in the catalog — IDENT-checked + allowlisted below.
+  const cols = await typedColumns(pool, schema, table);
+  const colNames = cols.map(c => c.name);
+  const fallback = colNames.includes('created_at') ? 'created_at' : 'id';
+  let sortCol = fallback;
+  if (orderCol && IDENT.test(orderCol) && colNames.includes(orderCol)) sortCol = orderCol;
+  const dir = orderDir === 'asc' ? 'asc' : 'desc';   // default desc (newest first, like the old behavior)
+  const rows = (await pool.query(`select * from "${schema}"."${table}" order by "${sortCol}" ${dir} limit ${lim} offset ${off}`)).rows;
   // PQ2 · variants: product cards need to know they have options — the grid then offers
   // "Choose options" (to the PDP) instead of a bare Add-to-cart the server would refuse
   if (table === 'products' && tables.includes('product_variants')) {

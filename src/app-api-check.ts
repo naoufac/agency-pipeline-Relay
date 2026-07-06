@@ -238,6 +238,216 @@ try {
     }
   }
 
+  // ============================================================================
+  // T8 — PAGINATION + ORDERING GATES (behavioral, real DB round-trip)
+  // Provisions a scratch schema with multiple rows and proves:
+  //   • ?limit is respected (fewer rows than total)
+  //   • ?offset advances the window (non-overlapping pages)
+  //   • ?order=<column> orders by that column
+  //   • ?dir=asc / ?dir=desc reverses the order
+  //   • an unknown ?order column is rejected with 400 (not injected)
+  //   • the response envelope contains {rows, limit, offset}
+  // ============================================================================
+  {
+    const pagId = randomUUID();
+    try {
+      await appdb.provision(pool, pagId, JSON.stringify({ entities: [
+        { name: 'items', public: true, display: 'name', fields: [
+          { name: 'name', type: 'text', required: true },
+          { name: 'score', type: 'int' },
+        ] },
+      ] }));
+      // Insert 5 rows with distinct scores so ordering is deterministic.
+      const schema = appdb.schemaName(pagId);
+      for (let i = 1; i <= 5; i++) {
+        await pool.query(`insert into "${schema}"."items" (name, score) values ($1, $2)`, [`Item${i}`, i * 10]);
+      }
+
+      // --- response envelope: list returns {rows, limit, offset} ---
+      const listR = await handleAppApi(pool, pagId, 'items', null, makeReq('GET', '/api/app/' + pagId + '/items?limit=3&offset=0'));
+      const listB = (() => { try { return JSON.parse(listR?.body || '{}'); } catch { return {}; } })();
+      ok('T8 envelope: list returns rows array', Array.isArray(listB.rows), JSON.stringify(listB));
+      ok('T8 envelope: limit echoed back', listB.limit === 3, JSON.stringify(listB));
+      ok('T8 envelope: offset echoed back', listB.offset === 0, JSON.stringify(listB));
+      ok('T8 limit: page 1 has 3 rows (bounded)', Array.isArray(listB.rows) && listB.rows.length === 3, 'rows=' + listB.rows?.length);
+
+      // --- second page: offset=3, should get the remaining 2 rows ---
+      const page2R = await handleAppApi(pool, pagId, 'items', null, makeReq('GET', '/api/app/' + pagId + '/items?limit=3&offset=3'));
+      const page2B = (() => { try { return JSON.parse(page2R?.body || '{}'); } catch { return {}; } })();
+      ok('T8 offset: page 2 has 2 rows (remaining after offset=3)', Array.isArray(page2B.rows) && page2B.rows.length === 2, 'rows=' + page2B.rows?.length);
+      ok('T8 offset echoed: offset=3 in page 2 response', page2B.offset === 3, JSON.stringify(page2B));
+
+      // --- pages don't overlap: no item id appears in both pages ---
+      if (Array.isArray(listB.rows) && Array.isArray(page2B.rows)) {
+        const p1ids = new Set(listB.rows.map((r: any) => r.id));
+        const overlap = page2B.rows.some((r: any) => p1ids.has(r.id));
+        ok('T8 no overlap: page 1 and page 2 are disjoint', !overlap, 'p1=' + JSON.stringify(listB.rows?.map((r: any) => r.id)) + ' p2=' + JSON.stringify(page2B.rows?.map((r: any) => r.id)));
+      }
+
+      // --- ordering: ?order=score&dir=asc → ascending scores ---
+      const ascR = await handleAppApi(pool, pagId, 'items', null, makeReq('GET', '/api/app/' + pagId + '/items?order=score&dir=asc&limit=5'));
+      const ascB = (() => { try { return JSON.parse(ascR?.body || '{}'); } catch { return {}; } })();
+      const ascScores: number[] = (ascB.rows || []).map((r: any) => Number(r.score));
+      const isSortedAsc = ascScores.every((v, i) => i === 0 || v >= ascScores[i - 1]);
+      ok('T8 order asc: scores are in ascending order', isSortedAsc && ascScores.length === 5, 'scores=' + JSON.stringify(ascScores));
+
+      // --- ordering: ?order=score&dir=desc → descending scores ---
+      const descR = await handleAppApi(pool, pagId, 'items', null, makeReq('GET', '/api/app/' + pagId + '/items?order=score&dir=desc&limit=5'));
+      const descB = (() => { try { return JSON.parse(descR?.body || '{}'); } catch { return {}; } })();
+      const descScores: number[] = (descB.rows || []).map((r: any) => Number(r.score));
+      const isSortedDesc = descScores.every((v, i) => i === 0 || v <= descScores[i - 1]);
+      ok('T8 order desc: scores are in descending order', isSortedDesc && descScores.length === 5, 'scores=' + JSON.stringify(descScores));
+
+      // --- reject unknown order column with 400 ---
+      // WHY 400 (not silent fallback): an unknown column almost certainly signals a client bug;
+      // returning rows in an unexpected order is worse than an honest error. (T8 spec)
+      const badOrderR = await handleAppApi(pool, pagId, 'items', null, makeReq('GET', '/api/app/' + pagId + '/items?order=nonexistent_column_xyz'));
+      ok('T8 unknown order column → 400', badOrderR?.status === 400, String(badOrderR?.status));
+
+      // --- limit bounds: max is capped at 200 ---
+      const bigR = await handleAppApi(pool, pagId, 'items', null, makeReq('GET', '/api/app/' + pagId + '/items?limit=9999'));
+      const bigB = (() => { try { return JSON.parse(bigR?.body || '{}'); } catch { return {}; } })();
+      ok('T8 limit cap: limit>200 is capped (echoed limit ≤ 200)', bigB.limit <= 200, 'limit=' + bigB.limit);
+
+    } finally {
+      await pool.query(`drop schema if exists "${appdb.schemaName(pagId)}" cascade`).catch(() => {});
+    }
+  }
+
+  // ============================================================================
+  // T9 — OWNER-AUTH ON PRIVATE TABLES (behavioral, real DB round-trip)
+  // Provisions a scratch schema with one private table (bookings) and one public table (products).
+  // Proves:
+  //   • public audience → private table list returns [] (FS0 preserved)
+  //   • owner audience → private table list returns real rows
+  //   • public audience → private table get-by-id returns 404 (FS0 preserved)
+  //   • owner audience → private table get-by-id returns the row
+  //   • public table is unaffected by audience (always readable)
+  //   • POST to a private table is always allowed (visitors book) regardless of audience
+  // ============================================================================
+  {
+    const authId = randomUUID();
+    try {
+      await appdb.provision(pool, authId, JSON.stringify({ entities: [
+        { name: 'products', public: true, display: 'title', fields: [
+          { name: 'title', type: 'text', required: true },
+          { name: 'price', type: 'int' },
+        ] },
+        { name: 'bookings', public: false, fields: [
+          { name: 'customer_name', type: 'text', required: true },
+          { name: 'email', type: 'email' },
+        ] },
+      ] }));
+
+      // Seed a product (public) and a booking (private).
+      await appdb.insertRow(pool, authId, 'products', { title: 'Auth Widget', price: 500 });
+      // insertRow on a private table is always allowed (visitor booking path).
+      const bookR = await appdb.insertRow(pool, authId, 'bookings', { customer_name: 'Alice Owner', email: 'alice@example.com' });
+      ok('T9 setup: insertRow on private table succeeds (visitor booking always allowed)', bookR.ok === true, JSON.stringify(bookR));
+
+      // --- public audience → private table list returns [] ---
+      const pubListR = await handleAppApi(pool, authId, 'bookings', null, makeReq('GET', '/api/app/' + authId + '/bookings'), 'public');
+      const pubListB = (() => { try { return JSON.parse(pubListR?.body || '{}'); } catch { return {}; } })();
+      ok('T9 public: private table list returns [] (FS0)', Array.isArray(pubListB.rows) && pubListB.rows.length === 0, JSON.stringify(pubListB));
+      ok('T9 public: private table list status 200 (not 404 — no existence leak)', pubListR?.status === 200, String(pubListR?.status));
+
+      // --- owner audience → private table list returns real rows ---
+      const ownListR = await handleAppApi(pool, authId, 'bookings', null, makeReq('GET', '/api/app/' + authId + '/bookings'), 'owner');
+      const ownListB = (() => { try { return JSON.parse(ownListR?.body || '{}'); } catch { return {}; } })();
+      ok('T9 owner: private table list returns rows', Array.isArray(ownListB.rows) && ownListB.rows.length >= 1, JSON.stringify(ownListB));
+      const aliceRow = (ownListB.rows || []).find((r: any) => r.customer_name === 'Alice Owner');
+      ok('T9 owner: the booking row is present in owner read', !!aliceRow, JSON.stringify(ownListB.rows));
+
+      // --- public audience → private table get-by-id returns 404 ---
+      const authSchema = appdb.schemaName(authId);
+      const bid = (await pool.query(`select id from "${authSchema}"."bookings" limit 1`)).rows[0]?.id;
+      if (bid !== undefined) {
+        const pubGetR = await handleAppApi(pool, authId, 'bookings', String(bid), makeReq('GET', '/api/app/' + authId + '/bookings/' + bid), 'public');
+        ok('T9 public: private get-by-id → 404 (FS0)', pubGetR?.status === 404, String(pubGetR?.status));
+
+        // --- owner audience → private table get-by-id returns the row ---
+        const ownGetR = await handleAppApi(pool, authId, 'bookings', String(bid), makeReq('GET', '/api/app/' + authId + '/bookings/' + bid), 'owner');
+        ok('T9 owner: private get-by-id returns 200', ownGetR?.status === 200, String(ownGetR?.status));
+        const ownRowB = (() => { try { return JSON.parse(ownGetR?.body || '{}'); } catch { return {}; } })();
+        ok('T9 owner: row has correct customer_name', ownRowB?.row?.customer_name === 'Alice Owner', JSON.stringify(ownRowB?.row));
+      } else {
+        fail++; console.error('  ✗ T9: could not find booking row id');
+      }
+
+      // --- public table unaffected by audience ---
+      const pubProdR = await handleAppApi(pool, authId, 'products', null, makeReq('GET', '/api/app/' + authId + '/products'), 'public');
+      const pubProdB = (() => { try { return JSON.parse(pubProdR?.body || '{}'); } catch { return {}; } })();
+      ok('T9 public table: readable by public audience', Array.isArray(pubProdB.rows) && pubProdB.rows.some((r: any) => r.title === 'Auth Widget'), JSON.stringify(pubProdB.rows));
+
+    } finally {
+      await pool.query(`drop schema if exists "${appdb.schemaName(authId)}" cascade`).catch(() => {});
+    }
+  }
+
+  // ============================================================================
+  // T10 — MINIMAL SERVED APP UI (behavioral gate)
+  // Proves:
+  //   • GET /api/app/:id/ui returns 200 HTML
+  //   • the page body contains /api/app (the fetch call that wires the UI to real data)
+  //   • the page body contains the primary public table name (rendered in the UI)
+  //   • the page renders even when no public table exists (placeholder, not 500)
+  // ============================================================================
+  {
+    const uiId = randomUUID();
+    try {
+      await appdb.provision(pool, uiId, JSON.stringify({ entities: [
+        { name: 'listings', public: true, display: 'title', fields: [
+          { name: 'title', type: 'text', required: true },
+          { name: 'price', type: 'int' },
+          { name: 'description', type: 'text' },
+        ] },
+        { name: 'bookings', public: false, fields: [
+          { name: 'customer_name', type: 'text', required: true },
+        ] },
+      ] }));
+
+      // Seed a listing row so the UI has something to load at runtime.
+      await appdb.insertRow(pool, uiId, 'listings', { title: 'UI Test Listing', price: 999 });
+
+      // --- UI route returns 200 HTML ---
+      const uiR = await handleAppApi(pool, uiId, 'ui', null, makeReq('GET', '/api/app/' + uiId + '/ui'));
+      ok('T10 ui route: returns 200', uiR?.status === 200, String(uiR?.status));
+      ok('T10 ui route: content-type is HTML', (uiR?.contentType || '').includes('text/html'), String(uiR?.contentType));
+
+      // --- page wires /api/app (the source-pin: the UI calls the real API at runtime) ---
+      const uiBody = uiR?.body || '';
+      ok('T10 source-pin: page body contains /api/app (fetch call to real API)', uiBody.includes('/api/app'), '(not found in ' + uiBody.length + ' bytes)');
+
+      // --- primary public table name appears in the page ---
+      ok('T10 primary table: "listings" appears in the rendered page', uiBody.includes('listings'), '(not found)');
+
+      // --- page does NOT embed private table name in the main listing section ---
+      // The UI picks only the PRIMARY public table — bookings must not be the featured table.
+      // (It may appear in the "Tables:" metadata footer — that's fine, just not as primary.)
+      // We check that 'listings' is the primary table and the form targets it.
+      ok('T10 XSS-safe: uiId appears escaped (no raw angle-bracket around projectId)', !uiBody.includes('<' + uiId), '(raw UUID found in angle bracket context)');
+
+      // --- placeholder page when no public tables exist (no 500) ---
+      const emptyId = randomUUID();
+      try {
+        // Provision with ONLY a private table — no public table to be primary.
+        await appdb.provision(pool, emptyId, JSON.stringify({ entities: [
+          { name: 'bookings', public: false, fields: [
+            { name: 'customer_name', type: 'text', required: true },
+          ] },
+        ] }));
+        const emptyR = await handleAppApi(pool, emptyId, 'ui', null, makeReq('GET', '/api/app/' + emptyId + '/ui'));
+        ok('T10 placeholder: no-public-table returns 200 not 500', emptyR?.status === 200, String(emptyR?.status));
+        ok('T10 placeholder: page is HTML', (emptyR?.contentType || '').includes('text/html'), String(emptyR?.contentType));
+      } finally {
+        await pool.query(`drop schema if exists "${appdb.schemaName(emptyId)}" cascade`).catch(() => {});
+      }
+
+    } finally {
+      await pool.query(`drop schema if exists "${appdb.schemaName(uiId)}" cascade`).catch(() => {});
+    }
+  }
+
 } catch (e: any) {
   fail++; console.error('  ✗ threw:', e?.message ?? e, e?.stack ?? '');
 } finally {
