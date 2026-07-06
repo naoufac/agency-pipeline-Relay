@@ -27,5 +27,15 @@ ok(!server.includes("from './cms/wordpress") && !server.includes("from './cms/us
 const app = readFileSync(new URL('../../web/app.js', import.meta.url), 'utf8');
 ok(!app.includes("'/api/cms-run'"), 'board UI: brief posts to /api/run (no /api/cms-run)');
 
+// SEO identity survives the CMS re-serve (the FINAL writer of every page): the adapter's
+// renderPage call and the finalize ctx must thread siteBase/localBusiness/bizType, or built
+// pages silently lose canonical + the specific schema.org @type (live-caught 2026-07-06).
+const directus = readFileSync(new URL('./directus.ts', import.meta.url), 'utf8');
+ok(directus.includes('siteBase: ctx.siteBase') && directus.includes('bizType: ctx.bizType'),
+  'directus adapter: renderPage carries siteBase + bizType');
+const fin = readFileSync(new URL('./finalize.ts', import.meta.url), 'utf8');
+ok(/siteBase: params\.slug \? `https:\/\/\$\{params\.slug\}\.naples\.agency` : undefined/.test(fin) && /bizType: params\.bizType/.test(fin),
+  'finalize: BuildCtx carries siteBase + bizType from params');
+
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS — one pipeline, one CMS.');
 if (fails) process.exit(1);

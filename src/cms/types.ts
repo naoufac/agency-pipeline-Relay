@@ -48,6 +48,13 @@ export interface BuildCtx {
   // page that may carry a typed form; without it the form degrades to the contact fallback.
   schemaForms?: { tables: string[]; forms: Record<string, any[]>; primaryTable: string };
   layout?: any;   // structure variant (hero/nav/band), passed to renderPage on CMS re-serve
+  locale?: string;
+  // SEO identity — the CMS re-serve is the FINAL writer of every page, so it must carry the same
+  // head context the runner renders with, or canonical/schema.org silently degrade (2026-07-06:
+  // a live proof build shipped generic Organization + no canonical because these were dropped here).
+  siteBase?: string;        // https://<slug>.naples.agency when the slug is minted
+  localBusiness?: boolean;  // back-compat classification
+  bizType?: string;         // most-specific schema.org @type (Restaurant, Dentist, …)
 }
 
 // The contract. See docs/CMS-ARCHITECTURE.md for how it maps onto Directus.
