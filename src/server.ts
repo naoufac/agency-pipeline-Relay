@@ -317,15 +317,18 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         res.end(readFileSync(f));
         return;
       }
-      // LEGACY-SITE SELF-HEAL: sites built BEFORE the external-CSS change have no ds-<hash8>.css on
-      // disk, but their LIVE-rendered pages (PDP/article/receipt) now link the CURRENT design-system
-      // file. The name is content-addressed, so when the requested hash equals the hash of the CSS
-      // this server was built with, serving it from memory is always byte-correct — no site dir is
-      // ever wrong, old or new. (Foreign/stale hashes still 404: a different hash means different
-      // bytes we do not have.)
+      // DS-CSS SELF-HEAL FOR ANY HASH (fix 2026-07-06, live-caught): the external-CSS change made
+      // every page reference assets/ds-<hash8>.css. When DS_CSS_BODY changes, the hash rotates —
+      // but pages already written to disk (interior static pages, and every page of a site not
+      // re-finalized since) still reference the OLD hash. That file isn't on disk and the request
+      // fell through to here → it WAS 404ing → the whole page rendered UNSTYLED. The design-system
+      // CSS is backward-compatible (classes only accrete), so serving the CURRENT body under ANY
+      // ds-<hash>.css name makes those pages styled again with zero re-render. Old cached copies keep
+      // their old bytes (they were valid then); fresh fetchers of an old page get current CSS. This
+      // removes the hash-rotation-unstyled class entirely without an atomic re-render of every site.
       const dsm = rel.match(/\/assets\/ds-([0-9a-f]{8})\.css$/);
-      if (dsm && dsm[1] === dsCssHash(DS_CSS_BODY)) {
-        res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable' });
+      if (dsm) {
+        res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=3600' });
         res.end(DS_CSS_BODY);
         return;
       }

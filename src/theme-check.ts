@@ -230,11 +230,15 @@ async function main() {
   const serverSrc = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
   if (!serverSrc.includes('isHashedAsset') || !serverSrc.includes('max-age=31536000, immutable') || !serverSrc.includes('ds-'))
     arcProblems.push('ARC C: server.ts does not appear to serve ds-*.css with immutable caching');
-  // (i) LEGACY SELF-HEAL: old site dirs predate the external file; when the requested ds-<hash8>
-  // matches the CURRENT design-system hash the server must serve DS_CSS_BODY from memory instead
-  // of 404ing — live-rendered pages of legacy sites depend on it.
-  if (!/dsm\[1\] === dsCssHash\(DS_CSS_BODY\)/.test(serverSrc) || !serverSrc.includes('res.end(DS_CSS_BODY)'))
-    arcProblems.push('ARC C: server.ts is missing the legacy-site ds-css memory fallback');
+  // (i) DS-CSS SELF-HEAL FOR ANY HASH: any ds-<hash8>.css that isn't on disk must serve the current
+  // DS_CSS_BODY from memory (never 404). Pages written with an older CSS hash — interior static pages,
+  // or whole sites not re-finalized since the hash rotated — reference a stale name; 404ing it renders
+  // the page UNSTYLED (live-caught 2026-07-06). The fallback must NOT be gated on the current hash.
+  const dsFallback = /const dsm = rel\.match\([^)]*ds-\(\[0-9a-f\]\{8\}\)[^;]*;\s*if \(dsm\) \{/;
+  if (!dsFallback.test(serverSrc) || !serverSrc.includes('res.end(DS_CSS_BODY)'))
+    arcProblems.push('ARC C: server.ts ds-css fallback must serve DS_CSS_BODY for ANY ds-<hash>.css (not only the current hash)');
+  if (/dsm && dsm\[1\] === dsCssHash/.test(serverSrc))
+    arcProblems.push('ARC C: ds-css fallback is still gated on the current hash — old-hash pages will 404 unstyled');
   if (arcProblems.length) { failures++; console.log(`✗ ARC C ${arcProblems.join(' · ')}`); }
   else console.log(`✓ ARC C: ds-${dsHash}.css written · link on all pages · :root inline · DS body external · deterministic hash`);
 
