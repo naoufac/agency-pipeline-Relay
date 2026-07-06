@@ -269,7 +269,16 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       const f = fileURLToPath(new URL(rel, SITES));
       if (existsSync(f) && statSync(f).isFile()) {
         const ext = (f.split('.').pop() || '').toLowerCase();
-        res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'public, max-age=3600' });
+        // IMMUTABLE cache for hashed asset files (ds-<hash8>.css, media-N.jpg etc. under assets/).
+        // The hash in the filename is a content fingerprint — if the bytes change the name changes,
+        // so the client's cached copy is ALWAYS correct. max-age=604800 (1 week), immutable.
+        // Everything else keeps the existing max-age=3600 (1 hour) short-lived cache.
+        const isHashedAsset = /\/assets\/[^/]+-[0-9a-f]{8,}\.[a-z0-9]+$/.test(rel) ||
+                              /\/assets\/ds-[0-9a-f]{8}\.css$/.test(rel);
+        const cacheControl = isHashedAsset
+          ? 'public, max-age=604800, immutable'
+          : 'public, max-age=3600';
+        res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': cacheControl });
         res.end(readFileSync(f));
         return;
       }
