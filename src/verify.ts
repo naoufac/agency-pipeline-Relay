@@ -157,9 +157,14 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     const html = raw.toLowerCase();
     if (!/<html|<!doctype/.test(html.slice(0, 400)) || !/<body|<div|<section/.test(html)) return { ok: false, log: 'not valid HTML structure' };
     // ARC C: the ds-<hash8>.css link is ALLOWED — it is a relative ref to the per-site assets/ dir
-    // (never an http/https URL). All other external asset references remain banned.
-    const rawNoDs = raw.replace(/<link\b[^>]*href="assets\/ds-[0-9a-f]{8}\.css"[^>]*>/gi, '');
-    if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(rawNoDs))
+    // (never an http/https URL). The SEO canonical link is ALLOWED — it declares the page's own
+    // public URL, it loads nothing. data-src is NOT an asset load (the video facade stores the
+    // click-to-load URL there; nothing is fetched pre-click) so the src= ban must not substring-
+    // match it — hence the (?<![-\w]) guard. All other external asset references remain banned.
+    const rawNoDs = raw
+      .replace(/<link\b[^>]*href="assets\/ds-[0-9a-f]{8}\.css"[^>]*>/gi, '')
+      .replace(/<link\b[^>]*rel="canonical"[^>]*>/gi, '');
+    if (/(?<![-\w])src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(rawNoDs))
       return { ok: false, log: 'broken: external/unbundled asset reference — all CSS/fonts must be inlined' };
     const ph = raw.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
     if (ph) return { ok: false, log: 'unfilled placeholder left in copy: ' + ph[0] };

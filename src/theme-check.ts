@@ -63,15 +63,38 @@ const PAGES = [{ slug: 'index', title: 'Home' }, { slug: 'about', title: 'About'
 function staticGate(html: string): string | null {
   const lo = html.toLowerCase();
   if (!/<html|<!doctype/.test(lo.slice(0, 400)) || !/<body|<div|<section/.test(lo)) return 'not valid HTML structure';
-  // strip the known-good ds link before checking for external assets
-  const htmlNoDs = html.replace(/<link\b[^>]*href="assets\/ds-[0-9a-f]{8}\.css"[^>]*>/gi, '');
-  if (/src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(htmlNoDs))
+  // strip the known-good ds link + the load-nothing canonical link before checking for external
+  // assets; (?<![-\w]) keeps data-src (the video facade's click-to-load URL) out of the src= ban —
+  // MUST stay in lockstep with verify.ts site_renders.
+  const htmlNoDs = html
+    .replace(/<link\b[^>]*href="assets\/ds-[0-9a-f]{8}\.css"[^>]*>/gi, '')
+    .replace(/<link\b[^>]*rel="canonical"[^>]*>/gi, '');
+  if (/(?<![-\w])src\s*=\s*["']?https?:|url\(\s*["']?https?:|<link\b[^>]*href\s*=\s*["']?https?:|\bapp\.css\b|via\.placeholder/i.test(htmlNoDs))
     return 'external/unbundled asset reference';
   // ARC C: the link tag must be present (proves renderPage emits it)
   if (!/href="assets\/ds-[0-9a-f]{8}\.css"/.test(html)) return 'ARC C: ds-<hash8>.css link missing from <head>';
   const ph = html.match(/\[[A-Z][a-z]+(?: [A-Z][a-z]+){0,3}\]/);
   if (ph) return 'unfilled placeholder: ' + ph[0];
   return null;
+}
+
+// SELF-TEST of the gate itself (regression: the 2026-07-06 live proof build failed because the
+// runtime gate banned the SEO canonical link and substring-matched data-src as src=. The dev
+// suite must fail BEFORE prod does if the gate and the renderer ever drift apart again.)
+{
+  const okPage = '<!doctype html><html><head><link rel="canonical" href="https://x.naples.agency/">'
+    + '<link rel="stylesheet" href="assets/ds-00000000.css"></head><body><section>'
+    + '<div class="video-facade" data-src="https://www.youtube-nocookie.com/embed/abc123XYZ"></div>'
+    + '</section></body></html>';
+  if (staticGate(okPage) !== null)
+    throw new Error('GATE SELF-TEST: canonical + ds link + video data-src must PASS, got: ' + staticGate(okPage));
+  const badImg = okPage.replace('</section>', '<img src="https://evil.example/x.jpg"></section>');
+  if (staticGate(badImg) !== 'external/unbundled asset reference')
+    throw new Error('GATE SELF-TEST: a real external <img src=https> must still FAIL');
+  const badIframe = okPage.replace('</section>', '<iframe src="https://www.youtube.com/embed/x"></iframe></section>');
+  if (staticGate(badIframe) !== 'external/unbundled asset reference')
+    throw new Error('GATE SELF-TEST: a pre-click external iframe src must still FAIL');
+  console.log('  ✓ gate self-test: canonical + data-src allowed · external src/iframe still banned');
 }
 
 async function shoot(path: string, shot: string, w: number, h: number) {
