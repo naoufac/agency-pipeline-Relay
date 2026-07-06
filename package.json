@@ -50,7 +50,8 @@
     "design:check": "node --experimental-strip-types src/design-check.ts",
     "figma:check": "node --experimental-strip-types src/figma-check.ts",
     "jsonld:check": "node --experimental-strip-types src/jsonld-check.ts",
-    "board:check": "node --experimental-strip-types src/board-check.ts"
+    "board:check": "node --experimental-strip-types src/board-check.ts",
+    "e2e:check": "set -a; . ./.env 2>/dev/null; set +a; tsx src/orchestrated-e2e-check.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
