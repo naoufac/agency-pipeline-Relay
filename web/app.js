@@ -9,9 +9,10 @@ let poll = null;
 const j = (u, o) => fetch(u, o).then(r => r.json());
 /* ---- M4 · auth: magic-link sign-in; the nav shows who you are ---- */
 /* ---- ARC A: balance chip next to the sign-out link (phone-first: compact, no jargon) ---- */
-let me = null, meBalance = null;
+/* ---- ARC I: isOperator flag from the me endpoint — server-asserted, never client-computed ---- */
+let me = null, meBalance = null, meIsOperator = false;
 async function loadMe(){
-  try { const r = await j('/api/me'); me = r.email; meBalance = r.balance_cents; } catch { me = null; meBalance = null; }
+  try { const r = await j('/api/me'); me = r.email; meBalance = r.balance_cents; meIsOperator = !!r.isOperator; } catch { me = null; meBalance = null; meIsOperator = false; }
   renderAuthNav();
 }
 function renderAuthNav(){
@@ -30,10 +31,38 @@ function renderAuthNav(){
       chip.textContent = '$' + (meBalance / 100).toFixed(2);
       a.appendChild(chip);
     }
-    a.onclick = async e => { e.preventDefault(); await fetch('/api/auth/logout', { method:'POST' }); me = null; meBalance = null; renderAuthNav(); location.hash = '#/'; location.reload(); };
+    a.onclick = async e => { e.preventDefault(); await fetch('/api/auth/logout', { method:'POST' }); me = null; meBalance = null; meIsOperator = false; renderAuthNav(); location.hash = '#/'; location.reload(); };
   }
   else { a.textContent = 'Sign in'; a.onclick = null; }
 }
+/* ---- ARC I · OPERATOR FUNNEL STRIP ----
+   Renders a compact row of stat chips at the top of the home page.
+   Called only when meIsOperator is true — the server already stripped the funnel key
+   from non-operator KPI responses, so the gate is double-locked (server + UI).
+   Phone-first: a single flexbox row that wraps; chip sizing matches the board's .kpi style. */
+async function renderFunnelStrip(container){
+  if (!meIsOperator) return;   // hard guard: never render for non-operators
+  try {
+    const k = await j('/api/kpi');
+    const f = k && k.funnel;
+    if (!f) return;   // operator but no funnel data (e.g. fresh DB) — stay silent
+    const fmt$ = cents => '$' + (cents / 100).toFixed(2);
+    const chips = [
+      { label: 'Real users',    value: f.users_real,         sub: `${f.users_total} total` },
+      { label: 'Real leads',    value: f.leads_real,         sub: `${f.leads_total} total` },
+      { label: 'Paying users',  value: f.active_paying_users, sub: 'at least one spend' },
+      { label: 'Credits spent', value: fmt$(f.credits_spent_cents), sub: `${fmt$(f.credits_granted_cents)} granted` },
+    ];
+    const strip = document.createElement('div');
+    strip.className = 'funnel-strip';
+    strip.innerHTML = chips.map(c =>
+      `<div class="funnel-chip"><div class="kpi-label">${esc(c.label)}</div><div class="kpi-value">${esc(String(c.value))}</div><div class="kpi-sub">${esc(c.sub)}</div></div>`
+    ).join('');
+    // Insert just below the hero section (before the project groups)
+    container.insertBefore(strip, container.querySelector('#bgroup') || container.firstChild);
+  } catch { /* network error — stay silent, don't break home */ }
+}
+
 function signin(){
   app.innerHTML = `<div class="container"><section class="hero" style="text-align:center;max-width:560px;margin:0 auto">
     <h1>Sign in</h1>
@@ -132,6 +161,9 @@ function home(){
     <div id="emptywrap"></div></div>`;
   document.getElementById('go').onclick = submitBrief;
   document.getElementById('brief').addEventListener('keydown', e => { if (e.key === 'Enter') submitBrief(); });
+  // ARC I: operator-only funnel strip — renders only when server-confirmed isOperator
+  const container = app.querySelector('.container');
+  if (meIsOperator && container) renderFunnelStrip(container);
   const cards = new Map();                                  // id -> { el, sig, building }
   const bgrid = document.getElementById('bgrid'), rgrid = document.getElementById('rgrid');
   async function load(){

@@ -430,6 +430,41 @@ try {
     ok('replan: preserves bizType across rebuilds', /bizType: prev\.bizType/.test(plSrc));
   }
 
+  // ---- ARC I · OPERATOR FUNNEL GATE source-pins ----
+  {
+    const serverSrc = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+    // web/app.js is one directory up from src/ — use ../web/app.js relative to import.meta.url
+    const appSrc    = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+
+    // 1. /api/kpi strips funnel for non-operator: the handler must call isOperator(user)
+    //    and delete .funnel before sending the response.
+    ok('ARC I: /api/kpi strips funnel when !isOperator(user)',
+      /isOperator\(user\)[^\n]*delete[^;]+funnel|delete[^;]+funnel[^\n]*isOperator\(user\)/.test(serverSrc.replace(/\n/g, ' ')) ||
+      // Alternative: the delete line directly follows the isOperator check in /api/kpi block
+      /\/api\/kpi[\s\S]{0,800}isOperator\(user\)[\s\S]{0,200}delete[\s\S]{0,50}funnel/.test(serverSrc));
+
+    // 2. /api/me endpoint now exposes isOperator boolean (server-asserted)
+    ok('ARC I: /api/me response includes isOperator key',
+      /isOperator.*isOperator\(user\)|['"]isOperator['"]\s*:/.test(serverSrc) &&
+      // The me endpoint specifically must set it
+      /\/api\/me[\s\S]{0,400}isOperator/.test(serverSrc));
+
+    // 3. app.js renders the funnel strip only behind the meIsOperator flag
+    ok('ARC I: app.js guards funnel strip behind meIsOperator',
+      /meIsOperator/.test(appSrc) &&
+      /if.*meIsOperator.*renderFunnelStrip|renderFunnelStrip[\s\S]{0,200}meIsOperator/.test(appSrc.replace(/\n/g, ' ')));
+
+    // 4. app.js reads isOperator from the /api/me response (server-assigned, not compared client-side)
+    ok('ARC I: app.js stores isOperator from me response (server-assigned)',
+      /meIsOperator\s*=\s*!!r\.isOperator|meIsOperator\s*=\s*r\.isOperator/.test(appSrc));
+
+    // 5. The public kpi shape has NO funnel key: the delete is unconditional for non-operators,
+    //    not merely hidden — i.e. the delete runs BEFORE send(), ensuring the wire payload lacks it.
+    ok('ARC I: /api/kpi handler deletes funnel before sending (not after)',
+      /delete[^;]+funnel[\s\S]{0,200}send\(res/.test(serverSrc) ||
+      /isOperator\(user\)[\s\S]{0,100}delete[\s\S]{0,40}funnel/.test(serverSrc));
+  }
+
 } catch (e: any) {
   fail++;
   console.error('  ✗ unexpected throw:', e?.message ?? e);
