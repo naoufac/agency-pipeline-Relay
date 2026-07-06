@@ -288,6 +288,11 @@ body.l-cards-minimal .collection .card,body.l-cards-minimal .feed .card,body.l-c
 body.l-cards-minimal .collection .card>img,body.l-cards-minimal .feed .card>img{display:none!important}
 body.l-cards-minimal .collection,body.l-cards-minimal .feed{grid-template-columns:1fr;gap:0}
 body.l-cards-minimal .collection .card h3,body.l-cards-minimal .feed .card h3{margin-top:.2em}
+/* minimal cards: numbered 01/02/03 eyebrows via CSS counters — pure CSS so client-rendered DB cards
+   count too; the editorial index look that separates 'minimal' from merely 'unstyled'. */
+body.l-cards-minimal .collection,body.l-cards-minimal .feed{counter-reset:cardno}
+body.l-cards-minimal .collection .card,body.l-cards-minimal .feed .card{counter-increment:cardno}
+body.l-cards-minimal .collection .card h3::before,body.l-cards-minimal .feed .card h3::before{content:counter(cardno,decimal-leading-zero);display:block;font-family:var(--font-body);font-size:.78rem;font-weight:600;letter-spacing:.14em;color:var(--accent);margin-bottom:.55em}
 body.l-cards-minimal .collection .card p,body.l-cards-minimal .feed .card p{color:var(--muted);margin:0}
 /* ============================================================================
    SECTION-MODE VARIANTS (ARC F) — features, testimonials, stats each have two render modes,

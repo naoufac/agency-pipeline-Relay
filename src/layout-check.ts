@@ -430,6 +430,8 @@ ok('DS_CSS contains .video-caption rule', DS_CSS.includes('.video-caption'));
   // CURLY-QUOTE ATTRIBUTES: class=”x” never applies in a browser — the CSS is silently dead while
   // substring marker greps still pass. Ban typographic quotes as attribute delimiters at the source.
   const compSrc = readFileSync(new URL('./components.ts', import.meta.url), 'utf8');
+  // minimal cards: the numbered-eyebrow counter CSS must exist (01/02/03 editorial index)
+  ok('minimal cards: CSS counter eyebrows present', /l-cards-minimal[^}]*counter-reset:cardno/.test(compSrc) && /counter\(cardno,decimal-leading-zero\)/.test(compSrc));
   ok('components.ts: no curly-quote attribute delimiters (class=”…” renders UNSTYLED)', !/(?:class|style|href|src)=[”“]/.test(compSrc));
   // and in the rendered output: the spotlight section must carry REAL (straight-quoted) classes
   const spotHtml = renderPage({ brand: { name: 'X', tokens: {} }, sections: [
