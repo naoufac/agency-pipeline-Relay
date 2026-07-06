@@ -602,13 +602,20 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
         if (isWrite && formLimited(ip)) return send(res, 429, 'application/json', '{"ok":false,"error":"too many submissions — try again shortly"}');
         if (!isWrite && readLimited(ip)) return send(res, 429, 'application/json', '{"rows":[],"error":"rate limited"}');
         const [, appProjectId, appTable, appRowId = null] = appM;
+        // T9 — OWNER-AUTH: resolve whether the authenticated user owns this project BEFORE the
+        // handler is called. The handler receives 'owner'|'public' — it never makes auth decisions
+        // itself (single-responsibility: server.ts owns auth, api.ts owns API logic).
+        // We want 'owner' only when there IS an owner and THIS user is it — not for legacy projects
+        // where ownerOf returns null (those stay 'public' for backward compat).
+        const appOwner = await ownerOf(appProjectId);
+        const appAudience: 'owner' | 'public' = (user && appOwner != null && user.id === appOwner) ? 'owner' : 'public';
         // Read the body only for POST (streaming; same idiom as the existing site data handler).
         let appBody = '';
         if (isWrite) { for await (const c of req) appBody += c; }
         const { handleAppApi } = await import('./app/api.ts');
         let appResp;
         try {
-          appResp = await handleAppApi(pool, appProjectId, appTable, appRowId, { method: req.method, url, body: appBody });
+          appResp = await handleAppApi(pool, appProjectId, appTable, appRowId, { method: req.method, url, body: appBody }, appAudience);
         } catch (e: any) {
           console.error('app api', appProjectId, appTable, e?.message ?? e);
           return send(res, 500, 'application/json', '{"error":"internal error"}');
