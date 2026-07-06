@@ -65,16 +65,19 @@ export function quoteCents(kind: 'build' | 'rebuild' | 'design', steps?: number)
 
 // ---- grant ----
 
-// grantSignupCredit: insert a GRANT_CENTS grant for this user exactly once. Idempotent forever.
-// Uses WHERE NOT EXISTS so it works with the partial unique index without needing ON CONFLICT
-// (which would require repeating the partial predicate verbatim in the WHERE clause).
+// grantSignupCredit: insert a GRANT_CENTS grant for this user exactly once. Idempotent forever —
+// INCLUDING under concurrency: WHERE NOT EXISTS alone races (two first-touch requests can both
+// see "no grant", both insert, and the loser dies on the billing_one_grant unique index with a
+// 500). ON CONFLICT infers the partial index because kind='grant' is a constant here, turning
+// the loser into a silent no-op. The DB index stays the enforcement; this is just graceful.
 export async function grantSignupCredit(pool: pg.Pool, userId: string): Promise<void> {
   await pool.query(`
     insert into billing_ledger(user_id, kind, amount_cents, reason)
     select $1, 'grant', $2, 'signup credit'
     where not exists (
       select 1 from billing_ledger where user_id = $1 and kind = 'grant'
-    )`, [userId, PRICING.GRANT_CENTS]);
+    )
+    on conflict (user_id) where kind = 'grant' do nothing`, [userId, PRICING.GRANT_CENTS]);
 }
 
 // ---- balance ----
@@ -123,6 +126,10 @@ export async function debitCents(
   reason:    string,
   projectId: string | null,
 ): Promise<{ ok: boolean; balance_cents_after: number }> {
+  // Self-contained: a brand-new user may hit a debiting endpoint (/api/run) BEFORE anything
+  // called balanceCents — without this, their snapshot reads 0 and they get a false 402
+  // despite being entitled to the signup grant. Idempotent, so calling it every time is safe.
+  await grantSignupCredit(pool, userId);
   // Run inside a transaction so the advisory lock is tied to the transaction lifetime.
   const client = await pool.connect();
   try {
@@ -201,7 +208,10 @@ export async function refundCents(
 // Nightly canaries run as the operator account — billing must be a no-op.
 export function isOperator(user: { email?: string } | null | undefined): boolean {
   if (!user?.email) return false;
-  return user.email === (process.env.RELAY_OPERATOR_EMAIL || 'nchobah@gmail.com');
+  // auth.ts lowercases stored emails; normalize the env side too so a capitalized or
+  // whitespace-padded RELAY_OPERATOR_EMAIL can never silently bill the operator.
+  const op = (process.env.RELAY_OPERATOR_EMAIL || 'nchobah@gmail.com').toLowerCase().trim();
+  return user.email.toLowerCase().trim() === op;
 }
 
 // ---- kill-switch ----

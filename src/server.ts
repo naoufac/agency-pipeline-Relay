@@ -352,7 +352,15 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
               chatDebited = cost;
             }
             const amended = `${pr.brief} · UPDATE: ${changeText.slice(0, 500)}`;
-            const r = await startRebuild(pool, projectId, amended);   // ONE safe path: plan → sweep → run, per-project lock
+            // Same refund contract as /api/rebuild: BOTH failure shapes give the money back —
+            // a clean {started:false} and a thrown error before the rebuild took off.
+            let r: { started: boolean; reason?: string };
+            try {
+              r = await startRebuild(pool, projectId, amended);   // ONE safe path: plan → sweep → run, per-project lock
+            } catch (e) {
+              if (chatDebited) await refundCents(pool, user.id, chatDebited, 'refund: chat rebuild errored before starting', projectId).catch(() => {});
+              throw e;
+            }
             if (!r.started && chatDebited)   // paid for a rebuild that never started — give it back
               await refundCents(pool, user.id, chatDebited, `refund: chat rebuild did not start (${r.reason || 'busy'})`, projectId);
             if (r.started) chat.announceWhenDone(pool, sidQ, projectId).catch(() => {});   // the session hears the outcome
@@ -893,7 +901,16 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       // ONE safe path: plans first, sweeps the previous generation's pages ONLY after the plan
       // succeeds (stale slugs would mix two navigations and fail site_consistent), never sweeps when
       // builds are paused, and a per-project lock serializes concurrent triggers.
-      const rb = await startRebuild(pool, id, brief || pr.brief);
+      // The debit precedes startRebuild, so BOTH failure shapes must refund: a clean
+      // {started:false} AND a thrown error (e.g. the busy-check query dying) — otherwise a DB
+      // hiccup charges the user for a rebuild that never happened.
+      let rb: { started: boolean; reason?: string };
+      try {
+        rb = await startRebuild(pool, id, brief || pr.brief);
+      } catch (e) {
+        if (rebuildDebited) await refundCents(pool, user!.id, rebuildDebited, 'refund: rebuild errored before starting', id).catch(() => {});
+        throw e;
+      }
       if (!rb.started) {
         // the debit paid for a rebuild that never started (busy/paused) — give it back
         if (rebuildDebited) await refundCents(pool, user!.id, rebuildDebited, `refund: rebuild did not start (${rb.reason || 'busy'})`, id);

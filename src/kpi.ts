@@ -55,18 +55,22 @@ export async function funnel(pool: pg.Pool): Promise<Funnel> {
   try {
     const lt = await pool.query(`select count(*)::int n from site_submissions`);
     leads_total = Number(lt.rows[0].n);
-    // Filter out QA noise: payloads that contain known QA markers, or come from test domains.
-    // payload is jsonb; cast to text for the string contains check.
+    // Filter out QA noise: submissions carrying known QA markers, or from test domains.
+    // The column is `data jsonb` (schema.sql — NOT `payload`; that bug made this silently 0).
+    // NOTE the parentheses around the email alternatives: without them AND/OR precedence lets
+    // any row WITH an email bypass the QA-marker filters entirely.
     const lr = await pool.query(`
       select count(*)::int n from site_submissions
-      where payload::text not ilike '%QA Test%'
-        and payload::text not ilike '%Automated QA%'
-        and (payload->>'email') is null
+      where data::text not ilike '%QA Test%'
+        and data::text not ilike '%Automated QA%'
+        and (
+              (data->>'email') is null
            or (
-                (payload->>'email') not ilike '%@example.%'
-            and (payload->>'email') not ilike '%@test.%'
-            and (payload->>'email') not ilike '%@naples.agency'
-           )`);
+                (data->>'email') not ilike '%@example.%'
+            and (data->>'email') not ilike '%@test.%'
+            and (data->>'email') not ilike '%@naples.agency'
+           )
+        )`);
     leads_real = Number(lr.rows[0].n);
   } catch {}  // table may not exist
 

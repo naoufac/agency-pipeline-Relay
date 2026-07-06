@@ -311,6 +311,10 @@ export async function replan(pool: pg.Pool, projectId: string, brief: string): P
     layout: prev.layout || chooseLayout(prev.theme || theme, archetype, brief),  // keep the site's structure across rebuilds
     rebuilds: Number(prev.rebuilds || 0) + 1, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief),
     complexity: { score: complexity.score, pagesMax: complexity.pagesMax },  // ARC E: board/KPI can show complexity
+    cal_key: prev.cal_key,   // the OWNER'S calendar subscription URL is identity — dropping it on
+                             // rebuild would 404 the feed and permanently orphan subscribed apps
+    bizType: prev.bizType,   // keep the schema.org @type through the rebuild window until the
+                             // branding task re-derives it (live renders must not degrade meanwhile)
   };
   await pool.query('delete from tasks where project_id=$1', [projectId]);
   await pool.query("update projects set brief=$2, status='running', params=$3::jsonb where id=$1", [projectId, brief, JSON.stringify(params)]);

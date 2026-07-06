@@ -302,6 +302,49 @@ try {
       /chatDebited\)[^\n]*\n\s*await refundCents/.test(serverSrc));
   }
 
+  // ---- review fixes (adversarial audit 2026-07-06) ----
+  {
+    // grant race: 5 concurrent first-touches on a brand-new user must neither throw nor double-grant
+    const uidR = await scratchUser();
+    const results = await Promise.allSettled(Array.from({ length: 5 }, () => grantSignupCredit(pool, uidR)));
+    ok('grant race: 5 concurrent grants — zero rejections', results.every(r => r.status === 'fulfilled'),
+      JSON.stringify(results.filter(r => r.status === 'rejected').map((r: any) => String(r.reason?.message))));
+    const g = (await pool.query(`select count(*)::int n from billing_ledger where user_id=$1 and kind='grant'`, [uidR])).rows[0];
+    ok('grant race: exactly ONE grant row', Number(g.n) === 1, `rows=${g.n}`);
+
+    // self-contained debit: a fresh user who NEVER called balanceCents can still spend the grant
+    const uidS = await scratchUser();
+    const dr = await debitCents(pool, uidS, 500, 'first touch is a debit', null);
+    ok('debit self-grants: fresh user debit succeeds without prior balanceCents', dr.ok === true, JSON.stringify(dr));
+    ok('debit self-grants: balance arithmetic includes the grant', dr.balance_cents_after === PRICING.GRANT_CENTS - 500,
+      `after=${dr.balance_cents_after}`);
+
+    // operator normalization survives env casing/whitespace
+    const prevOp = process.env.RELAY_OPERATOR_EMAIL;
+    process.env.RELAY_OPERATOR_EMAIL = '  NCHOBAH@GMAIL.COM ';
+    ok('isOperator: env casing/whitespace normalized', isOperator({ email: 'nchobah@gmail.com' }) === true);
+    if (prevOp === undefined) delete process.env.RELAY_OPERATOR_EMAIL; else process.env.RELAY_OPERATOR_EMAIL = prevOp;
+
+    // refund-on-throw source-pins: BOTH rebuild paths refund when startRebuild THROWS, not only on {started:false}
+    const srvSrc2 = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+    ok('server: /api/rebuild refunds when startRebuild throws',
+      /catch \(e\) \{[^}]*rebuildDebited\) await refundCents/s.test(srvSrc2));
+    ok('server: chat rebuild refunds when startRebuild throws',
+      /catch \(e\) \{[^}]*chatDebited\) await refundCents/s.test(srvSrc2));
+
+    // funnel SQL uses the real column name and parenthesized email filter (kpi.ts)
+    const kpiSrc = readFileSync(new URL('./kpi.ts', import.meta.url), 'utf8');
+    ok('kpi funnel: queries site_submissions.data (not the phantom payload column)',
+      !/payload::text|payload->>/.test(kpiSrc) && /data::text not ilike/.test(kpiSrc));
+    ok('kpi funnel: email alternatives are parenthesized (no and/or precedence bypass)',
+      /and \(\s*\n\s*\(data->>'email'\) is null/.test(kpiSrc));
+
+    // replan preserves calendar + bizType identity (planner.ts)
+    const plSrc = readFileSync(new URL('./planner.ts', import.meta.url), 'utf8');
+    ok('replan: preserves cal_key across rebuilds', /cal_key: prev\.cal_key/.test(plSrc));
+    ok('replan: preserves bizType across rebuilds', /bizType: prev\.bizType/.test(plSrc));
+  }
+
 } catch (e: any) {
   fail++;
   console.error('  ✗ unexpected throw:', e?.message ?? e);
