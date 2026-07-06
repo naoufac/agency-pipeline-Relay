@@ -1317,7 +1317,7 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = 0bdf085; FULL 22-suite gate green ON PROD (spec 191 · layout 100 · jsonld 55 ·
+· System healthy; prod = 8b195d6; FULL 22-suite gate green ON PROD (spec 191 · layout 100 · jsonld 55 ·
   billing 72 · lifecycle 56 · all others 0-failed); nightly canary/backup/watchdog armed.
 · 2026-07-06 BOSS SESSION (KPI audit -> 5 arcs, all live-proven):
   - KPI audit: overall 6.5/10 (gate 10, ops 7, funnel 3, output 7, lifecycle 7) — docs/kpi-report-2026-07-06.md.
@@ -1340,9 +1340,16 @@ datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly o
     persisted in params; funnel() in kpi.ts (QA-noise-filtered real users/leads/credits) in /api/kpi + CLI.
   - ADVERSARIAL REVIEW closed 4 high (funnel SQL data-column+precedence, grant ON CONFLICT race,
     self-granting debit, refund-on-throw) + operator email normalization + replan preserves cal_key/bizType.
-· LIVE PROOF RUN: prod build 0641fe58 (trattoria-prova-verde, restaurant+YouTube brief) — bizType=Restaurant
-  confirmed mid-build; verify on completion: external css link+file, srcset/alt imgs, Restaurant JSON-LD,
-  canonical, video facade. DELETE this scratch project after proof (QA artifact, not a demo).
+· LIVE PROOF COMPLETE (then scratch project deleted, 404 confirmed): real prod build trattoria-prova-verde
+  (restaurant+YouTube brief, 14 tasks = $7.00 quote) verified live: external ds-css 200 immutable-1y,
+  img srcset(2 sizes)+width/height+alt("hands shaping pasta dough")+eager hero, Restaurant JSON-LD
+  served live, per-page canonical, video facade (0 iframes pre-click, nocookie in data-src).
+  The proof CAUGHT AND FIXED two drift classes the dev gate missed: (1) site_renders banned the
+  canonical link + substring-matched data-src as src= (fixed in verify.ts + theme-check mirror,
+  gate SELF-TEST added); (2) the CMS finalize — the FINAL writer of every page — dropped
+  siteBase/localBusiness/bizType, silently degrading JSON-LD+canonical (BuildCtx now carries them,
+  pinned in cms:check). One bad commit (duplicate locale) was caught by the deploy gate: prod
+  refused, reverted, stayed serving — the gate works.
 · OWNER-GATED (do NOT start without explicit word): Stripe v2 (credits exist; Stripe = top-up/invoicing),
   Play Store publishing, apex naples.agency flip (RELAY_HOME_SLUG + DNS; never stomp the existing apex page).
 · NEXT ARCS (owner priorities): design variety expansion ("very few patterns" — needs a dedicated
