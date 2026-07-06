@@ -1223,3 +1223,20 @@ LIVE PROOF: anon write → 404 (owner-only, nothing written); the endpoint's exa
 merge → render) on chopslot kept brand name "ChopSlot" + tokens, added the design, and the served page
 rendered primary #c8963e with Cormorant Garamond loaded. Reverted.
 The live Figma/Canva URL connector fills this same endpoint once the owner provides a source.
+
+## 2026-07-06 — Live Figma connector (import a design by file URL)
+
+Closed the loop from paste to a REAL Figma file. src/figma.ts:
+· figmaKeyFromUrl — parse a figma.com/design|file URL (or bare key).
+· figmaFileToTokens (PURE) — walk a /v1/files/:key response: named FILL styles bound to nodes →
+  canonical colours (Background/Primary/Text/Accent/Surface), TEXT styles → display/body fonts,
+  commonest corner radius → radius. Hands clean keys to the existing designFromTokens.
+· figmaUrlToTokens — fetch (X-Figma-Token, timeout-bounded) + map.
+· /design endpoint: {figmaUrl} branch → fetch → map → SAME validator → apply. No FIGMA_TOKEN →
+  a clear "connect Figma / paste tokens" message (never a 500). Board Design tab: "Import from Figma"
+  URL field.
+figma:check (13 gates) = suite 22, proving the mapper against a realistic file fixture (no network).
+Full check (22 suites) green. Shipped 97a499a.
+TO GO LIVE: operator sets FIGMA_TOKEN in /srv/relay/.env (a Figma personal access token) + the owner
+pastes a file URL. Everything else is built, gated, deployed. The mapping is the only non-trivial part
+and it's proven; the HTTP is a thin wrapper.
