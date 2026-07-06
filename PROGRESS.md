@@ -1317,13 +1317,35 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = ed10f10; 23 gate suites green; nightly canary/backup/watchdog armed.
-· Recent arcs COMPLETE + certified: booking lifecycle (confirm/decline/cancel/remind, owner status),
-  project chat, design→reality (token/preset/Figma-URL ingestion, contrast-safe, rebuild-survival,
-  in-app preview), SEO structured data (Organization/LocalBusiness/WebSite/Product/Breadcrumb/Article).
-· Figma live import is BUILT + audited; blocked only on the operator setting FIGMA_TOKEN + a file URL.
-· OWNER-GATED (do NOT start without explicit word): Stripe v2, Play Store publishing, apex naples.agency
-  flip (env RELAY_HOME_SLUG + DNS; the existing apex page must never be stomped from code).
-· Next candidate SEO increments: LocalBusiness openingHours+telephone+address from the hours/contact
-  data; sitemap lastmod; FAQ schema on FAQ pages. Discipline: build → gate → deploy → prove on real
-  output → adversarially audit each new surface.
+· System healthy; prod = 0bdf085; FULL 22-suite gate green ON PROD (spec 191 · layout 100 · jsonld 55 ·
+  billing 72 · lifecycle 56 · all others 0-failed); nightly canary/backup/watchdog armed.
+· 2026-07-06 BOSS SESSION (KPI audit -> 5 arcs, all live-proven):
+  - KPI audit: overall 6.5/10 (gate 10, ops 7, funnel 3, output 7, lifecycle 7) — docs/kpi-report-2026-07-06.md.
+  - OPS FIXED+PROVEN: offsite vault push (HOME under systemd; remote advanced to vault 2026-07-06),
+    watchdog v2 deployed (cms probes /server/ping; 403 false-green gone).
+  - FIGMA UNBLOCKED: token installed (/root/secrets/relay-figma.env + relay.service.d/figma.conf drop-in),
+    proven via importer (fake key -> figma-file-not-found = auth OK). Needs ONE real file URL to certify e2e.
+  - BILLING (ARC A): $30 signup grant/user (DB-enforced once, lazy backfill), append-only billing_ledger,
+    advisory-locked atomic debit (never negative, $20/day cap), pricing 50c/planned-step clamp $3-$20
+    (real 5-page site = 13 tasks = $6.50 — measured), rebuild $2, design $1, 402s on run/rebuild/chat/design,
+    refunds on not-started AND on throw, anon 2 builds/IP/day, operator exempt, RELAY_BILLING=0 kill-switch.
+  - OUTPUT QUALITY (ARC B+C): external content-hashed ds-<hash8>.css (immutable 1y; ~200KB off every page;
+    legacy sites self-heal from memory when hash matches — proven live on nenna), img alt=query +
+    width/height + srcset (large+medium) + eager hero, schema.org category map (Restaurant/LegalService/
+    Dentist/MedicalBusiness/HairSalon/ExerciseGym/Hotel/Store) as params.bizType incl. live renders,
+    canonical + absolute og:image.
+  - VIDEO (ARC D): 'video' section — YouTube nocookie click-to-load facade (zero 3rd-party pre-click,
+    gated), direct mp4/webm no-autoplay, hostile fixtures render empty.
+  - DYNAMIC PLANS + FUNNEL (ARC E): complexityOf(brief) 1-10 -> pagesMax 5..8 (floor 5, hard cap 8),
+    persisted in params; funnel() in kpi.ts (QA-noise-filtered real users/leads/credits) in /api/kpi + CLI.
+  - ADVERSARIAL REVIEW closed 4 high (funnel SQL data-column+precedence, grant ON CONFLICT race,
+    self-granting debit, refund-on-throw) + operator email normalization + replan preserves cal_key/bizType.
+· LIVE PROOF RUN: prod build 0641fe58 (trattoria-prova-verde, restaurant+YouTube brief) — bizType=Restaurant
+  confirmed mid-build; verify on completion: external css link+file, srcset/alt imgs, Restaurant JSON-LD,
+  canonical, video facade. DELETE this scratch project after proof (QA artifact, not a demo).
+· OWNER-GATED (do NOT start without explicit word): Stripe v2 (credits exist; Stripe = top-up/invoicing),
+  Play Store publishing, apex naples.agency flip (RELAY_HOME_SLUG + DNS; never stomp the existing apex page).
+· NEXT ARCS (owner priorities): design variety expansion ("very few patterns" — needs a dedicated
+  visual-iteration session: more hero/card/section variants + art direction, gate the spread), funnel
+  distribution, board UI for funnel block, SEO increments (openingHours/telephone/address, sitemap lastmod,
+  FAQ schema). Discipline: build -> gate -> deploy -> prove on real output -> adversarially audit.
