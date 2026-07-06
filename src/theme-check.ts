@@ -203,9 +203,9 @@ async function main() {
       arcProblems.push(`ARC C: ds-*.css link missing from ${theme}.html`);
   }
   // (h) server.ts serves ds-*.css with immutable headers (source-pin).
-  // The server identifies hashed assets via isImmutableAsset and returns immutable in Cache-Control.
+  // The server identifies content-addressed assets via isHashedAsset and returns immutable in Cache-Control.
   const serverSrc = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
-  if (!serverSrc.includes('isImmutableAsset') || !serverSrc.includes('immutable') || !serverSrc.includes('ds-'))
+  if (!serverSrc.includes('isHashedAsset') || !serverSrc.includes('max-age=31536000, immutable') || !serverSrc.includes('ds-'))
     arcProblems.push('ARC C: server.ts does not appear to serve ds-*.css with immutable caching');
   if (arcProblems.length) { failures++; console.log(`✗ ARC C ${arcProblems.join(' · ')}`); }
   else console.log(`✓ ARC C: ds-${dsHash}.css written · link on all pages · :root inline · DS body external · deterministic hash`);
