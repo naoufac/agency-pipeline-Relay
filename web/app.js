@@ -220,7 +220,7 @@ function applyDlvFilter(){
     const g = document.getElementById(gid); if (!g) return;
     const grid = g.querySelector('.grid');
     if (!grid) return;
-    const any = Array.from(grid.children).some(c => (c as HTMLElement).style.display !== 'none');
+    const any = Array.from(grid.children).some(c => c.style.display !== 'none');
     g.style.display = (grid.children.length && any) ? '' : 'none';
   });
 }

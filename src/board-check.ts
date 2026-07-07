@@ -14,6 +14,7 @@
 //   No assertions on exact line numbers (stable) — use regexp on the text.
 
 import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root    = new URL('../', import.meta.url);
@@ -453,6 +454,19 @@ const ok = (name: string, cond: boolean, extra = '') => {
     css.includes('899px') && css.includes('ws-preview'));
   ok('workspace css: .ws-build-progress defined', css.includes('.ws-build-progress'));
   ok('workspace css: .ws-device-toggle defined', css.includes('.ws-device-toggle'));
+}
+
+// PARSE GATE (2026-07-07): web/app.js is plain JavaScript served to the browser — a single syntax
+// error (e.g. a stray TypeScript `as Type` cast) breaks the ENTIRE app and the board renders blank,
+// yet every source-pin above still passes because they only READ the file as text. Actually PARSE it
+// so a syntax error can never ship again. `node --check` parses without executing.
+{
+  let parseOk = true, perr = '';
+  try { execSync(`node --check ${fileURLToPath(new URL('web/app.js', root))}`, { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] }); }
+  catch (e: any) { parseOk = false; perr = String(e?.stderr ?? e?.message ?? e).split('\n').slice(0, 3).join(' '); }
+  ok('web/app.js is valid JavaScript (node --check parses it — no TS casts / syntax errors)', parseOk, perr);
+  // belt: no TypeScript-only `as <Type>` casts in the browser JS (they parse-fail in a real browser)
+  ok('web/app.js: no TypeScript `as Type` casts (browser JS, not TS)', !/\bas [A-Z][A-Za-z0-9_]+\)/.test(app));
 }
 
 console.log(`\nboard:check — ${pass} passed, ${fail} failed`);
