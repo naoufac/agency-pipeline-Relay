@@ -564,6 +564,11 @@ a.card.rv-card{display:block} a.card.rv-card:hover{border-color:var(--accent)}
 .ws-task-dot.pend{ background:var(--faint); }
 .ws-chain-reason{ font-size:12px; color:var(--faint); padding:var(--s2) var(--s3); border-left:2px solid var(--line); }
 
+/* The mobile-only preview tab DUPLICATES .ws-preview for the collapsed Chat/Preview tab layout
+   (<900px). It MUST be hidden on desktop or it renders as a phantom 4th column that squeezes the
+   chat pane out entirely (live-caught 2026-07-07). Base = hidden; mobile shows .ws-preview-tab.visible. */
+.ws-preview-tab{ display:none; }
+
 /* ---- MOBILE workspace (<900px) ---- */
 @media(max-width:899px){
   .ws-preview{ display:none; width:0; border:none; }

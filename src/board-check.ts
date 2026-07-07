@@ -467,6 +467,10 @@ const ok = (name: string, cond: boolean, extra = '') => {
   ok('web/app.js is valid JavaScript (node --check parses it — no TS casts / syntax errors)', parseOk, perr);
   // belt: no TypeScript-only `as <Type>` casts in the browser JS (they parse-fail in a real browser)
   ok('web/app.js: no TypeScript `as Type` casts (browser JS, not TS)', !/\bas [A-Z][A-Za-z0-9_]+\)/.test(app));
+  // the mobile preview-tab must be hidden by DEFAULT (desktop) — otherwise it becomes a phantom 4th
+  // column that squeezes out the chat pane (live-caught 2026-07-07). Base rule outside any media query.
+  ok('workspace: .ws-preview-tab hidden by default (base display:none, shown only on mobile)',
+    /\.ws-preview-tab\{\s*display:none;?\s*\}/.test(css));
 }
 
 console.log(`\nboard:check — ${pass} passed, ${fail} failed`);
