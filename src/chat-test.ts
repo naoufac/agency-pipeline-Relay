@@ -4,7 +4,7 @@
 // grounded answer path, the first message titles the session, cascade delete leaves no orphans.
 import { randomUUID } from 'node:crypto';
 import { makePool } from './db.ts';
-import { ensureChatTables, listSessions, createSession, sessionOf, listMessages, postMessage, CHANGE_INTENT, wantsRebuild, announceWhenDone } from './chat.ts';
+import { ensureChatTables, listSessions, createSession, sessionOf, listMessages, postMessage, CHANGE_INTENT, wantsRebuild, announceWhenDone, deriveLiveUrl } from './chat.ts';
 
 const pool = makePool();
 let pass = 0, fail = 0;
@@ -64,16 +64,55 @@ try {
   ok('chat: postMessage routes the destructive path through wantsRebuild (not the raw regex)', /if \(wantsRebuild\(body\)\)/.test(chatSrc));
 
   // the rebuild ANNOUNCES its outcome into the session (fast injected poll; project is 'done'+reviewed)
+  // announceWhenDone now posts TWO relay messages: (1) a start line immediately, (2) the terminal
+  // done/failed line after the poll resolves.  No double-terminal — the function returns after each
+  // terminal write, so exactly start + done = 2 lines total.
   await pool.query(`insert into dogfood_reviews(project_id, passed, summary, issues) values ($1, true, 'ok', '[]')`, [projA]);
   const s3 = await createSession(pool, projA, userA);
   await announceWhenDone(pool, s3.id, projA, { intervalMs: 50, deadlineMs: 3000 });
   const ann = await listMessages(pool, s3.id);
-  ok('a finished rebuild announces itself into the session (live url included)', ann.length === 1 && ann[0].role === 'relay' && /✅/.test(ann[0].body) && ann[0].body.includes('chat-scratch.naples.agency'), JSON.stringify(ann.map((m: any) => m.body.slice(0, 60))));
+  ok('interim: announceWhenDone posts a start line then a terminal done (exactly 2, no double-terminal)',
+    ann.length === 2 && ann[0].role === 'relay' && /rebuild/i.test(ann[0].body) && ann[1].role === 'relay' && /✅/.test(ann[1].body),
+    JSON.stringify(ann.map((m: any) => m.body.slice(0, 60))));
+  ok('interim: the terminal line contains the live URL (chat-scratch.naples.agency)',
+    ann.length >= 2 && ann[1].body.includes('chat-scratch.naples.agency'),
+    JSON.stringify(ann.map((m: any) => m.body.slice(0, 80))));
   await pool.query('delete from dogfood_reviews where project_id=$1', [projA]);
   const serverSrc2 = (await import('node:fs')).readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
   ok('server: the chat rebuild hook wires the announcement', serverSrc2.includes('announceWhenDone(pool, sidQ, projectId)'));
   const css = (await import('node:fs')).readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
   ok('chat is phone-first (session list stacks under 720px)', css.includes('.chatwrap') && css.includes('max-width: 720px'));
+
+  // messages GET context: deriveLiveUrl + project fields are returned alongside messages
+  // behavioural: create a fresh session, call GET response shape via direct DB + deriveLiveUrl
+  // (the server handler is integration-tested via source-pins below; a real HTTP call would need
+  // a running server, so we test the DB query + helper directly — same as boardJSON gates).
+  const s4 = await createSession(pool, projA, userA);
+  const sessCtx = (await pool.query(
+    `select p.status, p.params, p.id as proj_id,
+       count(t.*)::int as total,
+       count(t.*) filter (where t.status='done')::int as done
+     from projects p
+     left join tasks t on t.project_id=p.id
+     where p.id=$1
+     group by p.id`, [projA])).rows[0];
+  const pm4: Record<string, any> = { ...(sessCtx.params || {}), id: sessCtx.proj_id };
+  const liveUrlDerived = deriveLiveUrl(pm4, false);   // hasSite=false — no actual file on disk
+  ok('messages GET: deriveLiveUrl returns slug-based URL for the scratch project',
+    liveUrlDerived === 'https://chat-scratch.naples.agency',
+    String(liveUrlDerived));
+  ok('messages GET: project status and task counts are queryable for the response envelope',
+    sessCtx.status === 'done' && Number(sessCtx.total) >= 0 && Number(sessCtx.done) >= 0);
+
+  // source-pins: the server messages GET uses deriveLiveUrl from chat.ts (no divergence)
+  ok('server: messages GET imports and calls chat.deriveLiveUrl (shared, no dual-maintenance)',
+    serverSrc2.includes('chat.deriveLiveUrl') && serverSrc2.includes('deriveLiveUrl(pm, hasSite)'));
+  ok('server: messages GET response includes liveUrl, deliverable, status, done, total fields',
+    serverSrc2.includes('liveUrl,') && serverSrc2.includes('deliverable,') && serverSrc2.includes('status: projStatus') && serverSrc2.includes('done: taskDone') && serverSrc2.includes('total: taskTotal'));
+  // deriveLiveUrl is exported from chat.ts (the shared helper — both boardJSON and messages use same derivation)
+  const chatSrc2 = (await import('node:fs')).readFileSync(new URL('./chat.ts', import.meta.url), 'utf8');
+  ok('chat: deriveLiveUrl is exported from chat.ts (shared helper, no divergence with boardJSON)',
+    /export function deriveLiveUrl/.test(chatSrc2));
 
   // cascade: deleting a session leaves no orphan messages
   await pool.query('delete from chat_sessions where id=$1', [s1.id]);

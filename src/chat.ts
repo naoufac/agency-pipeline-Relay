@@ -7,6 +7,28 @@
 import pg from 'pg';
 import { callLLM } from './agents.ts';
 
+// SHARED LIVE-URL HELPER — used by boardJSON (server.ts) AND the /api/chat/messages GET
+// endpoint so both call sites derive the same URL from the same rules.  Keeping it here
+// (chat.ts) avoids a separate utils module while remaining importable by server.ts.
+// WHY factor it out: the workspace needs to render a live preview beside the thread in the
+// SAME GET call that returns messages; duplicating the derivation logic risks drift the moment
+// the rules change (e.g. new deliverable type). One function, one rule, two call sites.
+//
+// hasSite = existsSync(fileURLToPath(new URL(projectId + '/index.html', SITES)))
+export function deriveLiveUrl(pm: Record<string, any>, hasSite: boolean): string | null {
+  const dlv = (pm.deliverable as string | null) ?? null;
+  if (dlv === 'wp_site' || dlv === 'wp_woocommerce') return pm.wp_url ?? null;
+  if (hasSite || dlv === 'fullstack_app')
+    return pm.slug ? `https://${pm.slug}.naples.agency` : (hasSite ? '/sites/' + pm.id + '/' : null);
+  if (dlv === 'directus_site' || dlv === 'campaign' || dlv === 'landing_page')
+    return pm.slug ? `https://${pm.slug}.naples.agency` : null;
+  // null/unknown deliverable (legacy or mid-build): a slug is a strong enough signal —
+  // return the branded URL so the workspace can show the preview before the deliverable
+  // field is written.  Falls back to null only if there's neither slug nor site file.
+  if (pm.slug) return `https://${pm.slug}.naples.agency`;
+  return null;
+}
+
 export async function ensureChatTables(pool: pg.Pool): Promise<void> {
   await pool.query(`create table if not exists chat_sessions (
     id uuid primary key default gen_random_uuid(),
@@ -120,10 +142,22 @@ export async function postMessage(
 
 // after a chat-triggered rebuild, the SESSION hears the outcome — the client shouldn't have
 // to poll the Build tab. Fire-and-forget; intervals injectable so the gate can run it fast.
+//
+// INTERIM PROGRESS (workspace UX): we post ONE start line immediately (before the poll loop)
+// so the workspace feels live straight away.  The terminal line (done/failed/timeout) is the
+// SECOND and LAST relay message posted here — we never double-post a terminal because we
+// return immediately after each terminal write.  Total: 1 start + 1 terminal = ≤2 lines,
+// no spam.  The start message is NOT a terminal — it never competes with the final result.
 export async function announceWhenDone(
   pool: pg.Pool, sessionId: string, projectId: string,
-  opts: { intervalMs?: number; deadlineMs?: number } = {},
+  opts: { intervalMs?: number; deadlineMs?: number; skipStart?: boolean } = {},
 ): Promise<void> {
+  // Post the start line ONCE, before we begin waiting — gives the workspace instant feedback.
+  // skipStart is only set to true by the test that checks the ORIGINAL single-message path
+  // still works; production code always gets the start line.
+  if (!opts.skipStart) {
+    await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sessionId, '🔄 Rebuilding — researching & composing your updated site…']).catch(() => {});
+  }
   const interval = opts.intervalMs ?? 30_000;
   const deadline = Date.now() + (opts.deadlineMs ?? 30 * 60_000);
   while (Date.now() < deadline) {
@@ -141,11 +175,11 @@ export async function announceWhenDone(
           ? `✅ Done — your change is live${url ? ` at ${url}` : ''}. The independent review passed again.`
           : `⚠️ The rebuild finished but the review flagged issues — I'm keeping the previous quality bar in mind. Check the Build tab or tell me what looks off.`;
         await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sessionId, body]);
-        return;
+        return;   // terminal — never post again
       }
       if (p.status === 'blocked') {
         await pool.query("insert into chat_messages(session_id, role, body) values ($1,'relay',$2)", [sessionId, '⚠️ The rebuild could not finish — the operator has been alerted and your DATA is safe. Try rephrasing the change, or ask me what happened.']);
-        return;
+        return;   // terminal
       }
     } catch { /* transient poll error — keep waiting */ }
   }

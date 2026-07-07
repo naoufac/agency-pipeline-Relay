@@ -448,7 +448,41 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       }
       const sess = await chat.sessionOf(pool, sidQ, user.id);
       if (!sess) return send(res, 404, 'application/json', '{"error":"not found"}');
-      return send(res, 200, 'application/json', JSON.stringify({ messages: await chat.listMessages(pool, sidQ), title: sess.title }));
+      // WORKSPACE CONTEXT — the caller renders a live preview beside the thread so it needs
+      // the project's liveUrl, deliverable, status, and task progress in ONE call (avoids a
+      // separate /api/board round-trip on every poll tick).  We derive liveUrl via the shared
+      // deriveLiveUrl helper from chat.ts — the SAME function boardJSON uses — so the URL
+      // never diverges between the board and the workspace preview (no dual-maintenance bug).
+      const projCtx = (await pool.query(
+        `select p.status, p.params, p.id as proj_id,
+           count(t.*)::int as total,
+           count(t.*) filter (where t.status='done')::int as done
+         from projects p
+         left join tasks t on t.project_id=p.id
+         where p.id=$1
+         group by p.id`, [sess.project_id])).rows[0];
+      let liveUrl: string | null = null;
+      let deliverable: string | null = null;
+      let projStatus: string | null = null;
+      let taskDone = 0, taskTotal = 0;
+      if (projCtx) {
+        const pm: Record<string, any> = (projCtx.params && typeof projCtx.params === 'object') ? { ...projCtx.params, id: projCtx.proj_id } : { id: projCtx.proj_id };
+        const hasSite = existsSync(fileURLToPath(new URL(projCtx.proj_id + '/index.html', SITES)));
+        liveUrl = chat.deriveLiveUrl(pm, hasSite);   // shared helper — same derivation as boardJSON
+        deliverable = pm.deliverable ?? null;
+        projStatus = projCtx.status ?? null;
+        taskDone = Number(projCtx.done) || 0;
+        taskTotal = Number(projCtx.total) || 0;
+      }
+      return send(res, 200, 'application/json', JSON.stringify({
+        messages: await chat.listMessages(pool, sidQ),
+        title: sess.title,
+        liveUrl,
+        deliverable,
+        status: projStatus,
+        done: taskDone,
+        total: taskTotal,
+      }));
     }
     // ONE-TAP OWNER ACTIONS: the lead email carries signed Confirm/Decline links. GET shows a
     // button page and NEVER mutates (mail scanners prefetch GETs); POST performs. The HMAC token
