@@ -1317,25 +1317,22 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = 41e16b7; FULL 29-suite gate green (orchestrator 514, wp 61 dry/92 PROVE,
-  appapi 70, board 63, presta 42, e2e 762, + all others 0-failed).
-· 2026-07-06 LOCK-20 BATCH-2 (substrate depth — the "CMS makes it easy" thesis extended; deployed):
-  ORCHESTRATOR: locale-aware ecom routing (FR ecom -> prestashop builder when RELAY_PRESTA, else Woo),
-    confidence + second-choice deliverable in params/chainReason, +portfolio +event first-class
-    deliverables (EN/FR/IT). orchestrator:check 308->514.
-  WORDPRESS depth (LIVE-PROVEN 92/92): brand typography (Google Fonts + font vars), per-page SEO
-    (title/desc/OG via mu-plugin + /wp-sitemap.xml 200), featured images from Pexels, WooCommerce full
-    config (categories, product images, EUR for FR, COD payment).
-  APP depth: owner-only update(PUT/PATCH)+delete over app_ schemas, owner dashboard page reading private
-    tables. appapi 50->70.
-  BOARD/REPORTING: open-live-deliverable link per card, operator perf panel (build-time dist +
-    deliverable mix), nightly digest deliverable-mix line. board 33->63.
-  PRESTASHOP depth: hardened product/category/image/EUR provisioning + docs/prestashop-setup.md
-    (one-command container). presta 28->42.
-  E2E: src/orchestrated-e2e-check.ts — every deliverable planned offline + asserted (762), wired into
-    the chain. docs/capability-matrix.md + refreshed NORTH-STAR.
-· 7 deliverables live: directus_site, landing_page, brand_identity, wp_site, wp_woocommerce,
-  fullstack_app, campaign (+ portfolio, event). Default website path byte-identical.
-· Owner-gated: Stripe v2, Play Store, apex flip. FIGMA token in, needs a real file URL.
-· NEXT: enable cheap-tier in prod; a live wp_woocommerce end-to-end (WC active) + FR store; wire
-  PrestaShop infra if owner wants FR-native ecom; live brand_identity/landing builds.
+· System healthy; prod = latest; FULL 29-suite gate green (board 95, chat 30, + all others 0-failed).
+· 2026-07-07 MANUS-STYLE WORKSPACE (owner: 1 account, per-project workspace, many chats + live preview,
+  like manus.im/app) — SHIPPED + screenshot-verified:
+  - New route #/w/<projectId>. Desktop three-pane: LEFT rail (project + deliverable badge + New chat +
+    thread list), CENTER chat (brief bubble + message thread + sticky composer, polls replies), RIGHT
+    live-preview pane (iframe of liveUrl + Desktop/Phone toggle + Open, build-progress fallback that
+    auto-flips to the live site when done). Mobile: Chat/Preview segmented tabs + hamburger thread drawer.
+    Home cards open the workspace; #/p/<id> gains 'Open workspace'.
+  - API glue: GET /api/chat/messages now returns {liveUrl,deliverable,status,done,total}; announceWhenDone
+    posts a 'Rebuilding…' start line + terminal line (interim build feel). shared deriveLiveUrl helper.
+  - TWO real bugs the source-pin gates missed, caught by MY screenshot review + fixed + gated:
+    (1) a TS `as HTMLElement` cast in web/app.js = SyntaxError that blanked the WHOLE board (live since
+        board batch-2!). Fixed + added a REAL parse gate (node --check web/app.js) + no-TS-cast pin.
+    (2) the mobile .ws-preview-tab had display:none only inside the mobile media query -> phantom 4th
+        column on desktop squeezed out the chat pane. Fixed base display:none + gate.
+  - LESSON reinforced: UI gates must PARSE/RENDER, never just grep text ([[visual-review-required-for-ui]]).
+· 7 deliverables + workspace UX live. Owner-gated: Stripe, Play Store, apex flip. FIGMA token in, needs URL.
+· NEXT: SSE/live-push for the workspace (currently 3-4s poll); stream per-task build steps into chat;
+  workspace as the default project view.
