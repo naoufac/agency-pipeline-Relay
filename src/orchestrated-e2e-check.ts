@@ -261,31 +261,29 @@ const CASES: Case[] = [
     noBranches: ['compose', 'render', 'wp_provision', 'database', 'app_api'],
   },
 
-  // ── PORTFOLIO → directus_site ─────────────────────────────────────────
-  // WHY: a freelance photographer's portfolio is a classic brochure/presentation site.
-  // "portfolio" is a directus_site booster signal (score+3). No ecom, no data.
+  // ── PORTFOLIO → portfolio (first-class deliverable, T23) ──────────────
+  // A freelance photographer's portfolio is a showcase site — its own deliverable now,
+  // rendered on directus (no ecom, no data). Renders through the standard compose/render path.
   {
-    label: 'photographer portfolio → directus_site',
+    label: 'photographer portfolio → portfolio',
     brief: 'a portfolio site for a freelance photographer — home, about, portfolio gallery, contact',
-    deliverable: 'directus_site',
+    deliverable: 'portfolio',
     builder: 'directus',
     stack: 'directus',
     branches: ['compose', 'render'],
     noBranches: ['wp_provision', 'database', 'ecom_catalog', 'app_api'],
   },
 
-  // ── EVENT → directus_site ─────────────────────────────────────────────
-  // WHY: a corporate event website (speakers, schedule, venue — but no ticketing/booking
-  // signals that would fire fullstack_app, and no editorial/news signals that would fire
-  // wp_site) is a brochure/presentation site. The brief deliberately avoids "press",
-  // "news", "blog", booking/reservation language so the deterministic floor is directus_site.
+  // ── EVENT → event (first-class deliverable, T23) ──────────────────────
+  // A corporate event/conference site is its own deliverable — directus-rendered, and it
+  // pulls the integrations branch (RSVP/.ics) but no database/ecom/app.
   {
-    label: 'corporate event site → directus_site',
+    label: 'corporate event site → event',
     brief: 'website for an annual corporate conference — speakers, program, venue information, sponsors, contact',
-    deliverable: 'directus_site',
+    deliverable: 'event',
     builder: 'directus',
     stack: 'directus',
-    branches: ['compose', 'render'],
+    branches: ['compose', 'render', 'integrations'],
     noBranches: ['wp_provision', 'database', 'app_api', 'ecom_catalog'],
   },
 ];
