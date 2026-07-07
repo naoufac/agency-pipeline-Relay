@@ -1317,23 +1317,25 @@ LIVE PROOF: nenna (trattoria recipe blog) → post-1 emits Article "Ragù napole
 datePublished 2026-07-04 · publisher Nenna + BreadcrumbList (author correctly omitted, not faked).
 
 ### RESUME POINTER (fresh context starts here)
-· System healthy; prod = 59bb0f0; FULL 28-suite gate green (orchestrator 308, appapi 50, wp 38, presta 28,
-  board 33, llm 38, spec 195, + all others 0-failed).
-· 2026-07-06 LOCK-20 (6 domain workers, 20 gated increments, all merged + deployed):
-  ORCHESTRATOR: +landing_page +brand_identity deliverables (EN/FR/IT), richer detectors, human-readable
-    chainReason (spot-checked live), 'orchestrated' run_event.
-  WORDPRESS: WooCommerce products from data model (wc-cli + wp-post fallback), brand-palette CSS injection,
-    theme-install-or-fallback harden. wp:check 38 dry / 53 prove.
-  APP: /api/app pagination+ordering (?limit/offset/order/dir), owner-auth on PRIVATE_READ tables, a real
-    served app UI (list+create over primary table). appapi 50.
-  BOARD: deliverable/stack/chain view + chainReason why-banner + build wall-clock + deliverable badge+filter.
-    boardJSON exposes deliverable/stack/chainReason/capabilities/build_seconds (null on legacy projects).
-  QUALITY: quieted the misleading brand.name log (truthful only when name truly absent); per-department
-    CHEAP model tier via OPENROUTER_MODELS_CHEAP (policies/design/qa/... ; default unset = unchanged);
-    persisted params.build_seconds at build end.
-  PRESTASHOP: FR-ecom builder skeleton (RELAY_PRESTA flag, graceful-absent, PS webservice API path/stub),
-    wired into the builder registry (lazy). presta:check 28 dry, prove-mode when infra present.
-· LLM: M3 reasoning-off primary; per-dept cheap tier available (env). Default website path byte-identical.
+· System healthy; prod = 41e16b7; FULL 29-suite gate green (orchestrator 514, wp 61 dry/92 PROVE,
+  appapi 70, board 63, presta 42, e2e 762, + all others 0-failed).
+· 2026-07-06 LOCK-20 BATCH-2 (substrate depth — the "CMS makes it easy" thesis extended; deployed):
+  ORCHESTRATOR: locale-aware ecom routing (FR ecom -> prestashop builder when RELAY_PRESTA, else Woo),
+    confidence + second-choice deliverable in params/chainReason, +portfolio +event first-class
+    deliverables (EN/FR/IT). orchestrator:check 308->514.
+  WORDPRESS depth (LIVE-PROVEN 92/92): brand typography (Google Fonts + font vars), per-page SEO
+    (title/desc/OG via mu-plugin + /wp-sitemap.xml 200), featured images from Pexels, WooCommerce full
+    config (categories, product images, EUR for FR, COD payment).
+  APP depth: owner-only update(PUT/PATCH)+delete over app_ schemas, owner dashboard page reading private
+    tables. appapi 50->70.
+  BOARD/REPORTING: open-live-deliverable link per card, operator perf panel (build-time dist +
+    deliverable mix), nightly digest deliverable-mix line. board 33->63.
+  PRESTASHOP depth: hardened product/category/image/EUR provisioning + docs/prestashop-setup.md
+    (one-command container). presta 28->42.
+  E2E: src/orchestrated-e2e-check.ts — every deliverable planned offline + asserted (762), wired into
+    the chain. docs/capability-matrix.md + refreshed NORTH-STAR.
+· 7 deliverables live: directus_site, landing_page, brand_identity, wp_site, wp_woocommerce,
+  fullstack_app, campaign (+ portfolio, event). Default website path byte-identical.
 · Owner-gated: Stripe v2, Play Store, apex flip. FIGMA token in, needs a real file URL.
-· NEXT: enable OPENROUTER_MODELS_CHEAP in prod for a speed pass; a full brand_identity + landing_page live
-  build; WooCommerce prove with WC active; PrestaShop infra if owner wants FR-native ecom.
+· NEXT: enable cheap-tier in prod; a live wp_woocommerce end-to-end (WC active) + FR store; wire
+  PrestaShop infra if owner wants FR-native ecom; live brand_identity/landing builds.
