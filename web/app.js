@@ -278,7 +278,7 @@ function home(){
         el.className = 'card pcard';
         if (p.deliverable) el.setAttribute('data-dlv', p.deliverable);   // T13 filter hook
         el.innerHTML = cardInner(p);
-        el.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = '#/p/' + p.id; });
+        el.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = '#/w/' + p.id; });
         rec = { el, sig, building: isB }; cards.set(p.id, rec); (isB ? bgrid : rgrid).appendChild(el);
       } else if (rec.sig !== sig){                          // changed -> re-render THIS card only
         rec.el.innerHTML = cardInner(p); rec.sig = sig;
@@ -399,6 +399,7 @@ function project(id, tab, seq){
         <h1 class="ptitle">${esc(b.project.brief)}</h1>
         <span class="pill big"><i class="dot s-${st}"></i>${lab}</span>
         ${headerLiveUrl ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(headerLiveUrl)}">Open ↗</a>` : ''}
+        <a class="btn btn-sm btn-ghost" href="#/w/${esc(id)}">Open workspace</a>
         ${dlvLine}
         ${me ? visitsHtml(b.visits) : ''}
       </div>
@@ -1103,8 +1104,406 @@ function docsPage(){
   </div>`;
 }
 
+/* ---------------- WORKSPACE #/w/<projectId> — Manus-style three-pane UI ----
+   LEFT RAIL: project nav + thread list
+   CENTER:    active chat thread + composer
+   RIGHT:     live preview iframe (or build-progress view while building)
+   MOBILE (<900px): segmented "Chat / Preview" control + hamburger rail
+   -------------------------------------------------------------------- */
+function workspace(id) {
+  /* Shell replaces the full app area. Hide global footer height isn't needed — we
+     use min-height:0 + flex to fill; the nav is still there at the top. */
+  app.innerHTML = `
+    <div class="ws-shell" id="ws-shell">
+      <!-- mobile top bar: hamburger + segment control -->
+      <div class="ws-mobile-bar" id="ws-mobile-bar">
+        <button class="ws-hamburger" id="ws-hamburger" aria-label="Thread list">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <div class="ws-seg" id="ws-seg" role="tablist">
+          <button class="ws-seg-btn on" id="ws-tab-chat" role="tab" aria-selected="true">Chat</button>
+          <button class="ws-seg-btn" id="ws-tab-preview" role="tab" aria-selected="false">Preview</button>
+        </div>
+      </div>
+      <!-- rail overlay (mobile) -->
+      <div class="ws-rail-overlay" id="ws-rail-overlay"></div>
+      <!-- three-pane body -->
+      <div class="ws-body">
+        <!-- LEFT RAIL -->
+        <aside class="ws-rail" id="ws-rail" aria-label="Threads">
+          <a class="ws-rail-back" href="#/">&#8592; Projects</a>
+          <div class="ws-rail-title" id="ws-rail-title">Loading…</div>
+          <div style="margin-bottom:8px" id="ws-rail-dlv"></div>
+          <button class="btn ws-new-chat" id="ws-new-chat">＋ New chat</button>
+          <div class="ws-sess-list" id="ws-sess-list">
+            <div class="ws-sess-empty">Loading threads…</div>
+          </div>
+        </aside>
+        <!-- CENTER: chat -->
+        <section class="ws-chat" id="ws-chat" aria-label="Chat">
+          <div class="ws-thread" id="ws-thread"></div>
+          <form class="ws-composer" id="ws-composer" autocomplete="off">
+            <textarea class="ws-composer-input" id="ws-composer-input"
+              placeholder="Ask about your project, or say a change…"
+              rows="1" aria-label="Message"></textarea>
+            <button type="submit" class="btn ws-composer-send">Send</button>
+          </form>
+        </section>
+        <!-- RIGHT: preview (desktop only; mobile uses ws-preview-tab below) -->
+        <aside class="ws-preview" id="ws-preview" aria-label="Site preview">
+          <div class="ws-preview-bar" id="ws-preview-bar">
+            <span class="ws-preview-addr" id="ws-preview-addr">—</span>
+            <div class="ws-device-toggle" id="ws-device-toggle">
+              <button class="ws-device-btn on" id="ws-dev-desktop" title="Desktop view">Desktop</button>
+              <button class="ws-device-btn" id="ws-dev-phone" title="Phone 390px">Phone</button>
+            </div>
+            <a class="btn btn-sm btn-ghost ws-preview-open" id="ws-preview-open" target="_blank" rel="noopener" style="display:none">Open &#8599;</a>
+          </div>
+          <div class="ws-iframe-wrap" id="ws-iframe-wrap">
+            <div class="ws-build-progress" id="ws-build-progress" style="display:none"></div>
+            <iframe class="ws-iframe" id="ws-iframe" title="Site preview" style="display:none"></iframe>
+          </div>
+        </aside>
+        <!-- mobile preview tab (duplicates the preview bar for mobile) -->
+        <div class="ws-preview-tab" id="ws-preview-tab">
+          <div class="ws-preview-bar" id="ws-preview-bar-m">
+            <span class="ws-preview-addr" id="ws-preview-addr-m">—</span>
+            <div class="ws-device-toggle" id="ws-device-toggle-m">
+              <button class="ws-device-btn on" id="ws-dev-desktop-m" title="Desktop view">Desktop</button>
+              <button class="ws-device-btn" id="ws-dev-phone-m" title="Phone 390px">Phone</button>
+            </div>
+            <a class="btn btn-sm btn-ghost ws-preview-open" id="ws-preview-open-m" target="_blank" rel="noopener" style="display:none">Open &#8599;</a>
+          </div>
+          <div class="ws-iframe-wrap" id="ws-iframe-wrap-m">
+            <div class="ws-build-progress" id="ws-build-progress-m" style="display:none"></div>
+            <iframe class="ws-iframe" id="ws-iframe-m" title="Site preview (mobile)" style="display:none"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  /* ---- state ---- */
+  let boardData = null;         // last /api/board response
+  let currentSid = null;        // active session id
+  let sessions = [];            // [{id,title,messages,updated_at}]
+  let inFlight = false;         // composer send in progress
+  let boardPoll = null;         // interval for board polling
+  let msgPoll = null;           // interval for message polling
+  let liveUrl = null;           // current live url
+  let phoneMode = false;        // device toggle state
+
+  /* ---- mobile controls ---- */
+  const railEl = document.getElementById('ws-rail');
+  const overlayEl = document.getElementById('ws-rail-overlay');
+  const hamburger = document.getElementById('ws-hamburger');
+  const tabChat = document.getElementById('ws-tab-chat');
+  const tabPreview = document.getElementById('ws-tab-preview');
+  const chatEl = document.getElementById('ws-chat');
+  const previewTabEl = document.getElementById('ws-preview-tab');
+
+  function openRail() { railEl.classList.add('open'); overlayEl.classList.add('open'); }
+  function closeRail() { railEl.classList.remove('open'); overlayEl.classList.remove('open'); }
+  hamburger.onclick = () => railEl.classList.contains('open') ? closeRail() : openRail();
+  overlayEl.onclick = closeRail;
+
+  tabChat.onclick = () => {
+    tabChat.classList.add('on'); tabChat.setAttribute('aria-selected','true');
+    tabPreview.classList.remove('on'); tabPreview.setAttribute('aria-selected','false');
+    chatEl.classList.remove('hidden-mobile'); previewTabEl.classList.remove('visible');
+  };
+  tabPreview.onclick = () => {
+    tabPreview.classList.add('on'); tabPreview.setAttribute('aria-selected','true');
+    tabChat.classList.remove('on'); tabChat.setAttribute('aria-selected','false');
+    previewTabEl.classList.add('visible'); chatEl.classList.add('hidden-mobile');
+  };
+
+  /* ---- device toggle (both desktop + mobile panes) ---- */
+  function applyDevice(phone) {
+    phoneMode = phone;
+    ['', '-m'].forEach(sfx => {
+      const wrap = document.getElementById('ws-iframe-wrap' + sfx);
+      const dBtn = document.getElementById('ws-dev-desktop' + sfx);
+      const pBtn = document.getElementById('ws-dev-phone' + sfx);
+      if (!wrap) return;
+      if (phone) { wrap.classList.add('phone-mode'); dBtn.classList.remove('on'); pBtn.classList.add('on'); }
+      else { wrap.classList.remove('phone-mode'); dBtn.classList.add('on'); pBtn.classList.remove('on'); }
+    });
+  }
+  ['', '-m'].forEach(sfx => {
+    document.getElementById('ws-dev-desktop' + sfx)?.addEventListener('click', () => applyDevice(false));
+    document.getElementById('ws-dev-phone' + sfx)?.addEventListener('click', () => applyDevice(true));
+  });
+
+  /* ---- preview helpers ---- */
+  function setPreviewAddr(url) {
+    ['', '-m'].forEach(sfx => {
+      const addrEl = document.getElementById('ws-preview-addr' + sfx);
+      const openEl = document.getElementById('ws-preview-open' + sfx);
+      if (addrEl) addrEl.textContent = url || '—';
+      if (openEl) { openEl.href = url || '#'; openEl.style.display = url ? '' : 'none'; }
+    });
+  }
+  function showIframe(url) {
+    ['', '-m'].forEach(sfx => {
+      const iframe = document.getElementById('ws-iframe' + sfx);
+      const prog = document.getElementById('ws-build-progress' + sfx);
+      if (!iframe || !prog) return;
+      iframe.style.display = ''; prog.style.display = 'none';
+      if (iframe.src !== url) iframe.src = url;
+    });
+    setPreviewAddr(url);
+  }
+  function showBuildProgress(b) {
+    const done = b.tasks.filter(t => t.status === 'done').length;
+    const total = b.tasks.length;
+    const pct = total ? Math.round(100 * done / total) : 4;
+    const cur = b.tasks.find(t => ['running','verifying'].includes(t.status));
+    const taskHtml = b.tasks.slice(0, 20).map(t => {
+      const st = t.status === 'done' ? 'done' : (['running','verifying'].includes(t.status) ? 'run' : 'pend');
+      return `<div class="ws-task-row ${st}"><span class="ws-task-dot ${st}"></span><span>${esc(t.title)}</span></div>`;
+    }).join('');
+    const html = `
+      <div class="ws-build-bar"><i style="width:${pct}%"></i></div>
+      <div class="muted" style="font-size:12px">${done} / ${total} steps</div>
+      <div class="ws-build-tasks">${taskHtml}</div>
+      ${b.project.chainReason ? `<div class="ws-chain-reason">${esc(b.project.chainReason)}</div>` : ''}`;
+    ['', '-m'].forEach(sfx => {
+      const iframe = document.getElementById('ws-iframe' + sfx);
+      const prog = document.getElementById('ws-build-progress' + sfx);
+      if (!iframe || !prog) return;
+      iframe.style.display = 'none'; prog.style.display = '';
+      prog.innerHTML = html;
+    });
+    setPreviewAddr(null);
+  }
+  function updatePreview(b) {
+    const url = b.project.liveUrl || (b.site ? b.site : null);
+    const building = ['running','verifying'].includes(b.project.status) || !url;
+    liveUrl = url;
+    if (!building && url) showIframe(url);
+    else showBuildProgress(b);
+  }
+
+  /* ---- board polling ---- */
+  async function loadBoard() {
+    let b;
+    try { b = await j('/api/board?id=' + id); } catch { return; }
+    if (!b || !b.project) return;
+    boardData = b;
+    // update rail title + badge
+    const titleEl = document.getElementById('ws-rail-title');
+    if (titleEl) titleEl.textContent = b.project.brief || id;
+    const dlvEl = document.getElementById('ws-rail-dlv');
+    if (dlvEl) dlvEl.innerHTML = deliverableBadge(b.project.deliverable || null);
+    // update preview
+    updatePreview(b);
+    // stop polling when done/failed
+    const done = b.project.status === 'done' || b.tasks.every(t => t.status === 'done');
+    const failed = b.tasks.some(t => t.status === 'failed');
+    if ((done || failed) && boardPoll) { clearInterval(boardPoll); boardPoll = null; }
+  }
+
+  /* ---- thread/message helpers ---- */
+  function relTime(iso) {
+    if (!iso) return '';
+    const d = Date.now() - new Date(iso).getTime();
+    if (d < 60000) return 'just now';
+    if (d < 3600000) return Math.floor(d / 60000) + 'm ago';
+    if (d < 86400000) return Math.floor(d / 3600000) + 'h ago';
+    return Math.floor(d / 86400000) + 'd ago';
+  }
+
+  function renderSessions() {
+    const listEl = document.getElementById('ws-sess-list');
+    if (!listEl) return;
+    if (!sessions.length) {
+      listEl.innerHTML = '<div class="ws-sess-empty">Start a conversation about your project.</div>';
+      return;
+    }
+    listEl.innerHTML = sessions.map(s => `
+      <div class="ws-sess-item${s.id === currentSid ? ' active' : ''}" data-sid="${esc(s.id)}">
+        <div class="ws-sess-item-title">${esc(s.title || 'Chat')}</div>
+        <div class="ws-sess-item-time">${esc(relTime(s.updated_at))}</div>
+      </div>`).join('');
+    listEl.querySelectorAll('[data-sid]').forEach(el => {
+      el.onclick = () => {
+        closeRail();
+        switchSession(el.getAttribute('data-sid'));
+      };
+    });
+  }
+
+  let lastMsgCount = 0;
+  function renderThread(messages, brief) {
+    const threadEl = document.getElementById('ws-thread');
+    if (!threadEl) return;
+    const msgs = messages || [];
+    // brief as first system bubble (if thread is empty or always first)
+    let html = '';
+    if (brief) html += `<div class="ws-bubble-system">${esc(brief)}</div>`;
+    if (!msgs.length && !brief) {
+      html += '<div class="ws-sess-empty">Say hello — or describe a change and the site rebuilds.</div>';
+    }
+    html += msgs.map(m =>
+      m.role === 'user'
+        ? `<div class="ws-bubble-user">${esc(m.body)}</div>`
+        : `<div class="ws-bubble-relay">${esc(m.body)}</div>`
+    ).join('');
+    threadEl.innerHTML = html;
+    threadEl.scrollTop = threadEl.scrollHeight;
+    lastMsgCount = msgs.length;
+  }
+
+  function showTyping() {
+    const threadEl = document.getElementById('ws-thread');
+    if (!threadEl) return;
+    const old = threadEl.querySelector('.ws-typing');
+    if (!old) {
+      threadEl.insertAdjacentHTML('beforeend',
+        `<div class="ws-typing"><span class="ws-typing-dot"></span><span class="ws-typing-dot"></span><span class="ws-typing-dot"></span></div>`);
+      threadEl.scrollTop = threadEl.scrollHeight;
+    }
+  }
+  function hideTyping() {
+    document.querySelectorAll('.ws-typing').forEach(el => el.remove());
+  }
+
+  async function loadThread(sid, brief) {
+    if (!sid) { renderThread([], brief); return; }
+    try {
+      const d = await j('/api/chat/messages?session=' + sid);
+      renderThread(d.messages || [], brief);
+    } catch { renderThread([], brief); }
+  }
+
+  async function loadSessions(pickSid) {
+    try {
+      const d = await j('/api/chat/sessions?id=' + id);
+      sessions = d.sessions || [];
+    } catch { sessions = []; }
+    if (pickSid) currentSid = pickSid;
+    else if (!currentSid && sessions.length) currentSid = sessions[0].id;
+    renderSessions();
+    const brief = boardData ? boardData.project.brief : null;
+    await loadThread(currentSid, brief);
+  }
+
+  async function switchSession(sid) {
+    currentSid = sid;
+    renderSessions();
+    stopMsgPoll();
+    const brief = boardData ? boardData.project.brief : null;
+    await loadThread(sid, brief);
+    startMsgPoll();
+  }
+
+  /* ---- message polling ---- */
+  function stopMsgPoll() { if (msgPoll) { clearInterval(msgPoll); msgPoll = null; } }
+  function startMsgPoll() {
+    stopMsgPoll();
+    if (!currentSid) return;
+    msgPoll = setInterval(async () => {
+      if (inFlight) return;
+      try {
+        const d = await j('/api/chat/messages?session=' + currentSid);
+        const msgs = d.messages || [];
+        if (msgs.length !== lastMsgCount) {
+          hideTyping();
+          const brief = boardData ? boardData.project.brief : null;
+          renderThread(msgs, brief);
+        }
+      } catch {}
+    }, 4000);
+  }
+
+  /* ---- new chat session ---- */
+  document.getElementById('ws-new-chat').onclick = async () => {
+    try {
+      const s = await j('/api/chat/sessions?id=' + id, { method: 'POST' });
+      sessions = []; // force reload
+      currentSid = s.id;
+      await loadSessions(s.id);
+      stopMsgPoll(); startMsgPoll();
+    } catch {}
+  };
+
+  /* ---- composer ---- */
+  const composerForm = document.getElementById('ws-composer');
+  const composerInput = document.getElementById('ws-composer-input');
+
+  // auto-grow textarea
+  composerInput.addEventListener('input', () => {
+    composerInput.style.height = 'auto';
+    composerInput.style.height = Math.min(composerInput.scrollHeight, 140) + 'px';
+  });
+  // Enter sends; Shift+Enter = newline
+  composerInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); composerForm.requestSubmit(); }
+  });
+
+  composerForm.onsubmit = async e => {
+    e.preventDefault();
+    const body = composerInput.value.trim();
+    if (!body || inFlight) return;
+    inFlight = true;
+    // ensure a session exists
+    if (!currentSid) {
+      try {
+        const s = await j('/api/chat/sessions?id=' + id, { method: 'POST' });
+        currentSid = s.id;
+        sessions = [];
+        await loadSessions(currentSid);
+      } catch { inFlight = false; return; }
+    }
+    // optimistic user bubble
+    const threadEl = document.getElementById('ws-thread');
+    if (threadEl) {
+      threadEl.insertAdjacentHTML('beforeend', `<div class="ws-bubble-user">${esc(body)}</div>`);
+      threadEl.scrollTop = threadEl.scrollHeight;
+    }
+    composerInput.value = '';
+    composerInput.style.height = 'auto';
+    showTyping();
+    try {
+      await j('/api/chat/messages?session=' + currentSid, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body })
+      });
+    } catch {}
+    hideTyping();
+    inFlight = false;
+    // reload thread to get the relay reply
+    const brief = boardData ? boardData.project.brief : null;
+    await loadThread(currentSid, brief);
+    await loadSessions();
+    // restart polling
+    stopMsgPoll(); startMsgPoll();
+  };
+
+  /* ---- cleanup on route change ---- */
+  // store cleanup on the ws-shell element so the router can call it
+  document.getElementById('ws-shell')._wsCleanup = () => {
+    if (boardPoll) clearInterval(boardPoll);
+    if (msgPoll) clearInterval(msgPoll);
+  };
+
+  /* ---- initial load ---- */
+  (async () => {
+    await loadBoard();
+    await loadSessions();
+    // start board polling while building
+    const building = boardData && (['running','verifying'].includes(boardData.project.status) || !boardData.site);
+    if (building) boardPoll = setInterval(loadBoard, 3000);
+    startMsgPoll();
+  })();
+}
+
 /* ---------------- router ---------------- */
 function router(){
+  // cleanup any running workspace
+  const oldWs = document.getElementById('ws-shell');
+  if (oldWs && typeof oldWs._wsCleanup === 'function') oldWs._wsCleanup();
   clearPoll(); closeDrawer(false); navLinks?.classList.remove('open');
   let raw = location.hash.replace(/^#/, '') || '/';
   // legacy redirects
@@ -1126,6 +1525,7 @@ function router(){
   else if (seg[0] === 'review') { navPath = '/review'; review(); }
   else if (seg[0] === 'docs') { navPath = '/docs'; docsPage(); }
   else if (seg[0] === 'about') { navPath = '/about'; about(); }
+  else if (seg[0] === 'w' && seg[1]) { navPath = '/'; workspace(seg[1]); }
   else if (seg[0] === 'p' && seg[1]) { navPath = '/'; const tab = ['site','build','files','metrics','qa','content','data'].includes(seg[2]) ? seg[2] : 'site'; project(seg[1], tab, seq ? Number(seq) : null); }
   else home();
 
