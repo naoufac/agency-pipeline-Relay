@@ -340,5 +340,120 @@ const ok = (name: string, cond: boolean, extra = '') => {
     srv.includes('pm.deliverable') && srv.includes('pm.stack') && srv.includes('pm.chainReason'));
 }
 
+// ── WORKSPACE (#/w/<id>) — source-pin gates ──────────────────────────────────
+// WHY: the workspace is the primary project experience. These pins verify the
+// structural invariants of the three-pane layout, the chat posting path, the
+// preview iframe + device toggle, and the mobile tab switch — without requiring
+// a live server. Behavioural invariants only; exact line numbers are NOT pinned.
+{
+  // Route exists: the router handles seg[0]==='w' and calls workspace()
+  ok('workspace: #/w/ route handled in router (seg[0] === "w")',
+    app.includes("seg[0] === 'w'") && app.includes('workspace(seg[1])'));
+
+  // workspace() function is defined
+  ok('workspace: workspace() function is defined',
+    app.includes('function workspace(id)') || app.includes('function workspace(id,') ||
+    /function workspace\s*\(/.test(app));
+
+  // Three panes: rail, chat, preview present in the HTML template
+  ok('workspace: left rail rendered (ws-rail element)',
+    app.includes('ws-rail') && app.includes('ws-rail-back') && app.includes('ws-sess-list'));
+
+  ok('workspace: center chat pane rendered (ws-chat + ws-thread)',
+    app.includes('ws-chat') && app.includes('ws-thread'));
+
+  ok('workspace: right preview pane rendered (ws-preview + ws-iframe)',
+    app.includes('ws-preview') && app.includes('ws-iframe') && app.includes('ws-iframe-wrap'));
+
+  // Composer posts to /api/chat/messages
+  // Verified by presence in the whole file — workspace() is the only non-legacy
+  // place that uses this pattern with the 'POST' method header.
+  ok('workspace: composer POSTs to /api/chat/messages (correct endpoint)',
+    (() => {
+      const fnStart = app.indexOf('function workspace(');
+      const fn = app.slice(fnStart, fnStart + 20000);
+      return fn.includes('/api/chat/messages?session=') && fn.includes("method: 'POST'");
+    })());
+
+  // New chat session created via POST /api/chat/sessions
+  ok('workspace: new chat button calls POST /api/chat/sessions',
+    (() => {
+      const fnStart = app.indexOf('function workspace(');
+      const fn = app.slice(fnStart, fnStart + 20000);
+      return fn.includes('/api/chat/sessions?id=') && fn.includes("method: 'POST'");
+    })());
+
+  // Preview iframes liveUrl (showIframe sets iframe.src to the live url)
+  ok('workspace: showIframe() sets iframe.src to liveUrl',
+    (() => {
+      const fnStart = app.indexOf('function workspace(');
+      const fn = app.slice(fnStart, fnStart + 12000);
+      return fn.includes('iframe.src') && fn.includes('showIframe');
+    })());
+
+  // Device toggle exists (phone/desktop buttons)
+  ok('workspace: device toggle buttons (ws-dev-desktop / ws-dev-phone) rendered',
+    app.includes('ws-dev-desktop') && app.includes('ws-dev-phone'));
+
+  ok('workspace: device toggle applies phone-mode class on ws-iframe-wrap',
+    (() => {
+      const fnStart = app.indexOf('function workspace(');
+      const fn = app.slice(fnStart, fnStart + 20000);
+      return fn.includes('phone-mode') && fn.includes('applyDevice');
+    })());
+
+  // Build progress shown while building (showBuildProgress)
+  ok('workspace: showBuildProgress() renders task list + progress bar while building',
+    app.includes('showBuildProgress') && app.includes('ws-build-progress') && app.includes('ws-build-bar'));
+
+  // Mobile: segmented tab control (ws-tab-chat / ws-tab-preview)
+  ok('workspace: mobile segmented tab control (ws-tab-chat / ws-tab-preview)',
+    app.includes('ws-tab-chat') && app.includes('ws-tab-preview') && app.includes('ws-seg'));
+
+  // Mobile: hamburger that toggles the rail
+  ok('workspace: mobile hamburger toggles the rail (ws-hamburger / ws-rail-overlay)',
+    app.includes('ws-hamburger') && app.includes('ws-rail-overlay'));
+
+  // Board polling: GET /api/board every 3s while building
+  ok('workspace: board polled every 3s (setInterval loadBoard, 3000)',
+    (() => {
+      const fnStart = app.indexOf('function workspace(');
+      const fn = app.slice(fnStart, fnStart + 20000);
+      return fn.includes('setInterval(loadBoard, 3000)') || fn.includes('setInterval(loadBoard,3000)');
+    })());
+
+  // Message polling: GET /api/chat/messages every ~4s
+  ok('workspace: messages polled every ~4s (setInterval, 4000)',
+    (() => {
+      const fnStart = app.indexOf('function workspace(');
+      const fn = app.slice(fnStart, fnStart + 12000);
+      return fn.includes('4000');
+    })());
+
+  // Home cards click to #/w/ (primary click opens workspace)
+  ok('workspace: home card primary click opens #/w/<id> (not #/p/<id>)',
+    app.includes("location.hash = '#/w/' + p.id"));
+
+  // Project page (#/p/) has an "Open workspace" link to #/w/
+  ok('workspace: project page header has Open workspace link to #/w/<id>',
+    app.includes("href=\"#/w/${esc(id)}\"") || app.includes("href='#/w/") ||
+    (app.includes('#/w/') && app.includes('Open workspace')));
+
+  // CSS: workspace layout classes exist
+  ok('workspace css: .ws-shell defined', css.includes('.ws-shell'));
+  ok('workspace css: .ws-rail defined', css.includes('.ws-rail'));
+  ok('workspace css: .ws-chat defined', css.includes('.ws-chat'));
+  ok('workspace css: .ws-preview defined', css.includes('.ws-preview'));
+  ok('workspace css: .ws-thread defined', css.includes('.ws-thread'));
+  ok('workspace css: .ws-composer defined', css.includes('.ws-composer'));
+  ok('workspace css: .ws-bubble-user defined', css.includes('.ws-bubble-user'));
+  ok('workspace css: .ws-bubble-relay defined', css.includes('.ws-bubble-relay'));
+  ok('workspace css: .ws-seg defined (mobile segmented control)', css.includes('.ws-seg'));
+  ok('workspace css: mobile breakpoint collapses preview pane (@media max-width:899px)',
+    css.includes('899px') && css.includes('ws-preview'));
+  ok('workspace css: .ws-build-progress defined', css.includes('.ws-build-progress'));
+  ok('workspace css: .ws-device-toggle defined', css.includes('.ws-device-toggle'));
+}
+
 console.log(`\nboard:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
