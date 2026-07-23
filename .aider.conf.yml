@@ -1,0 +1,8 @@
+# Set MiniMax M3 as the primary code editor
+model: openrouter/minimax/minimax-m3
+# Set Kimi K3 as the Architect for deep reasoning and planning
+architect: true
+editor-model: openrouter/moonshotai/kimi-k3
+# Enable OpenRouter prefix caching to drastically reduce costs on large codebase reads
+cache-prompts: true
+cache-keepalive-pings: 6
