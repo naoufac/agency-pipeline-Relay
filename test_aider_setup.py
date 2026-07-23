@@ -60,10 +60,11 @@ class AiderSetupTests(unittest.TestCase):
         conf_path = ROOT / ".aider.conf.yml"
         self.assertTrue(conf_path.is_file(), ".aider.conf.yml must exist")
         text = conf_path.read_text(encoding="utf-8")
+        # Aider architect mode: `model` is the planner/reader; `editor-model` is the coder.
         required = {
-            "model": "openrouter/minimax/minimax-m3",
+            "model": "openrouter/moonshotai/kimi-k3",
             "architect": "true",
-            "editor-model": "openrouter/moonshotai/kimi-k3",
+            "editor-model": "openrouter/minimax/minimax-m3",
             "cache-prompts": "true",
             "cache-keepalive-pings": "6",
         }
