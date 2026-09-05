@@ -65,5 +65,18 @@ ok(wpBuilderSource.includes("id: 'wordpress'") && wpBuilderSource.includes('RELA
 ok(!wpBuilderSource.includes("from '../server.ts'") && !wpBuilderSource.includes("'../server'"),
   'wordpress builder: does not import server.ts (avoids circular + banned pattern)');
 
+const astroB = resolveBuilder('astro');
+ok(astroB.id === 'astro' && typeof astroB.finalize === 'function', "builder: resolveBuilder('astro') returns astro builder");
+const astroSrc = readFileSync(new URL('./astro.ts', import.meta.url), 'utf8');
+ok(astroSrc.includes('<!--relay:astro-->') && !astroSrc.includes('../render.ts'),
+  'astro builder: real .astro compile path, does not import render.ts');
+ok(!astroSrc.includes('Astro builder not implemented yet'), 'astro builder: not a Phase-4 stub');
+const appB = resolveBuilder('app');
+ok(appB.id === 'app' && typeof appB.finalize === 'function', "builder: resolveBuilder('app') returns app builder");
+const appSrc = readFileSync(new URL('./app.ts', import.meta.url), 'utf8');
+ok(appSrc.includes('proveApp') && !appSrc.includes('Worker C') && !appSrc.includes('../render.ts'),
+  'app builder: real data/API/UI proof, not a website renderer');
+
+
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS — one pipeline, one CMS, wordpress builder registered.');
 if (fails) process.exit(1);

@@ -64,6 +64,11 @@ const ok = (name: string, cond: boolean, extra = '') => {
       const region = srv.slice(start, end > 0 ? end : start + 4000);
       return region.includes('pm.deliverable') && region.includes('pm.chainReason');
     })());
+
+  ok('server: GET /api/mindmap is a live DB view, not a static SVG',
+    srv.includes("path === '/api/mindmap'") && srv.includes('buildMindmap') && !srv.includes('render-mindmap.mjs'));
+  ok('server: boardJSON attaches mindmap from the same DB rows',
+    srv.includes('visits, mindmap') && srv.includes('loadMindmap'));
 }
 
 // ── app.js: T13 · deliverable badge + filter ─────────────────────────────────

@@ -51,7 +51,7 @@ const directusBuilder: Builder = {
 const stubBuilder = (id: string, reason: string): Builder => ({
   id,
   async finalize(): Promise<{ ok: boolean; log: string }> {
-    return { ok: true, log: `${id} builder stub — ${reason}` };
+    return { ok: false, log: `${id} builder stub — ${reason}` };
   },
 });
 
@@ -92,9 +92,31 @@ export function resolveBuilder(id: BuilderId | string | undefined): Builder {
         },
       };
     case 'app':
-      return stubBuilder('app', 'app builder registered by Worker C');
+      return {
+        id: 'app',
+        async finalize(pool, projectId, ctx) {
+          try {
+            const { appBuilder } = await import('./app.ts');
+            return appBuilder.finalize(pool, projectId, ctx);
+          } catch (e: any) {
+            return { ok: false, log: `app builder load failed: ${String(e?.message ?? e).slice(0, 200)}` };
+          }
+        },
+      };
     case 'campaign':
       return stubBuilder('campaign', 'campaign builder not yet implemented');
+    case 'astro':
+      return {
+        id: 'astro',
+        async finalize(pool, projectId, ctx) {
+          try {
+            const { astroBuilder } = await import('./astro.ts');
+            return astroBuilder.finalize(pool, projectId, ctx);
+          } catch (e: any) {
+            return { ok: false, log: `astro builder load failed: ${String(e?.message ?? e).slice(0, 200)}` };
+          }
+        },
+      };
     default:
       return directusBuilder;
   }

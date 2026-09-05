@@ -10,6 +10,7 @@ import { ensureAnalyticsTables, recordHit, visitsForProject } from './analytics.
 import { runLoop } from './runner.ts';
 import { startRebuild } from './rebuild.ts';
 import { computeKpi } from './kpi.ts';
+import { buildMindmap } from './mindmap.ts';
 import { SITES } from './verify.ts';
 import { publicWriteTables } from './spec.ts';
 import { LIFECYCLE_TABLE } from './schema.ts';
@@ -86,6 +87,29 @@ const STATIC: Record<string, string> = {
 };
 const MIME: Record<string, string> = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'text/javascript',
   png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', ico: 'image/x-icon', json: 'application/json', webp: 'image/webp', webmanifest: 'application/manifest+json', xml: 'application/xml', txt: 'text/plain; charset=utf-8', apk: 'application/vnd.android.package-archive' };
+
+
+async function loadMindmap(proj: { id: string; brief?: string; status: string; params?: any; created_at?: any }) {
+  const tasks = (await pool.query(
+    'select seq, title, department, status, verify, artifact, attempts from tasks where project_id=$1 order by seq',
+    [proj.id])).rows;
+  const events = (await pool.query(
+    "select type, left(coalesce(detail,''), 240) as detail, at, task_id from run_events where project_id=$1 order by id desc limit 24",
+    [proj.id])).rows;
+  return buildMindmap({ project: { id: proj.id, brief: proj.brief, status: proj.status, params: proj.params, created_at: proj.created_at }, tasks, events });
+}
+
+async function mindmapJSON(user: User | null, projectId?: string) {
+  const p = projectId
+    ? await pool.query('select id, brief, status, params, created_at, owner_id from projects where id=$1', [projectId])
+    : (user
+      ? await pool.query('select id, brief, status, params, created_at, owner_id from projects where owner_id=$1 order by created_at desc limit 1', [user.id])
+      : await pool.query('select id, brief, status, params, created_at, owner_id from projects where owner_id is null order by created_at desc limit 1'));
+  if (!p.rows.length) return { project: null, mindmap: null };
+  const proj = p.rows[0];
+  if (!canSee(user, proj.owner_id)) return { project: null, mindmap: null };
+  return { project: { id: proj.id, status: proj.status }, mindmap: await loadMindmap(proj) };
+}
 
 async function boardJSON(user: User | null, projectId?: string) {
   const p = projectId
@@ -169,7 +193,8 @@ async function boardJSON(user: User | null, projectId?: string) {
     liveUrl,                                   // T33: the actual live deliverable URL — one-click open
   };
 
-  return { project: projectOut, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null, visits };
+  const mindmap = await loadMindmap({ id: proj.id, brief: proj.brief, status: proj.status, params: proj.params, created_at: proj.created_at });
+  return { project: projectOut, tasks, edges, site: hasSite ? '/sites/' + proj.id + '/' : null, visits, mindmap };
 }
 
 async function projectsJSON(user: User | null) {
@@ -571,6 +596,7 @@ ${sent.n} sent${sent.latest ? ` · last ${new Date(sent.latest).toISOString().sl
       return send(res, 200, 'application/json', JSON.stringify(await apkStatus(pool, aid, SITES)));
     }
     if (path === '/api/board') return send(res, 200, 'application/json', JSON.stringify(await boardJSON(user, url.searchParams.get('id') || undefined)));
+    if (path === '/api/mindmap') return send(res, 200, 'application/json', JSON.stringify(await mindmapJSON(user, url.searchParams.get('id') || undefined)));
     if (path === '/api/projects') return send(res, 200, 'application/json', JSON.stringify(await projectsJSON(user)));
     if (path === '/api/kpi') {
       const kid = url.searchParams.get('id') || undefined;

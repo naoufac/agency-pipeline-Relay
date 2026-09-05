@@ -38,15 +38,35 @@ function isTransient(msg: any): boolean {
 }
 const evCount = async (pool: pg.Pool, col: 'task_id' | 'project_id', id: string, type: string): Promise<number> =>
   (await pool.query(`select count(*)::int n from run_events where ${col}=$1 and type=$2`, [id, type])).rows[0]?.n ?? 0;
-// resurrect: reset every 'failed' task to 'ready' for a fresh full round (attempts reset). The unblock trigger
-// + reconcile re-open their downstreams as they complete. Returns true if anything was revived.
+// resurrect: a FAILED task opens a REVISION of that work, not a full-round replay.
+// Rejected design → new design revision (layout cleared). Customer data / branding / research stay done.
+// Data failure → migrate/preserve, do not drop schema, do not touch design.
 async function resurrect(pool: pg.Pool, projectId: string): Promise<boolean> {
-  const r = await pool.query(
-    "update tasks set status='ready', attempts=0, claimed_by=null, lease_expires_at=null, updated_at=now() where project_id=$1 and status='failed' returning id",
-    [projectId]);
-  if (!r.rowCount) return false;
-  await pool.query("update projects set status='running' where id=$1", [projectId]);
-  await ev(pool, projectId, null, 'project_retry', `resurrected ${r.rowCount} failed task(s) for a fresh round`);
+  const all = (await pool.query(
+    'select seq, title, department, status from tasks where project_id=$1 order by seq', [projectId])).rows;
+  const failed = all.filter((t: any) => t.status === 'failed');
+  if (!failed.length) return false;
+  const { revisionFor } = await import('./revise.ts');
+  const plan = revisionFor(failed, all);
+  if (!plan.reopen.length) return false;
+  const start = plan.reopen[0];
+  await pool.query(
+    `update tasks set
+        status = case when department = $2 then 'ready' else 'blocked' end,
+        attempts = 0, claimed_by = null, lease_expires_at = null, updated_at = now()
+     where project_id = $1 and department = any($3::text[])`,
+    [projectId, start, plan.reopen]);
+  let paramsExpr = 'params';
+  if (plan.clearLayout) paramsExpr += " - 'layout'";
+  if (plan.clearSite) paramsExpr += " - 'site'";
+  const rec = { at: new Date().toISOString(), kind: plan.kind, reopen: plan.reopen, preserve: plan.preserve, reason: plan.reason };
+  await pool.query(
+    `update projects set status='running',
+       params = jsonb_set(${paramsExpr}, '{revisions}', coalesce((${paramsExpr})->'revisions','[]'::jsonb) || $2::jsonb, true)
+     where id=$1`,
+    [projectId, JSON.stringify([rec])]);
+  await ev(pool, projectId, null, 'design_revision', plan.reason);
+  await ev(pool, projectId, null, 'project_retry', `revision ${plan.kind}: reopened ${plan.reopen.join(',')} · preserved ${plan.preserve.join(',')}`);
   return true;
 }
 
@@ -138,7 +158,7 @@ async function buildContext(pool: pg.Pool, task: any): Promise<Ctx> {
       await ev(pool, task.project_id, task.id, 'ctx_schema_failed', String(e?.message ?? e).slice(0, 200)).catch(() => {});
     }
   }
-  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug, locale: params.locale, localBusiness: params.localBusiness, bizType: params.bizType } as any;
+  return { brief: proj.rows[0].brief, upstream: ups.rows, feedback, pages, self, theme, layout, shape: params.shape, archetype: params.archetype, tables, forms, primaryTable, actionTable, brand, site, siteSlug: params.slug, locale: params.locale, localBusiness: params.localBusiness, bizType: params.bizType, builder: params.builder, deliverable: params.deliverable } as any;
 }
 
 async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<void> {
@@ -148,6 +168,15 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
     const dir = new URL(task.project_id + '/', SITES);
 
     if (task.department === 'render') {
+      if ((ctx as any).builder === 'astro' || (ctx as any).deliverable === 'astro_site') {
+        const { compileAstroProject } = await import('./cms/astro.ts');
+        mkdirSync(fileURLToPath(dir), { recursive: true });
+        const astroRes = await compileAstroProject(pool, task.project_id, fileURLToPath(dir));
+        if (!astroRes.ok) throw new Error(astroRes.log);
+        content = JSON.stringify({ builder: 'astro', log: astroRes.log, page: task.artifact });
+        await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
+        await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+      } else {
       // DETERMINISTIC PROJECTION (no LLM call): a render reads its page from the composed site model (the ONE
       // CMS in params.site) and renders it with the LOCKED brand. Every page is a view of the SAME source, so
       // brand/nav/theme/palette cannot drift — the page is, by construction, consistent with the whole site.
@@ -186,6 +215,7 @@ async function processTask(pool: pg.Pool, task: any, runnerId: string): Promise<
       content = JSON.stringify(page);
       await pool.query('update task_outputs set is_current=false where task_id=$1 and is_current', [task.id]);
       await pool.query('insert into task_outputs(task_id, attempt, content) values ($1,$2,$3)', [task.id, task.attempts, content]);
+    }
     } else if (task.department === 'integrations') {
       // DETERMINISTIC department — no LLM: the verify (calendar_feed) does ALL the work
       // (mints the key, builds the real feed). The content is just an honest marker.
@@ -426,7 +456,7 @@ export async function runLoop(
   }
 
   const c = await counts(pool, projectId);
-  const done = (c.blocked + c.ready + c.running + c.verifying) === 0 && c.failed === 0;
+  let done = (c.blocked + c.ready + c.running + c.verifying) === 0 && c.failed === 0;
   // genuinely stuck after exhausting recovery → alert the OPERATOR (Telegram, once per project) —
   // a stuck build must interrupt a human, never wait to be noticed on a dashboard (M5).
   if (!done && c.failed > 0) {
@@ -434,28 +464,41 @@ export async function runLoop(
     await ev(pool, projectId, null, 'project_stuck', detail);
     alertStuck(pool, projectId, detail).catch(() => {});
   }
-  await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
-  // T16: stamp the wall-clock only on a clean completion (not on blocked/stuck — partial metrics
-  // are misleading). Idempotent (see persistBuildMetrics) so re-runs don't overwrite the first.
-  if (done) await persistBuildMetrics(pool, projectId, Date.now() - buildStart);
-  // auto-review only in the SERVER context (opts.review). CLI/demo/scratch runs don't launch a browser
-  // (it would keep a short-lived process alive and isn't wanted for offline tests).
-  if (done && opts.review) {
-    // CMS-NATIVE: re-serve every finished site THROUGH its selected CMS (params.cms → adapter), gated
-    // by served_from_cms. Guarded + additive: if the CMS is down it logs cms_build_failed and the
-    // static build stands (never breaks a build). Runs BEFORE QA so QA judges the CMS-served pages.
-    (async () => {
-      try { await cmsFinalize(pool, projectId); } catch (e: any) { console.error('cmsFinalize', projectId, e?.message ?? e); }
-      reviewSite(pool, projectId).catch(() => {});          // visual QA + board thumbnail
-      dogfoodSite(pool, projectId).catch(() => {});         // interaction QA: a real browser uses the site
-      // ANDROID ONLY WHEN IT'S AN APP. An Android package makes sense for a full-stack APP deliverable,
-      // never on a marketing website — a TWA button glued onto every site was noise the owner rejected.
-      // Gate on params.deliverable === 'fullstack_app' (the orchestrator's app type).
-      const dlv = (await pool.query('select params->>\'deliverable\' as d from projects where id=$1', [projectId])).rows[0]?.d;
-      if (dlv === 'fullstack_app' && process.env.RELAY_APK_AUTO !== '0') {
-        try { const { packageProjectAsync } = await import('./apk.ts'); packageProjectAsync(pool, projectId); } catch (e: any) { console.error('auto-apk', projectId, e?.message ?? e); }
+  // Delivery is required for done. A stub/failed CMS finalize cannot leave the project marked shipped.
+  // Review/dogfood are not fire-and-forget after the status write — they run before done is committed.
+  // Non-site deliverables have no HTML/CMS to finalize. Forcing cmsFinalize would brick automation/campaign/brand.
+  const SITEISH = ['wp_site','wp_woocommerce','directus_site','portfolio','event','landing_page','astro_site'];
+  const FINALIZE = [...SITEISH, 'fullstack_app'];
+  const dlvRow = await pool.query("select params->>'deliverable' as d from projects where id=$1", [projectId]);
+  const dlv = String(dlvRow.rows[0]?.d || 'directus_site');
+  if (done && opts.review && FINALIZE.includes(dlv)) {
+    try {
+      const fin = await cmsFinalize(pool, projectId);
+      if (!fin.ok) {
+        done = false;
+        await ev(pool, projectId, null, 'project_stuck', `finalize failed — ${fin.log}`.slice(0, 400));
       }
-    })();
+    } catch (e: any) {
+      done = false;
+      await ev(pool, projectId, null, 'cms_build_failed', String(e?.message ?? e).slice(0, 280)).catch(() => {});
+    }
+    // Site review is for websites. An app is data/API/UI — dogfood of HTML pages would costume it.
+    if (done && SITEISH.includes(dlv)) {
+      try {
+        await reviewSite(pool, projectId);
+        await dogfoodSite(pool, projectId);
+      } catch (e: any) {
+        done = false;
+        await ev(pool, projectId, null, 'project_stuck', `review failed — ${String(e?.message ?? e)}`.slice(0, 400));
+      }
+    }
+  }
+  await pool.query('update projects set status=$2 where id=$1', [projectId, done ? 'done' : 'blocked']);
+  if (done) await persistBuildMetrics(pool, projectId, Date.now() - buildStart);
+  if (done && opts.review) {
+    if (dlv === 'fullstack_app' && process.env.RELAY_APK_AUTO !== '0') {
+      try { const { packageProjectAsync } = await import('./apk.ts'); packageProjectAsync(pool, projectId); } catch (e: any) { console.error('auto-apk', projectId, e?.message ?? e); }
+    }
   }
   return { stopped: done ? 'complete' : 'blocked', steps };
 }

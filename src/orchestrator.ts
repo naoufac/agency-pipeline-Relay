@@ -12,6 +12,7 @@
 
 import type { Archetype } from './archetype.ts';
 import { archetypeFor, needsData } from './archetype.ts';
+import { parseContract } from './project-contract.ts';
 
 // ────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -27,7 +28,9 @@ export type DeliverableId =
   | 'campaign'
   // T23: portfolio (creative showcase) and event (conference/wedding/festival)
   | 'portfolio'
-  | 'event';
+  | 'event'
+  | 'astro_site'
+  | 'automation';
 
 export type CapId =
   // FORCED SPINE — every deliverable gets these
@@ -193,7 +196,7 @@ export const CAPABILITIES: Record<CapId, Capability> = {
 // T23: portfolio and event are added before directus_site — they score 0 by default so they only
 // win when their signals are unambiguous. event before portfolio since event signals are more explicit.
 const PRIORITY: DeliverableId[] = [
-  'wp_woocommerce', 'fullstack_app', 'wp_site', 'campaign', 'brand_identity', 'landing_page', 'event', 'portfolio', 'directus_site',
+  'astro_site', 'automation', 'wp_woocommerce', 'fullstack_app', 'wp_site', 'campaign', 'brand_identity', 'landing_page', 'event', 'portfolio', 'directus_site',
 ];
 
 export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
@@ -431,6 +434,31 @@ export const DELIVERABLES: Record<DeliverableId, Deliverable> = {
     branchCaps: ['content_copy', 'integrations'],
     upgradesTo: ['directus_site', 'wp_site'],
   },
+
+  astro_site: {
+    id: 'astro_site',
+    label: 'Astro website',
+    detect(brief: string): number {
+      const b = ' ' + brief.toLowerCase() + ' ';
+      const n = (b.match(/\b(astro(\.js)?|astro-cms)\b/g) || []).length;
+      return n ? Math.min(12, n * 6) : 0;
+    },
+    stack: 'astro',
+    builder: 'astro',
+    archetypeCompat: 'site',
+    branchCaps: ['content_copy'],
+    upgradesTo: [],
+  },
+  automation: {
+    id: 'automation',
+    label: 'Automation / ops job (no website)',
+    detect(_brief: string): number { return 0; },
+    stack: 'ops',
+    builder: 'ops',
+    archetypeCompat: 'site',
+    branchCaps: [],
+    upgradesTo: [],
+  },
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -548,6 +576,24 @@ export function detectDeliverableWithMeta(brief: string): {
     confidence = Math.round(Math.min(1, Math.max(0, margin / bestScore)) * 1000) / 1000;
   }
 
+  const contract = parseContract(brief);
+  const websiteish = ['wp_site','wp_woocommerce','fullstack_app','directus_site','portfolio','event','landing_page','astro_site'];
+  if (contract.excludesWebsite && websiteish.includes(best)) {
+    second = best;
+    secondScore = bestScore;
+    best = 'automation';
+    bestScore = Math.max(bestScore, 9);
+    confidence = 1;
+  } else if (contract.requestedStack === 'astro' && best !== 'astro_site') {
+    second = best;
+    best = 'astro_site';
+    bestScore = Math.max(bestScore, 9);
+    confidence = 1;
+  } else if (contract.forbidCustomBooking && best === 'fullstack_app') {
+    second = best;
+    best = 'directus_site';
+    confidence = 1;
+  }
   return { deliverable: best, score: bestScore, confidence, secondChoice: second };
 }
 
@@ -595,6 +641,13 @@ export function detectNeeds(brief: string, archetype: Archetype, deliverable: De
     needs.add('content_copy');
     return [...needs];
   }
+  if (deliverable === 'astro_site') {
+    needs.add('content_copy');
+    return [...needs];
+  }
+  if (deliverable === 'automation') {
+    return [];
+  }
 
   // T2: brand_identity — brand_guidelines ONLY; no site/data/render steps.
   if (deliverable === 'brand_identity') {
@@ -632,7 +685,9 @@ export function detectNeeds(brief: string, archetype: Archetype, deliverable: De
   // directus_site can carry a booking branch on demand (e.g. a restaurant); a wp_site/blog does not,
   // unless the brief itself asks for bookings.
   const dataCapable = deliverableUsesData || deliverable === 'directus_site';
-  if (deliverable !== 'campaign' && (deliverableUsesData || (wantsBooking && dataCapable))) {
+  const contract = parseContract(brief);
+  const skipBookingBuild = contract.existingBooking || contract.forbidCustomBooking;
+  if (!skipBookingBuild && deliverable !== 'campaign' && deliverable !== 'automation' && (deliverableUsesData || (wantsBooking && dataCapable))) {
     needs.add('database');
     needs.add('policies');
     needs.add('integrations');
@@ -681,6 +736,15 @@ export function composeChain(
     seq++;
     tasks.push({ seq, title, department, verify, depends_on, artifact });
     return seq;
+  }
+
+  // Automation is an ops job, not a website. No brand spine, no hero, no CMS, no site QA.
+  if (deliverable === 'automation') {
+    const understandSeq = emit('Job contract (trigger, source, destination)', 'strategy', 'min:280', []);
+    const inspectSeq = emit('Inspect existing systems and data', 'research', 'min:280', [understandSeq]);
+    const jobSeq = emit('Ops job (trigger, transform, idempotent update, receipt)', 'integration', 'ops_job', [inspectSeq], 'job.json');
+    emit('QA — automation contract', 'qa', 'min:20', [jobSeq]);
+    return renumber(tasks);
   }
 
   // ── 1. FORCED SPINE: understand → research → branding → design_guidelines ──
@@ -758,6 +822,20 @@ export function composeChain(
     const composeSeq = emit('Compose the landing page (one CMS → single page)', 'compose', 'site_model', [...thinkingSeqs]);
     const rSeq = emit('Render the Home page', 'render', 'site_renders', [composeSeq], 'index.html');
     emit('QA — acceptance (1 nav · 1 logo · 1 palette, every page)', 'qa', 'site_consistent', [rSeq]);
+    return renumber(tasks);
+  }
+
+  if (deliverable === 'astro_site') {
+    if (needs.has('content_copy')) {
+      const copySeq = emit('Site content (sourced, not invented)', 'content', 'json', [researchSeq]);
+      thinkingSeqs.push(copySeq);
+    }
+    const composeSeq = emit('Compose the Astro site model', 'compose', 'site_model', [...thinkingSeqs]);
+    const renderSeqs: number[] = [];
+    for (const pg of pages) {
+      renderSeqs.push(emit(`Render the ${pg.title} page`, 'render', 'site_renders', [composeSeq], `${pg.slug}.html`));
+    }
+    emit('QA — acceptance', 'qa', 'site_consistent', renderSeqs);
     return renumber(tasks);
   }
 

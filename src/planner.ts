@@ -8,6 +8,7 @@ import { shapeFor, type Shape } from './landing.ts';
 import { chooseLayout } from './layout.ts';
 import { evaluateScope } from './scope.ts';
 import { orchestrate, applyDeliverable, type OrchestrationResult } from './orchestrator.ts';
+import { parseContract } from './project-contract.ts';
 
 // ─── COMPLEXITY-DYNAMIC PLANNING (ARC E) ─────────────────────────────────────
 // Pure, deterministic complexity scoring from brief text.  No LLM.  Signals:
@@ -306,6 +307,7 @@ export async function persistPlan(
     // T22: confidence in [0,1] and secondChoice deliverable — persisted for board display and audit.
     confidence:   orchestration.confidence,     // 0-1 score margin between winner and runner-up
     secondChoice: orchestration.secondChoice,   // runner-up deliverable id
+    contract: parseContract(brief),
   } : {};
   const params = { planner: usedLLM ? 'llm' : 'template', pages, theme, archetype, shape, layout, cms, scope, locale: detectLocale(brief), localBusiness: isLocalBusiness(brief), complexity: { score: complexity.score, pagesMax: complexity.pagesMax }, ...orchestrationParams };
 

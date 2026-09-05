@@ -7,6 +7,9 @@ process.env.OPENROUTER_API_KEY = 'test-or-key';
 process.env.MINIMAX_API_KEY = 'test-mm-key';
 process.env.MINIMAX_BASE_URL = 'http://minimax.test/v1';
 process.env.OPENROUTER_BASE_URL = 'http://openrouter.test/v1';
+delete process.env.OPENCODE_API_KEY;
+process.env.OPENCODE_ZEN_ENV = '/tmp/relay-llm-test-no-zen.env';
+process.env.OPENCODE_ZEN_URL = 'http://zen.test/v1/responses';
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, extra = '') => {
@@ -181,6 +184,48 @@ ok('T16 latency: persistBuildMetrics called on clean project completion (done pa
   /if \(done\)\s+await persistBuildMetrics\(pool, projectId/.test(runnerSrc.replace(/\s+/g, ' ')));
 ok('T16 latency: persistBuildMetrics is idempotent (conditional on build_seconds not yet set)',
   /build_seconds.*is null/.test(runnerSrc));
+
+
+// ---- Zen primary (owner 2026-09-05): Muse Spark answers first; MiniMax stays as failover ----
+ok('zen: callZen + Responses URL are in agents.ts',
+  agentsSrc.includes('async function callZen') && agentsSrc.includes('opencode.ai/zen/v1/responses') && agentsSrc.includes('muse-spark-1.3-contributor-free') && agentsSrc.includes('OPENCODE ZEN PRIMARY'));
+{
+  const realFetchZ = globalThis.fetch;
+  try {
+    process.env.OPENCODE_API_KEY = 'test-zen-key';
+    let zcalls: { url: string; body: any }[] = [];
+    (globalThis as any).fetch = async (url: any, init: any) => {
+      zcalls.push({ url: String(url), body: JSON.parse(String(init?.body || '{}')) });
+      if (String(url).includes('zen.test')) {
+        return new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'dal zen' }] }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'should-not-hit-or' } }] }), { status: 200 });
+    };
+    const rz = await callLLM('sys', 'user', 100);
+    ok('PRIMARY is OpenCode Zen Muse Spark — OpenRouter untouched',
+      rz.meta.ok === true && rz.meta.provider === 'opencode-zen' && /muse-spark-1\.3-contributor-free/.test(String(rz.meta.model)) && rz.text === 'dal zen' && zcalls.length === 1 && zcalls[0].url.includes('zen.test'), JSON.stringify({ meta: rz.meta, n: zcalls.length, url: zcalls[0]?.url }));
+    ok('zen request uses Responses body (instructions + input, not chat messages)',
+      zcalls[0]?.body?.instructions === 'sys' && Array.isArray(zcalls[0]?.body?.input), JSON.stringify(zcalls[0]?.body));
+
+    zcalls = [];
+    (globalThis as any).fetch = async (url: any, init: any) => {
+      zcalls.push({ url: String(url), body: JSON.parse(String(init?.body || '{}')) });
+      if (String(url).includes('zen.test')) return new Response('upstream down', { status: 502 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'dal or after zen' } }] }), { status: 200 });
+    };
+    const rz2 = await callLLM('sys', 'user', 100);
+    ok('zen 502 → OpenRouter MiniMax failover (MiniMax not revoked)',
+      rz2.meta.ok === true && rz2.meta.provider === 'openrouter' && rz2.text === 'dal or after zen' && zcalls.length >= 2 && zcalls[0].url.includes('zen.test') && zcalls[1].url.includes('openrouter'), JSON.stringify({ meta: rz2.meta, n: zcalls.length }));
+
+    zcalls = [];
+    const rweb = await callLLM('sys', 'user', 100, { web: true });
+    ok('web-grounded calls skip Zen and ride OpenRouter Exa',
+      rweb.meta.provider === 'openrouter' && zcalls.length === 1 && zcalls[0].url.includes('openrouter') && JSON.stringify(zcalls[0].body.plugins || '').includes('web'), JSON.stringify({ meta: rweb.meta, url: zcalls[0]?.url }));
+  } finally {
+    (globalThis as any).fetch = realFetchZ;
+    delete process.env.OPENCODE_API_KEY;
+  }
+}
 
 console.log(`\nllm:check — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

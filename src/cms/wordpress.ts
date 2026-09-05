@@ -754,7 +754,7 @@ export const wordpressBuilder: Builder = {
     // FEATURE FLAG: with RELAY_WP != '1', return immediately so the static Directus build stands.
     // This is how the default chain (24 suites) never touches WP infrastructure.
     if (process.env.RELAY_WP !== '1') {
-      return { ok: true, log: 'wp disabled (RELAY_WP!=1) — static build stands' };
+      return { ok: false, log: 'wp disabled (RELAY_WP!=1) — WordPress was selected and did not ship' };
     }
 
     // Ensure wp-cli is present; bail gracefully if the container is unreachable.

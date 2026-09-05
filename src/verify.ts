@@ -278,7 +278,7 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     // When RELAY_WP is unset, the builder skips and writes nothing; the task still passes (the static
     // Directus build stands and the wp path is inactive by design — feature-flagged).
     if (process.env.RELAY_WP !== '1') {
-      return { ok: true, log: 'wp_provisioned: RELAY_WP unset — WP path inactive, static build stands' };
+      return { ok: false, log: 'wp_provisioned: RELAY_WP unset — WordPress was selected and did not ship' };
     }
     const row = await pool.query("select params->'wp_provision' as wp from projects where id=$1", [task.project_id]);
     const wp = row.rows[0]?.wp;
@@ -288,15 +288,32 @@ export async function verify(pool: pg.Pool, task: any, content: string): Promise
     return { ok: true, log: `wp_provisioned: ${pageCount} page(s) · menu=${wp.menuId} · theme=${wp.theme} · ${wp.timestamp}` };
   }
 
+  if (rule === 'ops_job') {
+    const { proveOpsJob } = await import('./ops-job.ts');
+    const proof = proveOpsJob(content);
+    if (!proof.ok) return { ok: false, log: proof.log };
+    await pool.query("update projects set params = jsonb_set(params, '{ops_job}', $2::jsonb, true) where id=$1",
+      [task.project_id, JSON.stringify({ job: proof.job, preview: proof.preview, log: proof.log })]);
+    return { ok: true, log: proof.log };
+  }
+
   if (rule === 'app_api_ok') {
     // The full-stack app's REST API is served at RUNTIME by server.ts under /api/app/:projectId/:table,
     // reading the project's app_<hex> schema (already provisioned + proven by the database dept's app_db
     // gate). There is nothing to build at task time — the DAG step exists to gate on 'database' and to
     // show the capability on the board. It passes as a marker; when RELAY_APP_API is unset the routes are
     // inert but the wiring is still correct (feature-flagged), exactly like the WP path.
-    return { ok: true, log: process.env.RELAY_APP_API === '1'
-      ? 'app_api: routes live at /api/app/:projectId/:table'
-      : 'app_api: wired (RELAY_APP_API unset — inert until enabled)' };
+    if (process.env.RELAY_APP_API !== '1') {
+      return { ok: false, log: 'app_api: RELAY_APP_API unset — fullstack_app cannot ship an API' };
+    }
+    try {
+      const desc = await appdb.describeSchema(pool, task.project_id);
+      const n = (desc.tables || []).length;
+      if (!n) return { ok: false, log: 'app_api: no tables in project schema' };
+      return { ok: true, log: `app_api: ${n} table(s) live at /api/app/:projectId/:table` };
+    } catch (e: any) {
+      return { ok: false, log: 'app_api: ' + String(e?.message ?? e).slice(0, 200) };
+    }
   }
 
   return { ok: false, log: 'unknown verify rule: ' + rule };

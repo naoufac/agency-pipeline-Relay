@@ -1,16 +1,12 @@
 // A working agent is JUST AN API CALL: context in -> text/artifact out.
-// Live provider (preferred): OpenRouter (OpenAI-compatible) pinned to a MiniMax REASONING model, with
-// OpenRouter's server-side WEB SEARCH plugin turned on for the research/strategy/planning calls — so
-// those agents are grounded in REAL, cited facts within a SINGLE call (the one-call-per-agent rule is
-// preserved; OpenRouter runs the search and folds results into the same completion). MiniMax's
-// chain-of-thought returns in a SEPARATE `reasoning` field, so `content` stays clean — no <think> leak.
-// Downstream JSON agents (content/copy/build/database) inherit the grounded facts via the DAG, so they
-// stay strict-JSON and we pay for search only on the research phase.
-// Fallbacks: MiniMax-direct (no web), then deterministic STUBS (no key) so the engine runs offline.
-//   OPENROUTER_API_KEY   – preferred. OPENROUTER_MODEL (default minimax/minimax-m2.7, MiniMax-only).
-//   OPENROUTER_BASE_URL  – default https://openrouter.ai/api/v1 ;  WEB_MAX_RESULTS (default 5).
-//   MINIMAX_API_KEY / MINIMAX_BASE_URL / MINIMAX_MODEL – legacy direct fallback.
+// PRIMARY (owner 2026-09-05): OpenCode Zen Muse Spark 1.3 Free via the Responses API
+//   POST https://opencode.ai/zen/v1/responses  (chat/completions 500s on this model).
+// Fallbacks, MiniMax NOT revoked: OpenRouter MiniMax (web plugin for research) -> ChatGPT Codex -> MiniMax-direct -> stubs.
+//   OPENCODE_API_KEY / OPENCODE_ZEN_MODEL (default muse-spark-1.3-contributor-free)
+//   OPENROUTER_API_KEY – MiniMax ladder + Exa web. OPENROUTER_MODEL default minimax/minimax-m2.7.
+//   MINIMAX_API_KEY / MINIMAX_BASE_URL / MINIMAX_MODEL – direct failover.
 
+import { readFileSync, existsSync } from 'node:fs';
 const OR_KEY = process.env.OPENROUTER_API_KEY;
 const OR_BASE = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
 // PRIMARY MODEL LADDER (owner directive 2026-07-06): 2.7 favorite, 2.5 secondary — both via OpenRouter.
@@ -42,7 +38,22 @@ const CHEAP_DEPTS = new Set(['policies', 'design', 'qa', 'auth', 'stack', 'integ
 const KEY = process.env.MINIMAX_API_KEY;
 const BASE = process.env.MINIMAX_BASE_URL || 'https://api.minimax.io/v1';
 const MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
-const LIVE = !!(OR_KEY || KEY);   // any live provider configured?
+function zenKey(): string {
+  const fromEnv = process.env.OPENCODE_API_KEY;
+  if (fromEnv) return fromEnv;
+  try {
+    const p = process.env.OPENCODE_ZEN_ENV || '/root/.opencode-zen.env';
+    if (!existsSync(p)) return '';
+    for (const line of readFileSync(p, 'utf8').split('\n')) {
+      const s = line.trim();
+      if (s.startsWith('OPENCODE_API_KEY=')) return s.slice('OPENCODE_API_KEY='.length).replace(/^["']|["']$/g, '');
+    }
+  } catch { /* ignore */ }
+  return '';
+}
+const ZEN_URL = process.env.OPENCODE_ZEN_URL || 'https://opencode.ai/zen/v1/responses';
+const ZEN_MODEL = process.env.OPENCODE_ZEN_MODEL || 'muse-spark-1.3-contributor-free';
+const LIVE = !!(zenKey() || OR_KEY || KEY || (existsSync(process.env.CODEX_AUTH_JSON || '/root/.codex/auth.json')));
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 90000);  // hard per-request cap — a hung/slow call can't stall a build forever
 // departments whose output is improved by REAL-WORLD facts -> enable web search (grounding). Everything
 // else inherits those facts through upstream context, so search cost is ~2 calls/project.
@@ -107,8 +118,8 @@ const ROLE: Record<string, string> = {
                '- STORE ONLY: {"type":"products","title":"...","intro":"one line","table":"products"} (the SHOP GRID with Add-to-cart — put it on the shop/index page) · {"type":"cart","title":"Your cart"} (ONLY on the cart page) · {"type":"checkout","title":"Checkout","intro":"one line","cta":"Place order"} (ONLY on the checkout page)\n' +
                '- VIDEO (ARC D): {"type":"video","title":"...","youtubeId":"<id>","poster":"2-4 word photo search","caption":"..."}  ONLY when the brief EXPLICITLY mentions a video or YouTube link. Extract the YouTube id from a URL in the brief — e.g. from https://youtu.be/dQw4w9WgXcQ the id is dQw4w9WgXcQ. NEVER invent or guess a YouTube id. The renderer builds a privacy-safe facade (no tracking until play is clicked). For a direct file: {"type":"video","src":"https://…/video.mp4"}.\n' +
                'JSON ONLY — exactly one object containing every page. Self-check: every { has a matching }, no second block, no prose/fences.',
-  integration: 'You are the Integration department. List the integrations to wire and the deploy steps.',
-  qa:          'You are QA. The built site is verified by an automated render check, not by you. Briefly note any obvious gaps you would flag.',
+  integration: 'You are the Ops department. Output ONLY one JSON object for a durable job — no website, no hero, no CMS, no brand. Shape: {"trigger":{"kind":"cron|webhook|manual","spec":"<cron or url>"},"source":{"kind":"csv|url|table","spec":"<path or query>"},"transform":{"kind":"map_columns","mapping":{"<from>":"<to>"}},"destination":{"kind":"table|file","spec":"<name>"},"receipt":{"kind":"email|log|file","spec":"<who or path>"},"idempotency_key":"<column>","sample":[{...},{...}]}. sample MUST have 2-6 realistic rows from THIS brief (not placeholders). Duplicate the idempotency key once so the dry-run can skip it. JSON only.',
+  qa:          'You are QA. For a website, note render gaps. For an ops job, confirm the job JSON has trigger, transform, receipt and a sample — no website language. Plain text.',
 };
 
 function buildUser(ctx: Ctx, department?: string): string {
@@ -171,7 +182,7 @@ function buildUser(ctx: Ctx, department?: string): string {
 
 // Per-call instrumentation for the openrouter-vs-minimax A/B (Task 10): every live call reports which
 // provider+model served it, how long it took, whether web search was on, and whether it succeeded.
-export type LLMResult = { text: string; meta: { provider: 'openrouter' | 'minimax-direct'; model: string; latencyMs: number; web: boolean; ok: boolean; error?: string } };
+export type LLMResult = { text: string; meta: { provider: 'opencode-zen' | 'openrouter' | 'minimax-direct' | 'chatgpt-codex'; model: string; latencyMs: number; web: boolean; ok: boolean; error?: string } };
 
 // the single live call. Prefer OpenRouter (MiniMax + optional web search); else MiniMax-direct.
 // Returns the text AND per-call meta. On failure it returns ok:false (no throw) with the captured error —
@@ -282,6 +293,122 @@ async function callOpenRouter(messages: any[], model: string, maxTokens: number,
 // fall through to the ungrounded ladder rather than fail. Transient errors move DOWN the ladder, not over.
 // T15 — optional models override: when a caller provides a non-empty models list it replaces the
 // full OR_LADDER for this call (the cheap-tier routing path). Omitting it = current behavior.
+
+function codexAvailable(): boolean {
+  try {
+    const p = process.env.CODEX_AUTH_JSON || '/root/.codex/auth.json';
+    if (!existsSync(p)) return false;
+    const a = JSON.parse(readFileSync(p, 'utf8'));
+    return !!(a?.tokens?.access_token);
+  } catch { return false; }
+}
+
+function codexHeaders(accessToken: string, accountId?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    'User-Agent': 'codex_cli_rs/0.0.0 (Relay)',
+    originator: 'codex_cli_rs',
+  };
+  try {
+    const parts = accessToken.split('.');
+    if (parts[1]) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      const id = payload?.['https://api.openai.com/auth']?.chatgpt_account_id || accountId;
+      if (id) headers['ChatGPT-Account-ID'] = id;
+    } else if (accountId) headers['ChatGPT-Account-ID'] = accountId;
+  } catch {
+    if (accountId) headers['ChatGPT-Account-ID'] = accountId;
+  }
+  return headers;
+}
+
+function parseCodexSse(raw: string): string {
+  let text = '';
+  for (const block of raw.split('\n\n')) {
+    const line = block.split('\n').find((l) => l.startsWith('data:'));
+    if (!line) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    let ev: any; try { ev = JSON.parse(data); } catch { continue; }
+    const t = ev?.type;
+    if (t === 'response.output_text.delta' && ev.delta) text += String(ev.delta);
+    if (t === 'response.output_text.done' && ev.text) text = String(ev.text);
+    if (t === 'response.completed') {
+      const out = ev.response?.output || [];
+      for (const item of out) {
+        for (const c of item?.content || []) {
+          if (c?.text) text = String(c.text);
+        }
+      }
+    }
+  }
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
+function parseZenResponse(data: any): string {
+  const out = data?.output || [];
+  let text = '';
+  for (const item of out) {
+    if (item?.type === 'message') {
+      for (const c of item?.content || []) {
+        if (c?.type === 'output_text' && c.text) text += String(c.text);
+      }
+    }
+  }
+  if (!text && data?.output_text) text = String(data.output_text);
+  return String(text).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
+async function callZen(messages: any[], maxTokens: number, timeoutMs: number, t0: number): Promise<LLMResult> {
+  const zKey = zenKey();
+  if (!zKey) throw new Error('OpenCode Zen key missing');
+  const system = messages[0]?.role === 'system' ? String(messages[0].content || '') : '';
+  const input = (system ? messages.slice(1) : messages).map((m: any) => ({ role: m.role, content: m.content }));
+  const res = await fetch(ZEN_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${zKey}`, 'Content-Type': 'application/json', 'User-Agent': 'Relay/opencode-zen' },
+    body: JSON.stringify({
+      model: ZEN_MODEL,
+      instructions: system || 'You are a Relay department agent.',
+      input,
+      max_output_tokens: Math.max(256, maxTokens),
+      reasoning: { effort: 'low' },
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`OpenCode Zen ${res.status}: ${raw.slice(0, 200)}`);
+  let data: any;
+  try { data = JSON.parse(raw); } catch { throw new Error('OpenCode Zen: non-JSON ' + raw.slice(0, 200)); }
+  const text = parseZenResponse(data);
+  if (!text) throw new Error('OpenCode Zen: empty response ' + JSON.stringify({ status: data?.status, incomplete: data?.incomplete_details }).slice(0, 200));
+  return { text, meta: { provider: 'opencode-zen', model: ZEN_MODEL, latencyMs: Date.now() - t0, web: false, ok: true } };
+}
+
+async function callCodex(messages: any[], maxTokens: number, timeoutMs: number, t0: number): Promise<LLMResult> {
+  const p = process.env.CODEX_AUTH_JSON || '/root/.codex/auth.json';
+  if (!existsSync(p)) throw new Error('Codex auth.json missing');
+  const auth = JSON.parse(readFileSync(p, 'utf8'));
+  const token = auth?.tokens?.access_token;
+  if (!token) throw new Error('Codex access_token missing');
+  const model = process.env.CODEX_MODEL || 'gpt-6-astra';
+  const system = messages[0]?.role === 'system' ? String(messages[0].content || '') : '';
+  const input = (system ? messages.slice(1) : messages).map((m: any) => ({ role: m.role, content: m.content }));
+  const res = await fetch('https://chatgpt.com/backend-api/codex/responses', {
+    method: 'POST',
+    headers: codexHeaders(token, auth?.tokens?.account_id),
+    body: JSON.stringify({ model, instructions: system || 'You are a Relay department agent.', input, store: false, stream: true }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`Codex ${res.status}: ${raw.slice(0, 200)}`);
+  const text = parseCodexSse(raw);
+  if (!text) throw new Error('Codex: empty stream');
+  return { text, meta: { provider: 'chatgpt-codex', model, latencyMs: Date.now() - t0, web: false, ok: true } };
+}
+
 export async function callLLM(system: string, user: string, maxTokens: number = 16000, opts: { web?: boolean; timeoutMs?: number; models?: string[] } = {}): Promise<LLMResult> {
   const t0 = Date.now();
   const web = !!opts.web;
@@ -292,9 +419,16 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
   // (web search only runs on the primary tier anyway — cheap calls are never web-grounded).
   const webPrimaries = (opts.models && opts.models.length) ? opts.models : OR_PRIMARY_MODELS;
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
+  let zenErr: any = null;
 
-  // 1) OPENROUTER PRIMARY (fast). Web: try each primary model WITH grounding, then fall to the ungrounded
-  //    ladder. Non-web: run the full 2.7 -> 2.5 -> cheap ladder (or the cheap-tier override).
+  // 0) OPENCODE ZEN PRIMARY (owner 2026-09-05) — Muse Spark 1.3 Free. No web plugin; research still
+  //    uses OpenRouter Exa below if this is a web call, or if Zen fails.
+  if (zenKey() && !web) {
+    try { return await callZen(messages, maxTokens, timeoutMs, t0); }
+    catch (eZen: any) { zenErr = eZen; }
+  }
+
+  // 1) OPENROUTER (MiniMax + optional web). Web: try each primary WITH grounding, then ungrounded ladder.
   if (OR_KEY) {
     try {
       if (web) {
@@ -303,27 +437,33 @@ export async function callLLM(system: string, user: string, maxTokens: number = 
           try { return await callOpenRouter(messages, m, maxTokens, timeoutMs, true, t0); }
           catch (e: any) { lastWeb = e; }
         }
-        // grounding failed on all primaries → ungrounded ladder (better a real answer than a hard fail)
         try { return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0, ladder); }
         catch (e: any) { throw lastWeb ?? e; }
       }
       return await callOpenRouterLadder(messages, maxTokens, timeoutMs, t0, ladder);
     } catch (eOR: any) {
-      // 2) DEEP FAILOVER: OpenRouter fully unavailable → the slow direct MiniMax API (their plan).
+      try { return await callCodex(messages, maxTokens, timeoutMs, t0); }
+      catch (eCx: any) {
       if (KEY) {
         try { return await callMiniMaxDirect(messages, maxTokens, timeoutMs, false, t0); }
         catch (e2: any) {
-          return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `all providers failed [${String(eOR?.message).slice(0, 120)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
+          const zenBit = zenErr ? ` zen ${String(zenErr?.message).slice(0, 80)} |` : '';
+          return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: `all providers failed [${zenBit} or ${String(eOR?.message).slice(0, 120)} | codex ${String(eCx?.message).slice(0, 80)}]: ${String(e2?.message ?? e2)}`.slice(0, 300) } };
         }
       }
-      return { text: '', meta: { provider: 'openrouter', model: OR_LADDER[0], latencyMs: Date.now() - t0, web, ok: false, error: String(eOR?.message ?? eOR) } };
+      return { text: '', meta: { provider: 'chatgpt-codex', model: process.env.CODEX_MODEL || 'gpt-6-astra', latencyMs: Date.now() - t0, web, ok: false, error: String(eCx?.message ?? eOR) } };
+      }
     }
   }
 
-  // 3) No OpenRouter key configured → direct MiniMax only.
+  // 3) No OpenRouter key → ChatGPT Codex (subscription), then MiniMax-direct.
+  try { return await callCodex(messages, maxTokens, timeoutMs, t0); }
+  catch (eCx: any) {
   if (KEY) {
     try { return await callMiniMaxDirect(messages, maxTokens, timeoutMs, web, t0); }
-    catch (e: any) { return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? e) } }; }
+    catch (e: any) { return { text: '', meta: { provider: 'minimax-direct', model: MODEL, latencyMs: Date.now() - t0, web, ok: false, error: String(e?.message ?? eCx) } }; }
+  }
+  return { text: '', meta: { provider: 'chatgpt-codex', model: process.env.CODEX_MODEL || 'gpt-6-astra', latencyMs: Date.now() - t0, web, ok: false, error: String(eCx?.message ?? eCx) } };
   }
   return { text: '', meta: { provider: 'openrouter', model: 'none', latencyMs: Date.now() - t0, web, ok: false, error: 'no provider configured' } };
 }
@@ -343,7 +483,7 @@ export async function llm(system: string, user: string, maxTokens = 3000, opts: 
 // meta-returning form of llm() for callers that want the A/B instrumentation (provider/latency/ok).
 export async function llmTracked(system: string, user: string, maxTokens = 3000, opts: { web?: boolean } = {}): Promise<LLMResult> {
   if (LIVE) return callLLM(system, user, maxTokens, opts);
-  return { text: '', meta: { provider: OR_KEY ? 'openrouter' : 'minimax-direct', model: 'none', latencyMs: 0, web: !!opts.web, ok: false, error: 'no provider configured' } };
+  return { text: '', meta: { provider: zenKey() ? 'opencode-zen' : OR_KEY ? 'openrouter' : 'minimax-direct', model: 'none', latencyMs: 0, web: !!opts.web, ok: false, error: 'no provider configured' } };
 }
 
 // run one department agent and return its text + per-call meta (the runner logs the meta to run_events).
@@ -367,7 +507,7 @@ export async function runAgentTracked(department: string, ctx: Ctx): Promise<LLM
     return await callLLM(system, buildUser(ctx, department), maxTokens, { web, timeoutMs, ...(cheapModels ? { models: cheapModels } : {}) });
   }
   // offline deterministic fallback — synthesize a uniform meta so the runner's instrumentation still records it.
-  return { text: stub(department, ctx.brief), meta: { provider: OR_KEY ? 'openrouter' : 'minimax-direct', model: 'stub', latencyMs: 0, web: WEB_DEPTS.has(department), ok: true } };
+  return { text: stub(department, ctx.brief), meta: { provider: zenKey() ? 'opencode-zen' : OR_KEY ? 'openrouter' : 'minimax-direct', model: 'stub', latencyMs: 0, web: WEB_DEPTS.has(department), ok: true } };
 }
 
 // BACKWARD COMPAT: string-returning entry point used by the eval harness (src/eval.ts). Unchanged contract.
@@ -436,7 +576,19 @@ function stub(department: string, brief: string): string {
           { type: 'form', title: 'Send us a message', intro: 'We answer within a day.', cta: 'Send', form: 'contact' }] },
       ],
     });
-    case 'integration': return `Integration: payments + maps wired; deploy config ready.`;
+    case 'integration': return JSON.stringify({
+      trigger: { kind: 'cron', spec: '0 7 * * *' },
+      source: { kind: 'csv', spec: 'supplier.csv' },
+      transform: { kind: 'map_columns', mapping: { sku: 'sku', qty: 'quantity' } },
+      destination: { kind: 'table', spec: 'inventory' },
+      receipt: { kind: 'email', spec: 'ops@example.com' },
+      idempotency_key: 'sku',
+      sample: [
+        { sku: 'A1', qty: '2', name: 'Widget' },
+        { sku: 'A1', qty: '9', name: 'Widget' },
+        { sku: 'B2', qty: '1', name: 'Gadget' },
+      ],
+    });
     case 'qa':          return `QA: no blocking gaps noted.`;
     default:            return `[${department}] completed for: ${brief}`;
   }

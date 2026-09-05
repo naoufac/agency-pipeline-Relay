@@ -108,7 +108,7 @@ function summarize(results: any[]) {
 
 async function main() {
   const n = Math.max(1, Math.min(CORPUS.length, Number(process.argv[2] || 3)));
-  const stub = !(process.env.OPENROUTER_API_KEY || process.env.MINIMAX_API_KEY);
+  const stub = !(process.env.OPENCODE_API_KEY || process.env.OPENROUTER_API_KEY || process.env.MINIMAX_API_KEY);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   mkdirSync('eval', { recursive: true });
   const out = `eval/report-${stamp}.json`;

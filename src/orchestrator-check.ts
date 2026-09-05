@@ -730,6 +730,30 @@ import { detectDeliverableWithMeta } from './orchestrator.ts';
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+
+{
+  const a = 'Create an Astro CMS website for a local therapist.';
+  const b = 'A salon website linking to the existing Acuity booking page; do not build a booking platform.';
+  const c = 'Every morning read a supplier CSV, update inventory and email a report. No website.';
+  ok('contract: astro brief is astro_site not wp', detectDeliverable(a) === 'astro_site', 'got ' + detectDeliverable(a));
+  const astroChain = composeChain('astro_site', ['content_copy']);
+  ok('contract: astro chain still composes a site model', astroChain.some(t => t.department === 'compose'));
+  ok('contract: astro chain has render artifacts', astroChain.some(t => t.department === 'render' && String(t.artifact||'').endsWith('.html')));
+  ok('contract: acuity+no booking platform is not fullstack_app', detectDeliverable(b) !== 'fullstack_app', 'got ' + detectDeliverable(b));
+  ok('contract: no-website CSV is automation not woocommerce', detectDeliverable(c) === 'automation', 'got ' + detectDeliverable(c));
+  const chain = composeChain('automation', []);
+  ok('contract: automation chain has no render', !chain.some(t => t.department === 'render'));
+  ok('contract: automation chain has no branding', !chain.some(t => t.department === 'branding'));
+  ok('contract: automation chain has no design', !chain.some(t => t.department === 'design'));
+  ok('contract: automation chain has no compose', !chain.some(t => t.department === 'compose'));
+  ok('contract: automation QA is min:20 not site_consistent', chain.filter(t => t.department === 'qa').every(t => t.verify === 'min:20'));
+  ok('contract: automation emits job.json', chain.some(t => t.artifact === 'job.json'));
+  ok('contract: automation job verifies ops_job', chain.some(t => t.department === 'integration' && t.verify === 'ops_job'));
+  const salonNeeds = detectNeeds(b, 'site', detectDeliverable(b));
+  ok('contract: existing Acuity does not add a booking database', !salonNeeds.includes('database'), salonNeeds.join(','));
+  ok('contract: existing Acuity does not add booking policies', !salonNeeds.includes('policies'), salonNeeds.join(','));
+}
+
 // RESULT
 // ────────────────────────────────────────────────────────────────────────────
 console.log(`\norchestrator:check — ${pass} passed, ${fail} failed`);

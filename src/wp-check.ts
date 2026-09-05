@@ -155,7 +155,7 @@ ok(xbldr.id === 'directus', "resolveBuilder(unknown) → directus fallback");
 // 4. The wp_provisioned verify rule must be present in verify.ts.
 const verifySrc = readFileSync(new URL('./verify.ts', import.meta.url), 'utf8');
 ok(verifySrc.includes("'wp_provisioned'"), "verify.ts: wp_provisioned rule present");
-ok(verifySrc.includes("RELAY_WP !== '1'"), "verify.ts: wp_provisioned degrades gracefully without flag");
+ok(verifySrc.includes("RELAY_WP !== '1'") && verifySrc.includes("did not ship"), "verify.ts: wp_provisioned fails when WordPress is selected but disabled");
 ok(verifySrc.includes("params.wp_provision"), "verify.ts: wp_provisioned reads params.wp_provision proof");
 
 // 5. finalize.ts builder dispatch must be present.
