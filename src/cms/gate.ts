@@ -40,11 +40,13 @@ export async function servedFromCms(target: CmsTarget, inst: CmsInstance, model:
   const orig = heroHeadline(p0);
   try {
     setHeroHeadline(p0, sentinel);
-    await target.pushContent(inst, { pages: [p0] } as SiteModel, ctx);   // write THROUGH the CMS
+    // Full model, never a one-page subset. A one-page rebuild collapses nav to Home and the Directus
+    // sweep deletes every other CMS row. p0 is model.pages[0], so the sentinel is already in model.
+    await target.pushContent(inst, model, ctx);   // write THROUGH the CMS
     const rbS = await target.readBack(inst, p0.slug, ctx);                // confirm it landed in the CMS
     if (rbS.fields.title !== sentinel)
       return { ok: false, log: `mutation did not persist in CMS (read back "${rbS.fields.title}")` };
-    await target.buildAndServe(inst, { pages: [p0] } as SiteModel, ctx);  // rebuild that page FROM the CMS
+    await target.buildAndServe(inst, model, ctx);  // rebuild FROM the CMS with the full nav
     const after = readFileSync(servedPath(ctx, p0.slug), 'utf8');
     if (!after.includes(sentinel))
       return { ok: false, log: 'sentinel written to the CMS did NOT appear in the re-served HTML — page is NOT served from the CMS' };
@@ -52,7 +54,7 @@ export async function servedFromCms(target: CmsTarget, inst: CmsInstance, model:
   } finally {
     // revert to the original content + rebuild, so the gate leaves no trace.
     setHeroHeadline(p0, orig);
-    try { await target.pushContent(inst, { pages: [p0] } as SiteModel, ctx); await target.buildAndServe(inst, { pages: [p0] } as SiteModel, ctx); } catch {}
+    try { await target.pushContent(inst, model, ctx); await target.buildAndServe(inst, model, ctx); } catch {}
   }
 
   return { ok: true, log: `served_from_cms OK [${notes.join(' · ')}]` };

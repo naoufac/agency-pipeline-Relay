@@ -71,6 +71,9 @@ const astroSrc = readFileSync(new URL('./astro.ts', import.meta.url), 'utf8');
 ok(astroSrc.includes('<!--relay:astro-->') && !astroSrc.includes('../render.ts'),
   'astro builder: real .astro compile path, does not import render.ts');
 ok(!astroSrc.includes('Astro builder not implemented yet'), 'astro builder: not a Phase-4 stub');
+const gateSrc = readFileSync(new URL('./gate.ts', import.meta.url), 'utf8');
+ok(!gateSrc.includes('pushContent(inst, { pages: [p0]') && !gateSrc.includes('buildAndServe(inst, { pages: [p0]') && gateSrc.includes('pushContent(inst, model, ctx)') && gateSrc.includes('buildAndServe(inst, model, ctx)'),
+  'mutation proof rebuilds the full site model so nav cannot collapse to Home');
 const appB = resolveBuilder('app');
 ok(appB.id === 'app' && typeof appB.finalize === 'function', "builder: resolveBuilder('app') returns app builder");
 const appSrc = readFileSync(new URL('./app.ts', import.meta.url), 'utf8');

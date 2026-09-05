@@ -90,7 +90,11 @@ export const directus: CmsTarget = {
     try {
       const all = await dx('GET', `/items/${COLLECTION}?filter[project_id][_eq]=${encodeURIComponent(ctx.projectId)}&fields=id,slug&limit=200`);
       const live = new Set(model.pages.map(p => p.slug));
-      for (const row of (all?.data || [])) if (!live.has(String(row.slug))) await dx('DELETE', `/items/${COLLECTION}/${row.id}`);
+      const existing = (all?.data || []) as { id: any; slug?: string }[];
+      // A subset model must not wipe the rest of the site (mutation proof used to pass 1 page).
+      if (!(live.size > 0 && existing.length > live.size)) {
+        for (const row of existing) if (!live.has(String(row.slug))) await dx('DELETE', `/items/${COLLECTION}/${row.id}`);
+      }
     } catch { /* sweep is best-effort; the gate still validates current pages */ }
     return { ids };
   },
