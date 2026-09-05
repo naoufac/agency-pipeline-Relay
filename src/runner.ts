@@ -468,7 +468,7 @@ export async function runLoop(
   // Review/dogfood are not fire-and-forget after the status write — they run before done is committed.
   // Non-site deliverables have no HTML/CMS to finalize. Forcing cmsFinalize would brick automation/campaign/brand.
   const SITEISH = ['wp_site','wp_woocommerce','directus_site','portfolio','event','landing_page','astro_site'];
-  const FINALIZE = [...SITEISH, 'fullstack_app'];
+  const FINALIZE = [...SITEISH, 'fullstack_app', 'campaign'];
   const dlvRow = await pool.query("select params->>'deliverable' as d from projects where id=$1", [projectId]);
   const dlv = String(dlvRow.rows[0]?.d || 'directus_site');
   if (done && opts.review && FINALIZE.includes(dlv)) {

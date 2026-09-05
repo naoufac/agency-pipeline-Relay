@@ -258,7 +258,7 @@ const CASES: Case[] = [
     builder: 'campaign',
     stack: 'campaign',
     branches: ['content'],   // campaign_assets emitted as content dept
-    noBranches: ['compose', 'render', 'wp_provision', 'database', 'app_api'],
+    noBranches: ['compose', 'render', 'wp_provision', 'database', 'app_api', 'branding', 'design'],
   },
 
   // ── PORTFOLIO → portfolio (first-class deliverable, T23) ──────────────
@@ -318,7 +318,7 @@ for (const c of CASES) {
 
   // ── 2. Forced spine present in order ─────────────────────────────────
   // fullstack_app has no brand spine (it is data/API/UI, not a brochure).
-  if (c.deliverable === 'fullstack_app') {
+  if (c.deliverable === 'fullstack_app' || c.deliverable === 'campaign') {
     for (const dept of ['strategy', 'research', 'qa']) {
       ok(`${c.label}: spine '${dept}' present`, tasks.some(t => t.department === dept));
     }
@@ -487,6 +487,9 @@ for (const c of CASES) {
   ok('campaign: NO compose task', !depts.includes('compose'), `depts: ${depts.join(',')}`);
   ok('campaign: NO render task', !depts.includes('render'), `depts: ${depts.join(',')}`);
   ok('campaign: campaign_assets (content) task present', depts.includes('content'), `depts: ${depts.join(',')}`);
+  ok('campaign: no branding', !depts.includes('branding'), `depts: ${depts.join(',')}`);
+  ok('campaign: no design', !depts.includes('design'), `depts: ${depts.join(',')}`);
+  ok('campaign: QA is min:20', tasks.filter(t => t.department === 'qa').every(t => t.verify === 'min:20'));
 }
 
 // ────────────────────────────────────────────────────────────────────────────

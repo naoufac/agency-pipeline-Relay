@@ -777,6 +777,15 @@ export function composeChain(
     return renumber(tasks);
   }
 
+  // campaign: email + social assets. No brand spine, no pages, no site QA.
+  if (deliverable === 'campaign') {
+    const understandSeq = emit('Campaign contract (audience, offer, channels)', 'strategy', 'min:280', []);
+    const researchSeq = emit('Inspect brand voice and existing channels', 'research', 'min:280', [understandSeq]);
+    const assetsSeq = emit('Campaign assets (email + social)', 'content', 'json', [researchSeq], 'campaign.json');
+    emit('QA — campaign pack', 'qa', 'min:20', [assetsSeq]);
+    return renumber(tasks);
+  }
+
   // ── 1. FORCED SPINE: understand → research → branding → design_guidelines ──
   const understandSeq = emit('Audience & positioning', 'strategy', 'min:280', []);
   const researchSeq   = emit('Market & competitor research', 'research', 'min:280', [understandSeq]);
@@ -822,13 +831,6 @@ export function composeChain(
   }
 
   // ── 3. BUILD TAIL per builder ────────────────────────────────────────────
-  if (deliverable === 'campaign') {
-    // campaign: campaign_assets → qa (no compose/render)
-    const assetsSeq = emit('Campaign assets', 'content', 'json', [researchSeq]);
-    emit('QA — campaign review', 'qa', 'site_consistent', [assetsSeq]);
-    return renumber(tasks);
-  }
-
   // T2: brand_identity — spine + brand_guidelines; NO compose/render/qa-site
   // WHY: the client wants a brand package ONLY (name, palette, type, guidelines).
   // There is no website to render. The chain ends after design_guidelines + brand_guidelines.

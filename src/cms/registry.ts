@@ -104,7 +104,17 @@ export function resolveBuilder(id: BuilderId | string | undefined): Builder {
         },
       };
     case 'campaign':
-      return stubBuilder('campaign', 'campaign builder not yet implemented');
+      return {
+        id: 'campaign',
+        async finalize(pool, projectId, ctx) {
+          try {
+            const { campaignBuilder } = await import('./campaign.ts');
+            return campaignBuilder.finalize(pool, projectId, ctx);
+          } catch (e: any) {
+            return { ok: false, log: `campaign builder load failed: ${String(e?.message ?? e).slice(0, 200)}` };
+          }
+        },
+      };
     case 'astro':
       return {
         id: 'astro',

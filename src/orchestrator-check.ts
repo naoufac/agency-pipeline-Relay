@@ -116,7 +116,7 @@ for (const [brief, delivId] of [
   const needs = detectNeeds(brief, DELIVERABLES[d].archetypeCompat, d);
   const tasks = composeChain(d, needs, TEST_PAGES);
   const depts = tasks.map(t => t.department);
-  const spine = d === 'fullstack_app' ? ['strategy', 'research', 'qa'] : SPINE_DEPTS;
+  const spine = (d === 'fullstack_app' || d === 'campaign') ? ['strategy', 'research', 'qa'] : SPINE_DEPTS;
   for (const s of spine) {
     ok(`spine '${s}' in ${d} chain`, depts.includes(s), `got: ${depts.join(',')}`);
   }
@@ -124,6 +124,12 @@ for (const [brief, delivId] of [
     ok('fullstack_app: no branding (not a brochure)', !depts.includes('branding'), `got: ${depts.join(',')}`);
     ok('fullstack_app: no design (not a brochure)', !depts.includes('design'), `got: ${depts.join(',')}`);
     ok('fullstack_app: no calendar.ics', !depts.includes('integrations'), `got: ${depts.join(',')}`);
+  }
+  if (d === 'campaign') {
+    ok('campaign: no branding (not a brochure)', !depts.includes('branding'), `got: ${depts.join(',')}`);
+    ok('campaign: no design (not a brochure)', !depts.includes('design'), `got: ${depts.join(',')}`);
+    ok('campaign: no compose', !depts.includes('compose'), `got: ${depts.join(',')}`);
+    ok('campaign: QA is min:20 not site_consistent', tasks.filter(t => t.department === 'qa').every(t => t.verify === 'min:20'));
   }
   // QA must be last
   const qaSeq = tasks.find(t => t.department === 'qa')?.seq ?? -1;
@@ -215,6 +221,9 @@ for (const [brief, delivId] of [
   ok('campaign: no render step', !depts.includes('render'), `depts: ${depts.join(',')}`);
   ok('campaign: qa present', depts.includes('qa'), `depts: ${depts.join(',')}`);
   ok('campaign: content/campaign_assets present', depts.includes('content'), `depts: ${depts.join(',')}`);
+  ok('campaign: QA is min:20 not site_consistent', tasks.filter(t => t.department === 'qa').every(t => t.verify === 'min:20'));
+  ok('campaign: no branding', !depts.includes('branding'), `depts: ${depts.join(',')}`);
+  ok('campaign: emits campaign.json', tasks.some(t => t.artifact === 'campaign.json'));
 }
 
 // ────────────────────────────────────────────────────────────────────────────

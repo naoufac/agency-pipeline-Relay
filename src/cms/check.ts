@@ -79,6 +79,11 @@ ok(appB.id === 'app' && typeof appB.finalize === 'function', "builder: resolveBu
 const appSrc = readFileSync(new URL('./app.ts', import.meta.url), 'utf8');
 ok(appSrc.includes('proveApp') && !appSrc.includes('Worker C') && !appSrc.includes('../render.ts'),
   'app builder: real data/API/UI proof, not a website renderer');
+const campB = resolveBuilder('campaign');
+ok(campB.id === 'campaign' && typeof campB.finalize === 'function', "builder: resolveBuilder('campaign') returns campaign builder");
+const campSrc = readFileSync(new URL('./campaign.ts', import.meta.url), 'utf8');
+ok(campSrc.includes('proveCampaign') && !campSrc.includes('not yet implemented') && !campSrc.includes('../render.ts'),
+  'campaign builder: real assets pack, not a website renderer');
 
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS — one pipeline, one CMS, wordpress builder registered.');
