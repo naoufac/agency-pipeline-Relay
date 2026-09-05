@@ -1011,6 +1011,8 @@ Valid ids: ${upgradeSet}|directus_site. Default to directus_site for any plain/s
     'site';
   // A class/studio is a website. Do not keep the store costume after routing away from Woo.
   if (parseContract(brief).forbidStore && archetype === 'store') archetype = 'site';
+  if ((deliverable === 'automation' || deliverable === 'campaign' || deliverable === 'brand_identity') && archetype === 'store')
+    archetype = 'site';
 
   const detectedNeeds = detectNeeds(brief, archetype, deliverable) as CapId[];
 
@@ -1045,12 +1047,17 @@ export function applyDeliverable(
   // WHY: the shape invariant is 1 page; we must not pass built.pages (which the LLM may have
   // proposed as multi-page) into composeChain — that would emit multiple render tasks.
   // T23: portfolio and event use built.pages (multi-page is fine for both).
+  const noPages = orchestration.deliverable === 'automation'
+    || orchestration.deliverable === 'campaign'
+    || orchestration.deliverable === 'brand_identity';
   const chainPages = orchestration.deliverable === 'landing_page'
     ? [{ slug: 'index', title: 'Home' }]
-    : (orchestration.archetype !== 'store'
-        ? (built.pages || []).filter((p: any) => !/^(cart|checkout|basket)$/i.test(String(p.slug || '')))
-        : built.pages);
-  if (!chainPages.length) chainPages.push({ slug: 'index', title: 'Home' });
+    : noPages
+      ? []
+      : (orchestration.archetype !== 'store'
+          ? (built.pages || []).filter((p: any) => !/^(cart|checkout|basket)$/i.test(String(p.slug || '')))
+          : built.pages);
+  if (!chainPages.length && !noPages) chainPages.push({ slug: 'index', title: 'Home' });
 
   // For other deliverables, use composeChain to build the task list.
   // The spine + branch caps are assembled from the orchestration result.
@@ -1059,7 +1066,7 @@ export function applyDeliverable(
   // T1: landing_page also forces the page set to exactly one page in the plan.
   const finalPages = orchestration.deliverable === 'landing_page'
     ? [{ slug: 'index', title: 'Home' }]
-    : chainPages;
+    : noPages ? [] : chainPages;
 
   return {
     ...built,
