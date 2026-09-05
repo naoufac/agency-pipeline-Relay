@@ -18,8 +18,12 @@ export async function servedFromCms(target: CmsTarget, inst: CmsInstance, model:
     let html: string;
     try { html = readFileSync(servedPath(ctx, page.slug), 'utf8'); }
     catch { return { ok: false, log: `served file missing for ${page.slug}` }; }
-    if (rb.fields.title && !html.includes(rb.fields.title))
-      return { ok: false, log: `CMS title not present in served ${page.slug}: "${rb.fields.title}"` };
+    if (rb.fields.title) {
+      const t = String(rb.fields.title);
+      const amp = t.replace(/&/g, '&amp;');
+      if (!html.includes(t) && !html.includes(amp))
+        return { ok: false, log: `CMS title not present in served ${page.slug}: "${rb.fields.title}"` };
+    }
     const marker = `relay:cms=${target.id} doc=${rb.docId}`;
     if (!html.includes(marker))
       return { ok: false, log: `provenance marker missing in ${page.slug} (expected ${marker})` };

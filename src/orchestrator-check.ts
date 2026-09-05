@@ -752,6 +752,9 @@ import { detectDeliverableWithMeta } from './orchestrator.ts';
   const salonNeeds = detectNeeds(b, 'site', detectDeliverable(b));
   ok('contract: existing Acuity does not add a booking database', !salonNeeds.includes('database'), salonNeeds.join(','));
   ok('contract: existing Acuity does not add booking policies', !salonNeeds.includes('policies'), salonNeeds.join(','));
+  const d = 'A local ceramics studio. Wheel-throwing classes and a small shop of bowls. People book a class, not a shopping cart.';
+  ok('contract: studio+classes is not woocommerce', detectDeliverable(d) !== 'wp_woocommerce', 'got ' + detectDeliverable(d));
+  ok('contract: studio+classes is a website', ['directus_site','astro_site','wp_site','portfolio'].includes(detectDeliverable(d)), 'got ' + detectDeliverable(d));
 }
 
 // RESULT

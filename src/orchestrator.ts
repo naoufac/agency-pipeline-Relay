@@ -593,6 +593,10 @@ export function detectDeliverableWithMeta(brief: string): {
     second = best;
     best = 'directus_site';
     confidence = 1;
+  } else if (contract.forbidStore && best === 'wp_woocommerce') {
+    second = best;
+    best = 'directus_site';
+    confidence = 1;
   }
   return { deliverable: best, score: bestScore, confidence, secondChoice: second };
 }
