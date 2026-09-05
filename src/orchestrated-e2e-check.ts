@@ -218,8 +218,8 @@ const CASES: Case[] = [
     deliverable: 'fullstack_app',
     builder: 'app',
     stack: 'node-postgres',
-    branches: ['database', 'policies', 'integrations', 'app_api'],
-    noBranches: ['wp_provision', 'ecom_catalog'],
+    branches: ['database', 'app_api'],
+    noBranches: ['wp_provision', 'ecom_catalog', 'branding', 'design', 'content', 'compose', 'render', 'integrations'],
   },
 
   // ── LANDING PAGE → landing_page ───────────────────────────────────────
@@ -317,7 +317,14 @@ for (const c of CASES) {
   );
 
   // ── 2. Forced spine present in order ─────────────────────────────────
-  assertSpineOrder(c.label, tasks);
+  // fullstack_app has no brand spine (it is data/API/UI, not a brochure).
+  if (c.deliverable === 'fullstack_app') {
+    for (const dept of ['strategy', 'research', 'qa']) {
+      ok(`${c.label}: spine '${dept}' present`, tasks.some(t => t.department === dept));
+    }
+  } else {
+    assertSpineOrder(c.label, tasks);
+  }
 
   // ── 3. QA is the last task ────────────────────────────────────────────
   assertQaLast(c.label, tasks);
@@ -515,9 +522,12 @@ for (const c of CASES) {
   ok('fullstack_app: deliverable correct', r.deliverable === 'fullstack_app', `got ${r.deliverable}`);
   const tasks = composeChain(r.deliverable, r.detectedNeeds, TEST_PAGES);
   const depts = tasks.map(t => t.department);
-  for (const dept of ['database', 'policies', 'integrations', 'app_api']) {
+  for (const dept of ['database', 'app_api']) {
     ok(`fullstack_app: '${dept}' dept present`, depts.includes(dept), `depts: ${depts.join(',')}`);
   }
+  ok('fullstack_app booking: policies present', depts.includes('policies'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app booking: no calendar.ics', !depts.includes('integrations'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app booking: no branding', !depts.includes('branding'), `depts: ${depts.join(',')}`);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

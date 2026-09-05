@@ -116,8 +116,14 @@ for (const [brief, delivId] of [
   const needs = detectNeeds(brief, DELIVERABLES[d].archetypeCompat, d);
   const tasks = composeChain(d, needs, TEST_PAGES);
   const depts = tasks.map(t => t.department);
-  for (const spine of SPINE_DEPTS) {
-    ok(`spine '${spine}' in ${d} chain`, depts.includes(spine), `got: ${depts.join(',')}`);
+  const spine = d === 'fullstack_app' ? ['strategy', 'research', 'qa'] : SPINE_DEPTS;
+  for (const s of spine) {
+    ok(`spine '${s}' in ${d} chain`, depts.includes(s), `got: ${depts.join(',')}`);
+  }
+  if (d === 'fullstack_app') {
+    ok('fullstack_app: no branding (not a brochure)', !depts.includes('branding'), `got: ${depts.join(',')}`);
+    ok('fullstack_app: no design (not a brochure)', !depts.includes('design'), `got: ${depts.join(',')}`);
+    ok('fullstack_app: no calendar.ics', !depts.includes('integrations'), `got: ${depts.join(',')}`);
   }
   // QA must be last
   const qaSeq = tasks.find(t => t.department === 'qa')?.seq ?? -1;
@@ -232,12 +238,18 @@ for (const [brief, delivId] of [
   const tasks = composeChain('fullstack_app', needs, TEST_PAGES);
   const depts = tasks.map(t => t.department);
   ok('fullstack_app: database dept present', depts.includes('database'), `depts: ${depts.join(',')}`);
-  ok('fullstack_app: policies dept present', depts.includes('policies'), `depts: ${depts.join(',')}`);
-  ok('fullstack_app: integrations dept present', depts.includes('integrations'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app booking: policies present', depts.includes('policies'), `depts: ${depts.join(',')}`);
   ok('fullstack_app: app_api dept present', depts.includes('app_api'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: no calendar.ics (not a website)', !depts.includes('integrations'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: no branding', !depts.includes('branding'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: no design', !depts.includes('design'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: no content copy', !depts.includes('content'), `depts: ${depts.join(',')}`);
   ok('fullstack_app: no compose (not a website)', !depts.includes('compose'), `depts: ${depts.join(',')}`);
   ok('fullstack_app: no render (not a website)', !depts.includes('render'), `depts: ${depts.join(',')}`);
   ok('fullstack_app: QA is min:20 not site_consistent', tasks.filter(t => t.department === 'qa').every(t => t.verify === 'min:20'));
+  const fleet = detectNeeds('a SaaS dashboard for fleet tracking', 'app', 'fullstack_app');
+  ok('fleet dashboard: no policies (not a booking app)', !fleet.includes('policies'), fleet.join(','));
+  ok('fleet dashboard: no integrations', !fleet.includes('integrations'), fleet.join(','));
 }
 
 // ────────────────────────────────────────────────────────────────────────────

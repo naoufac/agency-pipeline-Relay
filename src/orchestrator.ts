@@ -674,6 +674,17 @@ export function detectNeeds(brief: string, archetype: Archetype, deliverable: De
     return [...needs];
   }
 
+  // fullstack_app is data / auth / API / UI. Branding, brochure copy, and a
+  // calendar.ics feed are website costume. Policies only when the brief books.
+  if (deliverable === 'fullstack_app') {
+    needs.add('database');
+    needs.add('app_api');
+    const wantsBooking = /\b(book(ing)?s?|reservations?|appointments?|scheduling|calendar|slots?|availability|table|r[ée]servations?|rendez[- ]?vous|prenotazion\w*|prenota\w*|agenda)\b/.test(b);
+    const skip = parseContract(brief).existingBooking || parseContract(brief).forbidCustomBooking;
+    if (wantsBooking && !skip) needs.add('policies');
+    return [...needs];
+  }
+
   // content_copy is enabled for every deliverable that lists it
   const del = DELIVERABLES[deliverable];
   if (del.branchCaps.includes('content_copy')) needs.add('content_copy');
@@ -751,6 +762,21 @@ export function composeChain(
     return renumber(tasks);
   }
 
+  // fullstack_app: schema + REST + UI. No brand spine, no calendar.ics, no pages.
+  if (deliverable === 'fullstack_app') {
+    const needs = new Set(detectedNeeds);
+    const understandSeq = emit('App contract (data, auth, API, UI)', 'strategy', 'min:280', []);
+    const researchSeq = emit('Inspect existing systems and data', 'research', 'min:280', [understandSeq]);
+    const dbSeq = emit('Data model (database schema)', 'database', 'app_db', [understandSeq], 'schema.sql');
+    const deps = [understandSeq, researchSeq, dbSeq];
+    if (needs.has('policies')) {
+      deps.push(emit('Business rules (notice, capacity, cancellation)', 'policies', 'policies_ok', [understandSeq]));
+    }
+    const apiSeq = emit('App API (generated REST endpoints)', 'app_api', 'app_api_ok', [dbSeq]);
+    emit('QA — app contract (schema + REST + UI)', 'qa', 'min:20', [...deps, apiSeq]);
+    return renumber(tasks);
+  }
+
   // ── 1. FORCED SPINE: understand → research → branding → design_guidelines ──
   const understandSeq = emit('Audience & positioning', 'strategy', 'min:280', []);
   const researchSeq   = emit('Market & competitor research', 'research', 'min:280', [understandSeq]);
@@ -793,13 +819,6 @@ export function composeChain(
   if (needs.has('app_api') && dbSeq !== null) {
     const apiSeq = emit('App API (generated REST endpoints)', 'app_api', 'app_api_ok', [dbSeq]);
     thinkingSeqs.push(apiSeq);
-  }
-
-  // fullstack_app is data / auth / API / UI. Compose/render would costume it as a website.
-  if (deliverable === 'fullstack_app') {
-    const qaDeps = thinkingSeqs.length ? thinkingSeqs : [understandSeq];
-    emit('QA — app contract (schema + REST + UI)', 'qa', 'min:20', qaDeps);
-    return renumber(tasks);
   }
 
   // ── 3. BUILD TAIL per builder ────────────────────────────────────────────
