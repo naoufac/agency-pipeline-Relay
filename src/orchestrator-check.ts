@@ -235,6 +235,9 @@ for (const [brief, delivId] of [
   ok('fullstack_app: policies dept present', depts.includes('policies'), `depts: ${depts.join(',')}`);
   ok('fullstack_app: integrations dept present', depts.includes('integrations'), `depts: ${depts.join(',')}`);
   ok('fullstack_app: app_api dept present', depts.includes('app_api'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: no compose (not a website)', !depts.includes('compose'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: no render (not a website)', !depts.includes('render'), `depts: ${depts.join(',')}`);
+  ok('fullstack_app: QA is min:20 not site_consistent', tasks.filter(t => t.department === 'qa').every(t => t.verify === 'min:20'));
 }
 
 // ────────────────────────────────────────────────────────────────────────────

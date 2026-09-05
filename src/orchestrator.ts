@@ -795,6 +795,13 @@ export function composeChain(
     thinkingSeqs.push(apiSeq);
   }
 
+  // fullstack_app is data / auth / API / UI. Compose/render would costume it as a website.
+  if (deliverable === 'fullstack_app') {
+    const qaDeps = thinkingSeqs.length ? thinkingSeqs : [understandSeq];
+    emit('QA — app contract (schema + REST + UI)', 'qa', 'min:20', qaDeps);
+    return renumber(tasks);
+  }
+
   // ── 3. BUILD TAIL per builder ────────────────────────────────────────────
   if (deliverable === 'campaign') {
     // campaign: campaign_assets → qa (no compose/render)
@@ -1049,7 +1056,8 @@ export function applyDeliverable(
   // T23: portfolio and event use built.pages (multi-page is fine for both).
   const noPages = orchestration.deliverable === 'automation'
     || orchestration.deliverable === 'campaign'
-    || orchestration.deliverable === 'brand_identity';
+    || orchestration.deliverable === 'brand_identity'
+    || orchestration.deliverable === 'fullstack_app';
   const chainPages = orchestration.deliverable === 'landing_page'
     ? [{ slug: 'index', title: 'Home' }]
     : noPages
