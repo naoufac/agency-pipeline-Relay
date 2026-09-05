@@ -138,7 +138,7 @@ function validate(plan: any, brief: string): Plan | null {
   const cx = complexityOf(brief);
   let pages = normPages(plan.pages, cx.pagesMax);
   const theme = themeFor(plan?.theme, brief);            // LLM value trusted only if in the closed set
-  const archetype = archetypeFor(plan?.archetype, brief); // same: validated, else classified from the brief
+  let archetype = archetypeFor(plan?.archetype, brief); // same: validated, else classified from the brief
   const shape = shapeFor(plan?.shape, brief);             // same: landing detected in CODE, never LLM whim
   // LANDING (PLAN.md M1): exactly ONE page — the conversion page. Forced here, gated in site_model.
   if (shape === 'landing') pages = [pages[0]];
@@ -165,6 +165,7 @@ function validate(plan: any, brief: string): Plan | null {
   if (contract.forbidStore && archetype === 'store') {
     // A class/studio is a website. Do not costume it as a store.
     notes.push('contract: service business — not a store (dropped cart/checkout)');
+    archetype = 'site';
   }
   if (archetype === 'store' && shape !== 'landing' && !contract.forbidStore) {
     // Use cx.pagesMax so a complex store (variants + blog) gets more brochure pages while

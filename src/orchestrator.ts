@@ -1005,10 +1005,12 @@ Valid ids: ${upgradeSet}|directus_site. Default to directus_site for any plain/s
   // must not weaken it (a booking brief that resolves to fullstack_app is still 'app').
   const classifiedArchetype = archetypeFor(del.archetypeCompat, brief);
   // Take the stronger of the two
-  const archetype: Archetype =
+  let archetype: Archetype =
     (classifiedArchetype === 'store' || del.archetypeCompat === 'store') ? 'store' :
     (classifiedArchetype === 'app'   || del.archetypeCompat === 'app')   ? 'app' :
     'site';
+  // A class/studio is a website. Do not keep the store costume after routing away from Woo.
+  if (parseContract(brief).forbidStore && archetype === 'store') archetype = 'site';
 
   const detectedNeeds = detectNeeds(brief, archetype, deliverable) as CapId[];
 
