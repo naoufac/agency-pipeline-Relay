@@ -659,6 +659,21 @@ export function normalizeSite(raw: any, pages: { slug: string; title: string }[]
     if (cartPage && !cartPage.sections.some((x: any) => x.type === 'cart')) { cartPage.sections.push({ type: 'cart', title: 'Your cart' }); repairs.push('injected the cart on "' + cartPage.slug + '"'); }
     const coPage = out.find(p => /checkout|order/.test(p.slug));
     if (coPage && !coPage.sections.some((x: any) => x.type === 'checkout')) { coPage.sections.push({ type: 'checkout', title: 'Checkout', intro: '' }); repairs.push('injected the checkout on "' + coPage.slug + '"'); }
+  } else if (out.length) {
+    // A class studio is not a store. A products grid ships add-to-cart with no checkout.
+    // Demote it to a collection shelf; drop leftover cart/checkout costume.
+    for (const p of out) {
+      for (const s of p.sections) {
+        if (s && s.type === 'products') {
+          s.type = 'collection';
+          if (!s.table) s.table = (base.tables || []).includes('products') ? 'products' : (base.primaryTable || 'products');
+          repairs.push(`demoted products grid on "${p.slug}" to a collection shelf (not a store)`);
+        }
+      }
+      const n = p.sections.length;
+      p.sections = p.sections.filter((s: any) => s && s.type !== 'cart' && s.type !== 'checkout');
+      if (p.sections.length !== n) repairs.push(`dropped cart/checkout costume on "${p.slug}"`);
+    }
   }
   // COPY GATE at the RETRYABLE stage: reject slop/placeholders now (compose retries with feedback) instead of
   // letting it reach the deterministic render, where a retry can't fix it. {{brand}} is ignored (not slop).

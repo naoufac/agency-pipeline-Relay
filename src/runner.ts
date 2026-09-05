@@ -84,12 +84,12 @@ async function reconcile(pool: pg.Pool): Promise<void> {
   await pool.query("update tasks set status='ready', updated_at=now() where id in (select id from v_ready_tasks)");
 }
 
-async function claim(pool: pg.Pool, runnerId: string, cap: number): Promise<any[]> {
+async function claim(pool: pg.Pool, runnerId: string, cap: number, projectId?: string): Promise<any[]> {
   const r = await pool.query(
     `update tasks set status='running', claimed_by=$1,
         lease_expires_at=now()+interval '240 seconds', attempts=attempts+1, updated_at=now()
-     where id in (select id from tasks where status='ready' order by seq for update skip locked limit $2)
-     returning *`, [runnerId, cap]);
+     where id in (select id from tasks where status='ready' and ($3::uuid is null or project_id=$3) order by seq for update skip locked limit $2)
+     returning *`, [runnerId, cap, projectId ?? null]);
   return r.rows;
 }
 
@@ -436,7 +436,7 @@ export async function runLoop(
   while (true) {
     await reclaim(pool);
     await reconcile(pool);
-    const claimed = await claim(pool, runnerId, cap);
+    const claimed = await claim(pool, runnerId, cap, projectId);
     if (claimed.length === 0) {
       const c = await counts(pool, projectId);
       if (c.running === 0 && c.ready === 0 && c.verifying === 0) {

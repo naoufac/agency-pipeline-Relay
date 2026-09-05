@@ -22,6 +22,10 @@ const shop = renderPage({ brand: { name: 'Kiln', tokens: { bg: '#ffffff', primar
   { pages, slug: 'shop', title: 'Shop' });
 ok('shop grid wired to the products table', shop.includes('data-products="products"'));
 ok('shop grid loads via the data API + add-to-cart runtime', shop.includes("'.products[data-products]'") && shop.includes('relayCartAdd'));
+const shelf = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [
+  { type: 'hero', headline: 'From the studio shelf' }, { type: 'collection', table: 'products', title: 'Shelf' }] },
+  { pages, slug: 'shop', title: 'Shop' });
+ok('non-store shelf has no add-to-cart runtime', !shelf.includes('relayCartAdd') && !shelf.includes('function __cart('));
 const cart = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [{ type: 'hero', headline: 'Cart' }, { type: 'cart', title: 'Your cart' }] }, { pages, slug: 'cart', title: 'Cart' });
 ok('cart section renders the cart container', cart.includes('data-cart="full"'));
 const co = renderPage({ brand: { name: 'Kiln', tokens: {} }, sections: [{ type: 'hero', headline: 'Checkout' }, { type: 'checkout', title: 'Checkout' }] }, { pages, slug: 'checkout', title: 'Checkout' });

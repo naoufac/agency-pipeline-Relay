@@ -486,6 +486,12 @@ ok('real copy passes #3', copySlop('<p>Find the full description below. Nothing 
   ] } as any, [{ slug: 'index', title: 'Home' }, { slug: 'checkout', title: 'Checkout' }], { forms: { orders: [{ name: 'customer_name', type: 'text' }] }, primaryTable: 'orders', actionTable: 'orders' } as any);
   const injected = (store.repairs || []).some((x: string) => /injected the missing typed form/.test(x));
   ok('store with a checkout gets NO redundant raw Orders form injected', !injected, JSON.stringify(store.repairs));
+  const studioShelf = normalizeSite({ pages: [
+    { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Throw a bowl this Saturday' }, { type: 'features', items: [{ title: 'Wheels', body: 'Six wheels, warm hands.' }, { title: 'Fire', body: 'Bisque and glaze included.' }] }] },
+    { slug: 'shop', title: 'Shop', sections: [{ type: 'hero', headline: 'From the studio shelf' }, { type: 'products', table: 'products', title: 'Studio Shop' }, { type: 'cta', headline: 'Book a class' }] },
+  ] } as any, [{ slug: 'index', title: 'Home' }, { slug: 'shop', title: 'Shop' }], { archetype: 'site', tables: ['products'] } as any);
+  ok('non-store demotes products grid to a collection shelf', !studioShelf.site.pages.some((p: any) => (p.sections || []).some((s: any) => s.type === 'products')), JSON.stringify(studioShelf.site.pages.map((p: any) => p.sections.map((s: any) => s.type))));
+  ok('non-store shop still shows a shelf', !!(studioShelf.site.pages.find((p: any) => p.slug === 'shop')?.sections || []).some((s: any) => s.type === 'collection'));
   const booking = normalizeSite({ pages: [
     { slug: 'index', title: 'Home', sections: [{ type: 'hero', headline: 'Book now' }, { type: 'features', items: [{ title: 'A', body: 'b' }, { title: 'C', body: 'd' }] }] },
   ] } as any, [{ slug: 'index', title: 'Home' }], { forms: { appointments: [{ name: 'customer_name', type: 'text' }] }, primaryTable: 'appointments', actionTable: 'appointments' } as any);
