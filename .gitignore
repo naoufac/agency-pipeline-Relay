@@ -9,3 +9,6 @@ tools/tailwindcss
 assets/*.woff2
 eval/
 .aider*
+.claude/
+repomix.xml
+aider-start.sh

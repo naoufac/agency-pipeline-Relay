@@ -251,9 +251,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === '/healthz') {
-      // the uptime monitor trusts this — it must NEVER say ok while the database is down
-      try { await pool.query('select 1'); return send(res, 200, 'text/plain', 'ok'); }
+      // NEVER say ok while Postgres is down. CMS is the website product — dead Directus is not ok.
+      try { await pool.query('select 1'); }
       catch { return send(res, 503, 'text/plain', 'db unavailable'); }
+      try {
+        const cms = process.env.DIRECTUS_URL || 'http://127.0.0.1:8055';
+        const r = await fetch(cms + '/server/info', { signal: AbortSignal.timeout(2000) });
+        if (!r.ok) return send(res, 503, 'text/plain', 'cms unavailable');
+      } catch { return send(res, 503, 'text/plain', 'cms unavailable'); }
+      return send(res, 200, 'text/plain', 'ok');
     }
 
     // HONEST INPUTS (API rating fix): an id that isn't a UUID can never be a project — answer with a

@@ -49,12 +49,13 @@ DUMP_BYTES=$(stat -c%s "$OUT/relay.dump")
 [ "$DUMP_BYTES" -gt 1000000 ] || die $LINENO   # dump suspiciously small — refuse to ship it
 
 # 2 · the unrecoverable secrets — a lost keystore means every published Android app is orphaned
-tar -C / -czf "$OUT/secrets.tar.gz" \
-  root/relay-android.keystore \
-  srv/relay/.env \
-  root/agency-pipeline/.env \
-  root/.cloudflared \
-  root/.bubblewrap/config.json
+# Only pack secrets that exist. A missing cloudflared must not kill the vault.
+SECRETS=()
+for p in root/relay-android.keystore srv/relay/.env root/agency-pipeline/.env root/.cloudflared root/.bubblewrap/config.json; do
+  [ -e "/$p" ] && SECRETS+=("$p")
+done
+[ "${#SECRETS[@]}" -ge 2 ] || die $LINENO
+tar -C / -czf "$OUT/secrets.tar.gz" "${SECRETS[@]}"
 
 # 3 · encrypt — AES-256-CBC, PBKDF2 200k; the key lives on this box AND on the owner's phone
 for f in relay.dump secrets.tar.gz; do
