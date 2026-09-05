@@ -755,6 +755,10 @@ import { detectDeliverableWithMeta } from './orchestrator.ts';
   const d = 'A local ceramics studio. Wheel-throwing classes and a small shop of bowls. People book a class, not a shopping cart.';
   ok('contract: studio+classes is not woocommerce', detectDeliverable(d) !== 'wp_woocommerce', 'got ' + detectDeliverable(d));
   ok('contract: studio+classes is a website', ['directus_site','astro_site','wp_site','portfolio'].includes(detectDeliverable(d)), 'got ' + detectDeliverable(d));
+  const { plan: studioPlan } = await buildPlan(d);
+  const studioDepts = studioPlan.tasks.map((t: any) => t.department);
+  ok('contract: studio DAG has no invented departments', studioDepts.every((x: string) => ['strategy','research','branding','design','content','compose','render','qa','database','policies','integrations','integration','wp_provision','app_api'].includes(x)), studioDepts.join(','));
+  ok('contract: studio pages have no cart/checkout', !studioPlan.pages.some((p: any) => /^(cart|checkout)$/i.test(p.slug)), studioPlan.pages.map((p: any) => p.slug).join(','));
 }
 
 // RESULT

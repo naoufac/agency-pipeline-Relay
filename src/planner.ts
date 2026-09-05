@@ -161,7 +161,12 @@ function validate(plan: any, brief: string): Plan | null {
   // the store could not sell) — brochure pages are trimmed FIRST, then cart/checkout are injected.
   // checkout is matched by its EXACT slug: the cart runtime's Proceed button targets checkout.html
   // literally, so only a page slugged "checkout" satisfies the contract (site_model gates this too).
-  if (archetype === 'store' && shape !== 'landing') {
+  const contract = parseContract(brief);
+  if (contract.forbidStore && archetype === 'store') {
+    // A class/studio is a website. Do not costume it as a store.
+    notes.push('contract: service business — not a store (dropped cart/checkout)');
+  }
+  if (archetype === 'store' && shape !== 'landing' && !contract.forbidStore) {
     // Use cx.pagesMax so a complex store (variants + blog) gets more brochure pages while
     // still guaranteeing cart + checkout.  Cap floor = 6 (cart + checkout + at least 4 others).
     const storeCap = Math.max(6, cx.pagesMax);

@@ -1034,12 +1034,10 @@ export function applyDeliverable(
   built: { tasks: any[]; pages: any[]; theme: any; archetype: any; shape: any; notes?: string[] },
   orchestration: OrchestrationResult,
 ): { tasks: any[]; pages: any[]; theme: any; archetype: any; shape: any; notes?: string[] } {
-  // CRITICAL: for the default deliverable (directus_site), return built UNCHANGED.
-  // This is the single load-bearing compatibility guarantee — the 24 existing gates
-  // see the EXACT task set validate() produces today.
-  if (orchestration.deliverable === 'directus_site') {
-    return built;
-  }
+  // directus_site used to return the LLM DAG unchanged. That shipped invented
+  // departments (contentia, copywriting). Tasks now come from composeChain.
+  // Pages still come from the LLM (titles), then cart/checkout are stripped when
+  // the job is not a store.
 
   // T1: landing_page — force exactly ONE page before composing the chain.
   // WHY: the shape invariant is 1 page; we must not pass built.pages (which the LLM may have
@@ -1047,7 +1045,10 @@ export function applyDeliverable(
   // T23: portfolio and event use built.pages (multi-page is fine for both).
   const chainPages = orchestration.deliverable === 'landing_page'
     ? [{ slug: 'index', title: 'Home' }]
-    : built.pages;
+    : (orchestration.archetype !== 'store'
+        ? (built.pages || []).filter((p: any) => !/^(cart|checkout|basket)$/i.test(String(p.slug || '')))
+        : built.pages);
+  if (!chainPages.length) chainPages.push({ slug: 'index', title: 'Home' });
 
   // For other deliverables, use composeChain to build the task list.
   // The spine + branch caps are assembled from the orchestration result.
@@ -1056,7 +1057,7 @@ export function applyDeliverable(
   // T1: landing_page also forces the page set to exactly one page in the plan.
   const finalPages = orchestration.deliverable === 'landing_page'
     ? [{ slug: 'index', title: 'Home' }]
-    : built.pages;
+    : chainPages;
 
   return {
     ...built,
